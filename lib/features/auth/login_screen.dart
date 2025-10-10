@@ -112,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(width: 16),
                             Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                              crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
                                   'SS Transways India',
@@ -123,13 +123,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                     fontSize: 32,
                                   ),
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 2),
                                 Text(
                                   'Your Reliable Logistic Partner',
-                                  textAlign: TextAlign.center,
+                                  textAlign: TextAlign.right,
                                   style: theme.textTheme.bodySmall?.copyWith(
                                     color: const Color(0xFF000C66),
-                                    fontSize: 12,
+                                    fontSize: 13,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
