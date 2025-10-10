@@ -316,11 +316,16 @@ class _TripScreenState extends State<TripScreen> {
     final assignedVehicleId = int.tryParse(widget.user.assignmentVehicleId ?? '');
     if (assignedVehicleId == null || assignedVehicleId != vehicle.id) return;
 
+    print('Auto-adding assigned driver: $currentDriverId for vehicle: ${vehicle.id}');
+
     // Check if driver is already selected
     final alreadySelected = _selectedDrivers.any(
       (driver) => driver.id == currentDriverId,
     );
-    if (alreadySelected) return;
+    if (alreadySelected) {
+      print('Driver already selected, skipping');
+      return;
+    }
 
     // Find the driver in the available drivers list
     TripDriver? driverMatch;
@@ -339,6 +344,8 @@ class _TripScreenState extends State<TripScreen> {
         widget.user.plantId ?? widget.user.assignmentPlantId ?? '',
       ),
     );
+
+    print('Adding driver: ${driverMatch.name} (ID: ${driverMatch.id})');
 
     // Add the driver to selected drivers
     if (mounted) {
@@ -862,16 +869,21 @@ class _TripScreenState extends State<TripScreen> {
           plantId: plantId,
         );
 
+        print('Assigned vehicle ID from API: $assignedVehicleId');
+        print('User assignmentVehicleId: ${widget.user.assignmentVehicleId}');
+
         if (assignedVehicleId != null) {
           // Find the assigned vehicle in the list
           for (final vehicle in vehicles) {
             if (vehicle.id == assignedVehicleId) {
               initialVehicle = vehicle;
+              print('Found assigned vehicle: ${vehicle.number} (ID: ${vehicle.id})');
               break;
             }
           }
         }
       } catch (e) {
+        print('Error getting assigned vehicle: $e');
         // Fallback to first vehicle if API fails
         initialVehicle = vehicles.isNotEmpty ? vehicles.first : null;
       }
