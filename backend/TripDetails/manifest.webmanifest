@@ -1,0 +1,19 @@
+{
+  "id": "/TripDetails/",
+  "name": "Trip Details",
+  "short_name": "Trips",
+  "description": "Manage and track trips with drivers, vehicles, and customers.",
+  "start_url": "/TripDetails/",
+  "scope": "/TripDetails/",
+  "display": "standalone",
+  "background_color": "#0d6efd",
+  "theme_color": "#0d6efd",
+  "icons": [
+    { "src": "/TripDetails/images/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/TripDetails/images/pwa/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "screenshots": [
+    { "src": "/TripDetails/images/pwa/screen1.png", "sizes": "1024x1536", "type": "image/png", "form_factor": "narrow" },
+    { "src": "/TripDetails/images/pwa/screen2.png", "sizes": "1024x1024", "type": "image/png", "form_factor": "wide" }
+  ]
+}

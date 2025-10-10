@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import 'core/widgets/app_gradient_background.dart';
+
 class AttendancePage extends StatefulWidget {
   const AttendancePage({super.key});
 
@@ -71,9 +73,10 @@ class _AttendancePageState extends State<AttendancePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Mark Attendance")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
+      body: AppGradientBackground(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
           children: [
             TextField(
               controller: _nameController,
@@ -110,6 +113,7 @@ class _AttendancePageState extends State<AttendancePage> {
             const SizedBox(height: 16),
             Text(_message, style: const TextStyle(fontSize: 16)),
           ],
+        ),
         ),
       ),
     );

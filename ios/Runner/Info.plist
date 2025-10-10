@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>This app uses the camera to capture attendance and profile photos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Photo library access is required to store attendance captures.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Location is collected during attendance check-in and check-out to verify where submissions occur.</string>
 </dict>
 </plist>

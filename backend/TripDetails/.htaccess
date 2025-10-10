@@ -1,0 +1,29 @@
+Options -Indexes
+DirectoryIndex index.html
+
+AddType application/manifest+json .webmanifest
+AddType application/json .json
+AddType text/javascript .js
+
+<IfModule mod_headers.c>
+  <Files "manifest.webmanifest">
+    Header set Access-Control-Allow-Origin "*"
+    Header set Content-Type "application/manifest+json; charset=utf-8"
+  </Files>
+  <Files "sw.js">
+    Header set Service-Worker-Allowed "/TripDetails/"
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+  </Files>
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+  RewriteRule ^manifest\.webmanifest$ - [L,NC]
+  RewriteRule ^sw\.js$ - [L,NC]
+  RewriteRule ^images/ - [L,NC]
+  RewriteRule ^api/ - [L,NC]
+  # RewriteRule ^ index.html [L]   # (leave commented unless you need SPA routing)
+</IfModule>

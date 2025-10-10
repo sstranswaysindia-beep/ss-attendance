@@ -1,0 +1,29 @@
+TripDetails
+├── api
+│   ├── bootstrap.php
+│   ├── get_plants.php
+│   ├── get_vehicles.php
+│   ├── meta.php
+│   ├── plants.php
+│   ├── trips_create.php
+│   ├── trips_delete.php
+│   ├── trips_end.php
+│   ├── trips_list.php
+│   ├── trips_update.php
+│   ├── trip_details.php
+│   └── vehicles_by_plant.php
+├── images
+│   ├── pwa
+│   │   ├── icon-192.png
+│   │   ├── icon-512.png
+│   │   ├── screen1.png
+│   │   └── screen2.png
+│   └── logo_new.png
+├── .env
+├── .htaccess
+├── app.js
+├── index.html
+├── index_node.html
+├── manifest.webmanifest
+├── package.json
+└── sw.js

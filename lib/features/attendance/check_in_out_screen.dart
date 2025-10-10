@@ -1,0 +1,741 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+
+import '../../core/models/app_user.dart';
+import '../../core/models/attendance_record.dart';
+import '../../core/models/driver_vehicle.dart';
+import '../../core/services/attendance_repository.dart';
+import '../../core/services/assignment_repository.dart';
+import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_toast.dart';
+
+enum CheckFlowAction { checkIn, checkOut }
+
+class CheckInOutScreen extends StatefulWidget {
+  const CheckInOutScreen({
+    required this.user,
+    this.availableVehicles = const <DriverVehicle>[],
+    this.selectedVehicleId,
+    this.onVehicleAssigned,
+    super.key,
+  });
+
+  final AppUser user;
+  final List<DriverVehicle> availableVehicles;
+  final String? selectedVehicleId;
+  final ValueChanged<DriverVehicle>? onVehicleAssigned;
+
+  @override
+  State<CheckInOutScreen> createState() => _CheckInOutScreenState();
+}
+
+class _CheckInOutScreenState extends State<CheckInOutScreen>
+    with SingleTickerProviderStateMixin {
+  final AttendanceRepository _attendanceRepository = AttendanceRepository();
+  final AssignmentRepository _assignmentRepository = AssignmentRepository();
+
+  AttendanceRecord? _activeShift;
+  bool _isLoadingShift = true;
+  bool _isSubmitting = false;
+  bool _isAssigning = false;
+  bool _isSyncPending = false;
+  File? _capturedPhoto;
+  String? _submissionSummary;
+  bool _hasShownLocationWarning = false;
+
+  String? _selectedVehicleId;
+  String? _selectedVehicleNumber;
+
+  late final AnimationController _statusController;
+  late final Animation<double> _statusAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _statusController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _statusAnimation = Tween<double>(begin: 0.94, end: 1.06).animate(
+      CurvedAnimation(parent: _statusController, curve: Curves.easeInOut),
+    );
+
+    _initialiseVehicleSelection();
+    _loadActiveShift();
+  }
+
+  @override
+  void dispose() {
+    _statusController.dispose();
+    super.dispose();
+  }
+
+  void _initialiseVehicleSelection() {
+    final vehicles = widget.availableVehicles;
+    if (vehicles.isEmpty) {
+      _selectedVehicleId = widget.selectedVehicleId;
+      _selectedVehicleNumber = widget.user.vehicleNumber;
+      return;
+    }
+
+    if (widget.selectedVehicleId != null) {
+      final match = vehicles.firstWhere(
+        (vehicle) => vehicle.id == widget.selectedVehicleId,
+        orElse: () => vehicles.first,
+      );
+      _selectedVehicleId = match.id;
+      _selectedVehicleNumber = match.vehicleNumber;
+      return;
+    }
+
+    final firstVehicle = vehicles.first;
+    _selectedVehicleId = firstVehicle.id;
+    _selectedVehicleNumber = firstVehicle.vehicleNumber;
+  }
+
+  Future<void> _loadActiveShift() async {
+    final driverId = widget.user.driverId;
+    if (driverId == null || driverId.isEmpty) {
+      setState(() {
+        _isLoadingShift = false;
+        _activeShift = null;
+      });
+      return;
+    }
+
+    setState(() => _isLoadingShift = true);
+
+    try {
+      final now = DateTime.now();
+      final record = await _attendanceRepository.fetchLatestRecord(
+        driverId: driverId,
+        month: DateTime(now.year, now.month),
+      );
+      if (!mounted) return;
+
+      setState(() {
+        _activeShift = record;
+        _isLoadingShift = false;
+        if (record != null) {
+          if (record.vehicleId != null && record.vehicleId!.isNotEmpty) {
+            _selectedVehicleId = record.vehicleId;
+            _selectedVehicleNumber = record.vehicleNumber;
+          }
+          _submissionSummary = _hasOpenShift
+              ? 'Checked in at ${_formatDateTime(record.inTime)}'
+              : 'Last check-out ${_formatDateTime(record.outTime)}';
+        }
+      });
+      _updateStatusAnimation();
+    } on AttendanceFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingShift = false;
+        _activeShift = null;
+      });
+      _updateStatusAnimation();
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingShift = false;
+        _activeShift = null;
+      });
+      _updateStatusAnimation();
+      showAppToast(context, 'Unable to load attendance status.', isError: true);
+    }
+  }
+
+  bool get _hasOpenShift {
+    final record = _activeShift;
+    if (record == null) {
+      return false;
+    }
+    final outTime = record.outTime;
+    return outTime == null || outTime.isEmpty;
+  }
+
+  CheckFlowAction get _currentAction => _hasOpenShift ? CheckFlowAction.checkOut : CheckFlowAction.checkIn;
+
+  String get _currentActionLabel => _currentAction == CheckFlowAction.checkIn ? 'Check-in' : 'Check-out';
+
+  String _formatDateTime(String? raw) {
+    if (raw == null || raw.isEmpty) {
+      return '-';
+    }
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) {
+      return raw;
+    }
+    return DateFormat('dd MMM yyyy • HH:mm').format(parsed);
+  }
+
+  String? _resolvePlantId() {
+    final activeShift = _activeShift;
+    final activePlantId = activeShift?.plantId;
+    if (_hasOpenShift && activePlantId != null && activePlantId.isNotEmpty) {
+      return activePlantId;
+    }
+
+    final assignmentPlantId = widget.user.assignmentPlantId;
+    if (assignmentPlantId != null && assignmentPlantId.isNotEmpty) {
+      return assignmentPlantId;
+    }
+
+    final mappedPlantId = widget.user.plantId;
+    if (mappedPlantId != null && mappedPlantId.isNotEmpty) {
+      return mappedPlantId;
+    }
+
+    final defaultPlantId = widget.user.defaultPlantId;
+    if (defaultPlantId != null && defaultPlantId.isNotEmpty) {
+      return defaultPlantId;
+    }
+
+    return activePlantId;
+  }
+
+  String _resolvePlantLabel() {
+    final activeShift = _activeShift;
+    if (_hasOpenShift) {
+      final activeLabel = activeShift?.plantName;
+      if (activeLabel != null && activeLabel.isNotEmpty) {
+        return activeLabel;
+      }
+    }
+
+    final candidates = <String?>[
+      widget.user.assignmentPlantName,
+      widget.user.plantName,
+      widget.user.defaultPlantName,
+      activeShift?.plantName,
+      _resolvePlantId(),
+    ];
+
+    for (final candidate in candidates) {
+      if (candidate != null && candidate.isNotEmpty) {
+        return candidate;
+      }
+    }
+
+    return 'Not mapped';
+  }
+
+  Future<void> _pickVehicle() async {
+    final vehicles = widget.availableVehicles;
+    if (vehicles.isEmpty) {
+      showAppToast(context, 'No vehicles mapped yet. Contact supervisor.', isError: true);
+      return;
+    }
+
+    final selected = await showModalBottomSheet<DriverVehicle>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text('Select Vehicle', style: Theme.of(context).textTheme.titleMedium),
+              ),
+              ...vehicles.map(
+                (vehicle) => ListTile(
+                  leading: const Icon(Icons.fire_truck),
+                  title: Text(vehicle.vehicleNumber),
+                  trailing: vehicle.id == _selectedVehicleId ? const Icon(Icons.check) : null,
+                  onTap: () => Navigator.of(context).pop(vehicle),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.close),
+                title: const Text('Cancel'),
+                onTap: () => Navigator.of(context).pop(),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null) {
+      return;
+    }
+
+    await _persistVehicleSelection(selected);
+  }
+
+  Future<void> _persistVehicleSelection(DriverVehicle vehicle) async {
+    final driverId = widget.user.driverId;
+    final plantId = _resolvePlantId();
+
+    if (driverId == null || driverId.isEmpty) {
+      showAppToast(context, 'Driver mapping missing. Contact admin.', isError: true);
+      return;
+    }
+    if (plantId == null || plantId.isEmpty) {
+      showAppToast(context, 'Plant mapping missing. Contact admin.', isError: true);
+      return;
+    }
+
+    setState(() => _isAssigning = true);
+    try {
+      await _assignmentRepository.assignVehicle(
+        driverId: driverId,
+        vehicleId: vehicle.id,
+        plantId: plantId,
+        userId: widget.user.id,
+      );
+      if (!mounted) return;
+
+      setState(() {
+        _selectedVehicleId = vehicle.id;
+        _selectedVehicleNumber = vehicle.vehicleNumber;
+        _isAssigning = false;
+      });
+      widget.onVehicleAssigned?.call(vehicle);
+      showAppToast(context, 'Vehicle updated successfully.');
+    } on AssignmentFailure catch (error) {
+      if (!mounted) return;
+      setState(() => _isAssigning = false);
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isAssigning = false);
+      showAppToast(context, 'Unable to update vehicle.', isError: true);
+    }
+  }
+
+  Future<void> _capturePhoto() async {
+    final picker = ImagePicker();
+    try {
+      final xFile = await picker.pickImage(
+        source: ImageSource.camera,
+        preferredCameraDevice: CameraDevice.rear,
+        imageQuality: 85,
+      );
+
+      if (xFile == null) {
+        return;
+      }
+
+      final directory = await getApplicationDocumentsDirectory();
+      final fileName = 'attendance_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final savedPath = '${directory.path}/$fileName';
+      final savedFile = await File(xFile.path).copy(savedPath);
+
+      if (!mounted) return;
+      setState(() => _capturedPhoto = savedFile);
+      showAppToast(context, 'Photo captured and saved locally.');
+    } catch (_) {
+      if (!mounted) return;
+      showAppToast(context, 'Unable to capture photo.', isError: true);
+    }
+  }
+
+  Future<void> _submitAttendance() async {
+    final driverId = widget.user.driverId;
+    final plantId = _resolvePlantId();
+    final vehicleId = _selectedVehicleId;
+    final assignmentId = _activeShift?.assignmentId ?? widget.user.assignmentId;
+
+    if (driverId == null || driverId.isEmpty) {
+      showAppToast(context, 'Driver mapping missing. Contact admin.', isError: true);
+      return;
+    }
+    if (plantId == null || plantId.isEmpty) {
+      showAppToast(context, 'Plant mapping missing. Contact admin.', isError: true);
+      return;
+    }
+    if (vehicleId == null || vehicleId.isEmpty) {
+      showAppToast(context, 'Select a vehicle before submitting.', isError: true);
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _isSyncPending = true;
+    });
+    _updateStatusAnimation();
+
+    try {
+      final locationPayload = await _captureCurrentLocation();
+      final result = await _attendanceRepository.submit(
+        driverId: driverId,
+        plantId: plantId,
+        vehicleId: vehicleId,
+        assignmentId: assignmentId,
+        action: _currentAction == CheckFlowAction.checkIn
+            ? AttendanceAction.checkIn
+            : AttendanceAction.checkOut,
+        photoFile: _capturedPhoto,
+        locationJson: locationPayload,
+      );
+
+      if (!mounted) return;
+
+      final actionLabel = _currentActionLabel;
+      final displayTimestamp = _formatDateTime(result.timestamp);
+
+      setState(() {
+        _capturedPhoto = null;
+        _submissionSummary = '$actionLabel recorded at $displayTimestamp';
+        _isSyncPending = false;
+      });
+      _updateStatusAnimation();
+
+      await _loadActiveShift();
+      if (!mounted) return;
+      showAppToast(context, '$actionLabel submitted successfully.');
+    } on AttendanceFailure catch (error) {
+      if (!mounted) return;
+      setState(() => _isSyncPending = false);
+      _updateStatusAnimation();
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isSyncPending = false);
+      _updateStatusAnimation();
+      showAppToast(context, 'Unable to submit attendance.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+        _updateStatusAnimation();
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> _captureCurrentLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (mounted && !_hasShownLocationWarning) {
+          _hasShownLocationWarning = true;
+          showAppToast(
+            context,
+            'Enable location services to attach coordinates to attendance.',
+          );
+        }
+        return null;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.deniedForever || permission == LocationPermission.denied) {
+        if (mounted && !_hasShownLocationWarning) {
+          _hasShownLocationWarning = true;
+          showAppToast(
+            context,
+            'Location permission denied. Attendance submitted without GPS.',
+            isError: true,
+          );
+        }
+        return null;
+      }
+
+      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      return <String, dynamic>{
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        if (position.timestamp != null) 'timestamp': position.timestamp!.toIso8601String(),
+        'accuracy': position.accuracy,
+        'altitude': position.altitude,
+        'speed': position.speed,
+        'speedAccuracy': position.speedAccuracy,
+        'heading': position.heading,
+        'source': 'geolocator',
+      };
+    } catch (error) {
+      if (mounted && !_hasShownLocationWarning) {
+        _hasShownLocationWarning = true;
+        showAppToast(
+          context,
+          'Unable to capture GPS location. Attendance saved without it.',
+          isError: true,
+        );
+      }
+      return null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Check-in / Check-out')),
+      body: AppGradientBackground(
+        child: _isLoadingShift
+            ? const Center(child: CircularProgressIndicator())
+            : RefreshIndicator(
+                onRefresh: _loadActiveShift,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _SummaryInfoCard(
+                            icon: Icons.factory_outlined,
+                            label: 'Plant',
+                            value: _resolvePlantLabel(),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _SummaryInfoCard(
+                            icon: Icons.fire_truck,
+                            label: 'Vehicle',
+                            value: _selectedVehicleNumber ?? 'Not assigned',
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: OutlinedButton.icon(
+                        onPressed: _isAssigning ? null : _pickVehicle,
+                        icon: _isAssigning
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.swap_horiz),
+                        label: Text(_isAssigning ? 'Updating...' : 'Change Vehicle'),
+                      ),
+                    ),
+                    if (widget.availableVehicles.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text(
+                          'No vehicles are mapped yet. Contact supervisor to assign one.',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Attendance Photo (optional)',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      height: 220,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.grey.shade400),
+                        color: Colors.grey.shade200,
+                      ),
+                      child: _capturedPhoto != null
+                          ? ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(_capturedPhoto!, fit: BoxFit.cover),
+                            )
+                          : const Center(child: Text('Captured photo will appear here')),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _capturePhoto,
+                      icon: const Icon(Icons.camera_alt),
+                      label: const Text('Capture Photo'),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Photos help supervisors verify attendance but are optional if the camera is unavailable.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 20),
+                    FilledButton(
+                      onPressed: _isSubmitting ? null : _submitAttendance,
+                      child: _isSubmitting
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(_currentActionLabel),
+                    ),
+                    const SizedBox(height: 24),
+                    _ShiftStatusCard(
+                      actionLabel: _currentActionLabel,
+                      hasOpenShift: _hasOpenShift,
+                      summary: _submissionSummary,
+                      activeShift: _activeShift,
+                      isSyncPending: _isSyncPending,
+                      statusAnimation: (_hasOpenShift || _isSyncPending) ? _statusAnimation : null,
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  void _updateStatusAnimation() {
+    final shouldAnimate = _isSyncPending || _hasOpenShift;
+    if (shouldAnimate) {
+      if (!_statusController.isAnimating) {
+        _statusController.repeat(reverse: true);
+      }
+    } else {
+      if (_statusController.isAnimating) {
+        _statusController.stop();
+      }
+    }
+  }
+}
+
+class _SummaryInfoCard extends StatelessWidget {
+  const _SummaryInfoCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(icon, color: theme.colorScheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 4),
+                  Text(value, style: theme.textTheme.titleMedium),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ShiftStatusCard extends StatelessWidget {
+  const _ShiftStatusCard({
+    required this.actionLabel,
+    required this.hasOpenShift,
+    required this.summary,
+    required this.activeShift,
+    required this.isSyncPending,
+    this.statusAnimation,
+  });
+
+  final String actionLabel;
+  final bool hasOpenShift;
+  final String? summary;
+  final AttendanceRecord? activeShift;
+  final bool isSyncPending;
+  final Animation<double>? statusAnimation;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final subtitle = summary ?? (hasOpenShift ? 'Pending check-out.' : 'No recent attendance yet.');
+    final baseChip = Chip(
+      label: Text(
+        isSyncPending
+            ? 'Pending sync'
+            : hasOpenShift
+                ? 'Open shift'
+                : 'Ready',
+      ),
+      backgroundColor: isSyncPending
+          ? Colors.orange.shade200
+          : hasOpenShift
+              ? Colors.amber.shade200
+              : Colors.lightBlue.shade200,
+    );
+    final statusChip = statusAnimation != null
+        ? ScaleTransition(scale: statusAnimation!, child: baseChip)
+        : baseChip;
+
+    final cardColor = hasOpenShift ? Colors.amber.shade50 : Colors.lightBlue.shade50;
+
+    return Card(
+      color: cardColor,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  hasOpenShift ? 'Currently Checked-in' : 'Ready to $actionLabel',
+                  style: theme.textTheme.titleMedium,
+                ),
+                statusChip,
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(subtitle, style: theme.textTheme.bodyMedium),
+            if (activeShift != null) ...[
+              const SizedBox(height: 12),
+              _ShiftDetailRow(label: 'Checked in', value: _format(activeShift!.inTime)),
+              _ShiftDetailRow(label: 'Checked out', value: _format(activeShift!.outTime)),
+              _ShiftDetailRow(label: 'Vehicle', value: activeShift!.vehicleNumber ?? activeShift!.vehicleId ?? '-'),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _format(String? raw) {
+    if (raw == null || raw.isEmpty) {
+      return '-';
+    }
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) {
+      return raw;
+    }
+    return DateFormat('dd MMM • HH:mm').format(parsed);
+  }
+}
+
+class _ShiftDetailRow extends StatelessWidget {
+  const _ShiftDetailRow({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          Text(value, style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+}

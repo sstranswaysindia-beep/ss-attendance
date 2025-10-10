@@ -1,0 +1,2222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Trip Details</title>
+
+  <!-- Preconnects to speed up first load -->
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+
+  <link rel="icon" href="/images/logo_new.png" type="image/png" fetchpriority="low"/>
+  <!-- Bootstrap CSS (high priority for quick paint) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+        rel="stylesheet" fetchpriority="high">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet"/>
+  <!-- Non-blocking Choices.css -->
+  <link rel="preload"
+        href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css"
+        as="style"
+        onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css">
+  </noscript>
+  <!-- Google Font with swap -->
+  <link href="https://fonts.googleapis.com/css2?family=Josefin+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+
+  <link rel="manifest" href="/TripDetails/manifest.webmanifest">
+  <meta name="theme-color" content="#0d6efd">
+
+  <style>
+    :root{ --brand-grad-start:#0d6efd; --brand-grad-end:#1b74e4; --chip-green:#5CE65C; }
+    body{ background:#f7f8fa; font-family:'Josefin Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding-top: 70px; }
+    @media (max-width: 991.98px){ body { padding-top: 82px; } }
+
+    .app-navbar{ background:linear-gradient(90deg,var(--brand-grad-start) 0%,var(--brand-grad-end) 100%); }
+    .app-navbar .navbar-brand, .app-navbar .nav-link, .app-navbar .navbar-text{ color:#fff !important; }
+    .brand-logo{ width:28px; height:28px; border-radius:6px; object-fit:cover; }
+    .brand-wordmark{ font-weight:700; font-size:1.08rem; letter-spacing:.25px; line-height:1; white-space:nowrap; }
+    .brand-gif{ height:28px; width:auto; border-radius:4px; margin-left:.25rem; }
+
+    .card{ border-radius:16px; } .shadow-soft{ box-shadow:0 6px 24px rgba(0,0,0,.05); }
+    .chip{ display:inline-flex; align-items:center; gap:.35rem; border-radius:999px; padding:.38rem .68rem; margin:.2rem; font-size:.9rem; font-weight:700; }
+    #driverChips .chip{ background:var(--chip-green); color:#073b07; border:1px solid #35c235; }
+    #customerChips .chip{ background:#cfe2ff; color:#0b2a55; }
+    .chip .bi-x{ cursor:pointer; }
+    /* Helpers chip theme */
+    #helperChips .chip.helper{ background:#ffe8cc; color:#5a2a00; border:1px solid #ffcd94; }
+
+    .tap{ min-height:44px; }
+    .input-group .choices{ flex:1; min-width:0; }
+    .input-group .btn{ height:44px; padding:0 12px; display:flex; align-items:center; justify-content:center; }
+    .input-group .btn i{ font-size:1rem; line-height:1; }
+
+    .table-responsive{ overflow-x:auto; }
+    .table thead.table-green th{ background:#d4edda; color:#155724; white-space:nowrap; }
+
+    @keyframes flash{ 0%{transform:scale(1)} 50%{transform:scale(1.05)} 100%{transform:scale(1)} }
+    .badge-flash{ animation:flash 1.1s ease-in-out infinite; filter:drop-shadow(0 0 6px rgba(255,193,7,.6)); }
+
+    #ongoingInfo{ background:linear-gradient(90deg, #ffc107, #ffdd57); border-radius:10px; padding:.5rem .75rem; }
+    .toast-container{ z-index:11000; }
+
+    /* A2HS install banner */
+    #installBanner{ position:fixed; left:0; right:0; top:56px; z-index:1055; background:linear-gradient(90deg,var(--brand-grad-start),var(--brand-grad-end)); color:#fff; transform:translateY(-100%); transition:transform .25s ease; }
+    #installBanner.show{ transform:translateY(0); }
+
+    /* iOS A2HS helper */
+    #iosA2HS{ display:none; position:fixed; left:12px; right:12px; bottom:12px; z-index:1060; background:#fff; border:1px solid rgba(0,0,0,.1); border-radius:12px; box-shadow:0 6px 24px rgba(0,0,0,.15); }
+    #iosA2HS.show{ display:block; }
+    #iosA2HS .hdr{ font-weight:700; padding:.5rem .75rem; border-bottom:1px solid rgba(0,0,0,.05); }
+    #iosA2HS .bd{ padding:.5rem .75rem; }
+    #iosA2HS .ft{ padding:.5rem .75rem; text-align:right; }
+
+    /* Bottom sticky ongoing card */
+    .mobile-sticky-note{
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1060;
+      background:#fffbe6; border-top:1px solid rgba(0,0,0,.08);
+      padding:.75rem .9rem; box-shadow:0 -6px 20px rgba(0,0,0,.12);
+    }
+    @supports(padding-bottom: env(safe-area-inset-bottom)){
+      .mobile-sticky-note{ padding-bottom: calc(.75rem + env(safe-area-inset-bottom)); }
+    }
+    @media (min-width: 992px){
+      .mobile-sticky-note{ left:auto; right:24px; width:380px; border:1px solid rgba(0,0,0,.08); border-bottom-left-radius:12px; border-bottom-right-radius:12px; }
+    }
+    .mobile-sticky-note .title{ font-weight:700; display:flex; align-items:center; gap:.4rem; }
+    .mobile-sticky-note .title .dot{ width:8px; height:8px; background:#ffc107; border-radius:50%; display:inline-block; }
+    .mobile-sticky-note .close-note{ border:0; background:transparent; font-size:1.2rem; line-height:1; }
+    
+    #welcomeBanner {
+      padding: .35rem .5rem !important;
+      font-size: .9rem !important;
+      line-height: 1.3 !important;
+      margin-bottom: .5rem !important;
+    }
+    .container { padding-top: .5rem !important; }
+    #welcomeBanner { margin-top: -0.95rem !important; }
+  </style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar navbar-expand-lg navbar-dark app-navbar fixed-top">
+<div class="container align-items-center">
+  <!-- Brand -->
+  <a class="navbar-brand d-flex align-items-center gap-2" href="#">
+    <img src="/images/logo_new.png" alt="Logo" class="brand-logo" loading="lazy" decoding="async" fetchpriority="low"/>
+    <span class="brand-wordmark">SS Transways India</span>
+    <img src="/images/IMG_8026.gif" alt="brand" class="brand-gif" loading="lazy" decoding="async" fetchpriority="low"/>
+  </a>
+
+  <!-- Middle: title -->
+  <span class="navbar-text ms-auto d-none d-md-inline">Trip Details</span>
+
+  <!-- Install -->
+  <button id="btnInstallApp" class="btn btn-light btn-sm d-none ms-2">
+    <i class="bi bi-download me-1"></i>Install
+  </button>
+
+  <!-- Right: Logout (no username) -->
+  <button id="btnLogout" class="btn btn-outline-light btn-sm ms-2">
+    <i class="bi bi-box-arrow-right me-1"></i>Logout
+  </button>
+</div>
+</nav>
+
+<!-- Android/Chromium install banner -->
+<div id="installBanner" class="install-banner d-none">
+  <div class="container d-flex align-items-center justify-content-between gap-2 py-2">
+    <div class="me-2">
+      <strong class="me-1">Install Trip Details</strong>
+      <small class="opacity-75 d-none d-sm-inline">Quick access from your home screen.</small>
+    </div>
+    <div class="d-flex gap-2">
+      <button id="installNow" class="btn btn-light btn-sm fw-semibold"><i class="bi bi-download me-1"></i>Install</button>
+      <button id="installDismiss" class="btn btn-outline-light btn-sm">Dismiss</button>
+    </div>
+  </div>
+</div>
+
+<!-- iOS A2HS helper -->
+<div id="iosA2HS" class="ios-banner" role="region" aria-live="polite">
+  <div class="hdr">Add to Home Screen (iPhone/iPad)</div>
+  <div class="bd">
+    <ol class="m-0 ps-3">
+      <li>Tap the <strong>Share</strong> icon in Safari</li>
+      <li>Select <strong>Add to Home Screen</strong></li>
+      <li>Tap <strong>Add</strong></li>
+    </ol>
+  </div>
+  <div class="ft">
+    <button id="iosA2HSDismiss" class="btn btn-outline-secondary btn-sm">Hide</button>
+  </div>
+</div>
+
+<div class="container pt-1 pb-3">
+
+  <!-- Welcome banner -->
+  <div id="welcomeBanner" class="alert alert-info mb-3 d-none" role="status"></div>
+
+  <!-- Start / Update Trip -->
+  <div class="card shadow-soft mb-3">
+    <div class="card-body">
+      <div class="row g-3">
+
+        <!-- Plant & Vehicle -->
+        <div class="col-12 col-md-6">
+          <label class="form-label">
+            Plant <span class="text-danger">*</span>
+            <small id="plantNote" class="text-danger fw-semibold ms-1 d-none">(Contact admin)</small>
+          </label>
+          <select id="plant" class="form-select tap" aria-label="Select Plant"></select>
+        </div>
+        <div class="col-12 col-md-6">
+          <label class="form-label">Vehicle No <span class="text-danger">*</span></label>
+          <select id="vehicle" class="form-select tap" disabled aria-label="Select Vehicle"></select>
+        </div>
+
+        <!-- Drivers -->
+        <div class="col-12">
+          <label class="form-label">Driver(s) <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <select id="driverSelect" class="form-select tap" aria-label="Select Driver" disabled></select>
+            <button id="addDriver" class="btn btn-outline-primary tap" type="button" title="Add driver" disabled>
+              <i class="bi bi-plus-lg"></i>
+            </button>
+          </div>
+          <div id="driverChips" class="mt-2"></div>
+        </div>
+
+        <!-- Helpers (multi) -->
+        <div class="col-12">
+          <label class="form-label">Helper(s) (optional)</label>
+          <div class="input-group">
+            <select id="helperSelect" class="form-select tap" aria-label="Select Helper"></select>
+            <button id="addHelper" class="btn btn-outline-primary tap" type="button" title="Add helper">
+              <i class="bi bi-plus-lg"></i>
+            </button>
+          </div>
+          <div id="helperChips" class="mt-2"></div>
+        </div>
+
+        <!-- Customers -->
+        <div class="col-12">
+          <label class="form-label">Customer(s) <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <input id="customerInput" class="form-control tap"
+              list="custList"
+              placeholder="Type name and press +"
+              aria-label="Customer name"
+              autocapitalize="none" autocomplete="off" autocorrect="off" spellcheck="false">
+            <datalist id="custList"></datalist>
+            <button id="addCustomer" class="btn btn-outline-primary tap" type="button" title="Add customer">
+              <i class="bi bi-plus-lg"></i>
+            </button>
+          </div>
+          <div id="customerChips" class="mt-2"></div>
+        </div>
+
+        <!-- Start date & KM -->
+        <div class="col-6">
+          <label class="form-label">Trip Start Date <span class="text-danger">*</span></label>
+          <input id="startDate" type="date" class="form-control tap" aria-label="Trip Start Date">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Trip Starting KM <span class="text-danger">*</span></label>
+          <input id="startKm" type="text" class="form-control tap" inputmode="numeric" aria-label="Trip Starting KM" placeholder="e.g. 12,34,567">
+        </div>
+
+        <div class="col-12">
+          <label class="form-label">Note</label>
+          <textarea id="note" class="form-control tap" rows="2" placeholder="Any note..." aria-label="Note"></textarea>
+        </div>
+
+        <div class="col-12 d-grid">
+          <button id="startTripBtn" class="btn btn-light border tap fw-semibold" disabled>Start Trip (Ongoing)</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- End Trip Modal -->
+  <div class="modal fade" id="endTripModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">End Trip</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body row g-3">
+        <input type="hidden" id="endTripId">
+        <div class="col-6">
+          <label class="form-label">Trip End Date</label>
+          <input id="endDate" type="date" class="form-control tap" aria-label="Trip End Date">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Trip End KM</label>
+          <input id="endKm" type="text" class="form-control tap" inputmode="numeric" aria-label="Trip End KM" placeholder="e.g. 12,34,567">
+        </div>
+        <div class="col-12"><div class="form-text" id="computedRun"></div></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button id="saveEndTrip" class="btn btn-success">Save</button>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Trips list -->
+  <div class="card shadow-soft">
+    <div class="card-body">
+      <div id="ongoingInfo" class="d-flex align-items-center gap-2 mb-2 d-none">
+        <span class="badge bg-warning text-dark badge-flash">ONGOING</span>
+        <span class="info-line" id="ongoingText"></span>
+        <button id="clearOngoingForm" class="btn btn-sm btn-outline-dark ms-2">Clear Form</button>
+      </div>
+
+      <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+        <h2 class="h5 m-0">Trips (Latest First)</h2>
+        <small class="text-muted" id="vehLabel"></small>
+      </div>
+
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead class="table-green">
+            <tr>
+              <th>Start</th>
+              <th>Drivers</th>
+              <th>Helper(s)</th>
+              <th>Customers</th>
+              <th>Status</th>
+              <th>End</th>
+              <th class="text-end">Run KM</th>
+              <th class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="tripRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bottom sticky ongoing card -->
+<div id="mobileSticky" class="mobile-sticky-note d-none">
+  <div class="d-flex justify-content-between align-items-start">
+    <div class="title"><span class="dot"></span><span>Ongoing Trip</span></div>
+    <button class="close-note" id="closeSticky" title="Hide">&times;</button>
+  </div>
+  <div class="meta mt-1" id="stickyMeta">—</div>
+  <div class="d-flex gap-2 mt-2">
+    <button id="stickyUpdate" class="btn btn-warning text-dark btn-sm"><i class="bi bi-save2 me-1"></i>Update</button>
+    <button id="stickyEnd" class="btn btn-success btn-sm"><i class="bi bi-flag me-1"></i>End</button>
+  </div>
+</div>
+
+<!-- Toasts -->
+<div id="toastContainer" class="toast-container position-fixed top-0 start-50 translate-middle-x p-3"></div>
+
+<!-- Login Modal -->
+<div class="modal fade" id="loginModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h5 class="modal-title">Driver Login</h5>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">Username</label>
+          <input id="loginUsername" type="text" class="form-control" autocomplete="username" placeholder="e.g. firstname"/>
+        </div>
+        <div class="mb-3">
+          <label for="loginPassword" class="form-label">Password</label>
+          <div class="input-group">
+            <input 
+              id="loginPassword" 
+              type="password" 
+              class="form-control" 
+              autocomplete="current-password" 
+              placeholder="••••"
+              required
+            />
+            <button 
+              type="button" 
+              class="btn btn-outline-secondary" 
+              id="togglePwdBtn" 
+              aria-label="Show password" 
+              aria-pressed="false"
+            >
+              <span id="togglePwdIcon">👁️</span>
+            </button>
+          </div>
+
+          <div class="form-check mt-1">
+            <input class="form-check-input" type="checkbox" id="showPwdChk">
+            <label class="form-check-label" for="showPwdChk">Show password</label>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer py-2">
+        <button id="loginBtn" class="btn btn-primary w-100">
+          <i class="bi bi-box-arrow-in-right me-1"></i>Login
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JS deps -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+
+<script>
+/* ===== PAGINATION (Latest 15 + Load More) ===== */
+let tripsPage = 0;
+let tripsHasMore = true;
+let tripsLoading = false;
+const tripsPageSize = 15;
+const tripsSeenIds = new Set();
+let lastVehicleId = '';
+let lastHelperOptions = []; 
+const helperNameById = new Map();      // id -> name, filled from meta + refresh + trip_details
+
+/* ===== CONFIG, STATE, UTILS ===== */
+const API = '/TripDetails/api';
+const $ = id => document.getElementById(id);
+const state = {
+  plants:[], vehicles:[], drivers:[], helpers:[], customers:[],
+  allDrivers:[],
+  chosenDrivers:[], chosenHelpers:[], customerTags:[], lastTrips:[], me:null
+};
+let driverChoices, helperChoices;
+let currentOngoingId=null, formDirty=false;
+
+const todayLocal = () => {
+  const d=new Date(); const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+};
+
+function showToast(message, variant='info', delay=3000){
+  const id='t'+Date.now();
+  $('toastContainer').insertAdjacentHTML('beforeend', `
+    <div id="${id}" class="toast align-items-center text-bg-${variant} border-0 mb-2" role="status" aria-live="polite" aria-atomic="true">
+      <div class="d-flex"><div class="toast-body fw-semibold">${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>
+    </div>`);
+  const el=$(id); const t=new bootstrap.Toast(el,{delay}); t.show(); el.addEventListener('hidden.bs.toast',()=>el.remove());
+}
+
+function formatIndianNumber(x){ const s=String(x).replace(/[^0-9]/g,''); if(!s) return ''; const last3=s.slice(-3), rest=s.slice(0,-3); return rest? rest.replace(/\B(?=(\d{2})+(?!\d))/g, ",")+','+last3 : last3; }
+function parseNumber(x){ const s=String(x||'').replace(/,/g,'').trim(); return s? Number(s):''; }
+
+const idle = (cb) => (window.requestIdleCallback ? requestIdleCallback(cb) : setTimeout(cb, 1));
+/* ---- Helper name resolver ---- */
+function getHelperName(id) {
+  if (id == null || id === '') return '';
+  const key = String(id);
+
+  // 1️⃣ Cached name (fast path)
+  if (helperNameById.has(key)) return helperNameById.get(key);
+
+  // 2️⃣ From the most recent helper dropdown load
+  const fromLast = Array.isArray(lastHelperOptions)
+    ? lastHelperOptions.find(h => String(h.id) === key)?.name
+    : null;
+  if (fromLast) {
+    helperNameById.set(key, fromLast);
+    return fromLast;
+  }
+
+  // 3️⃣ From global meta helpers (loaded via meta.php)
+  const fromMeta = (state.helpers || []).find(h => String(h.id) === key)?.name;
+  if (fromMeta) {
+    helperNameById.set(key, fromMeta);
+    return fromMeta;
+  }
+
+  // 4️⃣ Fallback to numeric ID if nothing else known
+  return `#${key}`;
+}
+/* ===== Vehicle lock helpers (role-aware) ===== */
+function lockVehicleForOngoing(lock){
+  const veh = $('vehicle');
+  if (!veh) return;
+  const role = String(state.me?.role || '').toLowerCase();
+  const shouldLock = (role === 'driver' && !!lock);
+  veh.disabled = shouldLock;
+  veh.title = shouldLock
+    ? 'You have an ongoing trip. Ask your supervisor to change vehicle.'
+    : '';
+}
+
+/* ===== fetch helpers ===== */
+async function apiFetch(url, options = {}) {
+  const res = await fetch(url, { credentials: 'include', cache: 'no-store', ...options });
+  if (res.status === 401) {
+    bootstrap.Modal.getOrCreateInstance($('loginModal')).show();
+    throw new Error('Not authenticated');
+  }
+  return res;
+}
+async function fetchJSON(url, options = {}) {
+  const res = await apiFetch(url, { ...options, headers: { 'Accept':'application/json', ...(options.headers||{}) }});
+  let data;
+  try { data = await res.json(); } catch { throw new Error(`Bad JSON from ${url}`); }
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+/* ===== UI helpers ===== */
+function renderWelcome(){
+  const banner = $('welcomeBanner');
+  const pool = state.allDrivers || [];
+  const names = state.chosenDrivers
+    .map(id => pool.find(d => String(d.id) === String(id))?.name)
+    .filter(Boolean);
+
+  if(!names.length){ banner.classList.add('d-none'); banner.innerHTML=''; return; }
+
+  const ongoing = (state.lastTrips||[]).some(
+    r => r.status === 'ongoing' && names.some(nm => (r.drivers||'').includes(nm))
+  );
+  const base = `Welcome <strong>${names.join(', ')}</strong>`;
+  const flash = ongoing ? 
+    ` <span class="badge bg-warning text-dark badge-flash ms-2">ONGOING</span><span class="ms-2">— You Are On Trip</span>` 
+    : '';
+  banner.innerHTML = base + flash; 
+  banner.classList.remove('d-none');
+}
+function renderDriverChips(){
+  const wrap = $('driverChips'); 
+  wrap.innerHTML = '';
+  const pool = state.allDrivers || [];
+
+  state.chosenDrivers.forEach(id=>{
+    const d = pool.find(x => String(x.id) === String(id)); 
+    if(!d) return;
+    const el = document.createElement('span');
+    el.className = 'chip';
+    el.innerHTML = `<span>${d.name}</span>`;
+    if (String(id) !== String(state.me?.driver_id)) {
+      const rm = document.createElement('i');
+      rm.className = 'bi bi-x'; rm.title = 'Remove';
+      rm.onclick = () => { 
+        state.chosenDrivers = state.chosenDrivers.filter(x => String(x) !== String(id));
+        formDirty = true; renderDriverChips(); renderWelcome(); loadTrips({reset:true});
+      };
+      el.appendChild(rm);
+    }
+    wrap.appendChild(el);
+  });
+
+  renderWelcome();
+}
+function renderHelperChips(){
+  const wrap = $('helperChips');
+  wrap.innerHTML = '';
+
+  state.chosenHelpers.forEach(id => {
+    const key = String(id);
+    const nm  = getHelperName(key);
+    const el  = document.createElement('span');
+    el.className = 'chip helper';
+    el.innerHTML = `<span>${nm}</span><i class="bi bi-x" data-id="${key}" title="Remove"></i>`;
+    el.querySelector('i').onclick = () => {
+      state.chosenHelpers = state.chosenHelpers.filter(x => String(x) !== key);
+      formDirty = true;
+      renderHelperChips();
+      enableAddHelperByValue();
+    };
+    wrap.appendChild(el);
+  });
+}
+function renderCustomerChips(){
+  const wrap=$('customerChips'); wrap.innerHTML='';
+  state.customerTags.forEach(name=>{
+    const el=document.createElement('span');
+    el.className='chip'; el.innerHTML=`<span>${name}</span><i class="bi bi-x" data-name="${name}" title="Remove"></i>`;
+    el.querySelector('i').onclick=()=>{ state.customerTags=state.customerTags.filter(x=>x!==name); formDirty=true; renderCustomerChips(); };
+    wrap.appendChild(el);
+  });
+}
+
+/* ===== Ongoing badge / sticky ===== */
+async function renderOngoingBadge(){
+  const box=$('ongoingInfo'), txt=$('ongoingText');
+  if(!currentOngoingId){ box.classList.add('d-none'); txt.textContent=''; hideSticky(); return; }
+  const r=(state.lastTrips||[]).find(x=>String(x.id)===String(currentOngoingId));
+  if(!r){ box.classList.add('d-none'); txt.textContent=''; hideSticky(); return; }
+  txt.textContent=`Trip #${r.id} • Start: ${r.start_date_fmt||r.start_date||''} • KM: ${formatIndianNumber(r.start_km??'')}`;
+  box.classList.remove('d-none');
+  const who = (r.drivers||'-');
+  const hlp = r.helpers ? ` | H: ${r.helpers}` : (r.helper ? ` | H: ${r.helper}` : '');
+  const cus = r.customers ? ` | ${r.customers}` : '';
+  $('stickyMeta').textContent = `#${r.id} | ${r.start_date_fmt||r.start_date||''} | KM ${formatIndianNumber(r.start_km??'')} | ${who}${hlp}${cus}`;
+  $('mobileSticky').classList.remove('d-none');
+}
+function hideSticky(){ $('mobileSticky').classList.add('d-none'); }
+
+/* ===== Seed native selects before Choices (if ever needed) ===== */
+function setSelectOptions(selectEl, placeholderLabel, items){
+  if(!selectEl) return;
+  const opts = [`<option value="">${placeholderLabel}</option>`]
+    .concat((items||[]).map(x=>`<option value="${x.id}">${x.name}</option>`));
+  selectEl.innerHTML = opts.join('');
+}
+
+/* ===== Loads ===== */
+async function loadPlants(){
+  try{
+    const data = await fetchJSON(`${API}/get_plants.php?cb=${Date.now()}`);
+    state.plants=data.plants||[];
+    $('plant').innerHTML='<option value="">Select Plant</option>'+state.plants.map(p=>`<option value="${p.id}">${p.plant_name}</option>`).join('');
+  }catch(err){ showToast(`Plants load failed: ${err.message}`,'danger',6000); }
+}
+function enforceVehicleRoleLock(){
+  const veh = $('vehicle');
+  if (!veh) return;
+  const role = String(state.me?.role || '').toLowerCase();
+  const shouldLock = (role === 'driver' && !!currentOngoingId);
+  veh.disabled = shouldLock;
+  veh.title = shouldLock
+    ? 'Drivers cannot change vehicle while a trip is ongoing'
+    : '';
+}
+async function loadVehiclesByPlant(plant_id){
+  if(!plant_id){
+    $('vehicle').innerHTML = '<option value="">Select Plant First</option>';
+    $('vehicle').disabled = true;
+    return;
+  }
+  try{
+    const data = await fetchJSON(`${API}/get_vehicles.php?plant_id=${encodeURIComponent(plant_id)}&cb=${Date.now()}`);
+    state.vehicles = data.vehicles || [];
+    $('vehicle').innerHTML = '<option value="">Select Vehicle</option>' +
+      state.vehicles.map(v => `<option value="${v.id}">${v.vehicle_no}</option>`).join('');
+    $('vehicle').disabled = false;
+
+    enforceVehicleRoleLock();
+    lastVehicleId = $('vehicle').value || '';
+  }catch(err){
+    showToast(`Vehicles load failed: ${err.message}`,'danger',6000);
+  }
+}
+// Hard block opening the vehicle dropdown if driver has an ongoing trip
+(function hardBlockVehicleOpen(){
+  const veh = $('vehicle');
+  if (!veh) return;
+  const stopIfLocked = (e) => {
+    const role = String(state.me?.role || '').toLowerCase();
+    if (role === 'driver' && !!currentOngoingId) {
+      e.preventDefault();
+      e.stopPropagation();
+      showToast('Drivers cannot change vehicle while a trip is ongoing', 'warning', 4000);
+      return false;
+    }
+  };
+  veh.addEventListener('mousedown', stopIfLocked, true);
+  veh.addEventListener('touchstart', stopIfLocked, { capture: true, passive: false });
+})();
+
+/* ===== Helpers dropdown (multi-aware) ===== */
+async function refreshHelperChoices(plant_id){
+  const native = $('helperSelect');
+  if (!native) return;
+
+  const prevValue =
+    (helperChoices && helperChoices.getValue && helperChoices.getValue(true)) ||
+    (native.value || '');
+
+  native.disabled = true;
+
+  try{
+    const vehicle_id = $('vehicle')?.value ? String($('vehicle').value) : '';
+    const qs = new URLSearchParams({ cb: String(Date.now()) });
+    if (plant_id)   qs.set('plant_id', String(plant_id));
+    if (vehicle_id) qs.set('vehicle_id', vehicle_id);
+
+    const data = await fetchJSON(`${API}/get_helpers.php?${qs.toString()}`);
+    const list = Array.isArray(data.helpers) ? data.helpers : [];
+
+    // normalize, sort & cache
+    lastHelperOptions = list
+      .filter(h => h && h.id != null && h.name)
+      .map(h => ({ id: String(h.id), name: String(h.name) }))
+      .sort((a,b) => a.name.localeCompare(b.name));
+
+    // update global name map
+    for (const h of lastHelperOptions) helperNameById.set(String(h.id), String(h.name));
+
+    if (!helperChoices) {
+      helperChoices = new Choices('#helperSelect', {
+        searchEnabled: true,
+        shouldSort:   false,
+        itemSelectText: '',
+        allowHTML:    false,
+        searchResultLimit: 50,
+        position: 'auto',
+        removeItemButton: false,
+        duplicateItemsAllowed: false
+      });
+    }
+
+    const selectedSet = new Set((state.chosenHelpers || []).map(String));
+    const choices = [{ value:'', label:'Select Helper', disabled:true, selected:true }];
+    for (const h of lastHelperOptions){
+      choices.push({
+        value: h.id,
+        label: h.name,
+        selected: String(prevValue) === h.id && !selectedSet.has(h.id)
+      });
+    }
+
+    helperChoices.clearChoices();
+    helperChoices.setChoices(choices, 'value', 'label', true);
+
+    // rebind change → auto-add (use a stable handler so we don’t double-bind)
+    native.onchange = () => {
+      const val = helperChoices.getValue(true);
+      if (val && !state.chosenHelpers.includes(String(val))) {
+        state.chosenHelpers.push(String(val));
+        formDirty = true;
+        renderHelperChips();
+      }
+      try {
+        helperChoices.removeActiveItems();
+        helperChoices.setChoiceByValue('');
+        helperChoices.clearInput();
+      } catch(_){}
+      enableAddHelperByValue();
+    };
+
+    // restore visible value if it’s not already in chips
+    if (prevValue && !selectedSet.has(String(prevValue))) {
+      try { helperChoices.setChoiceByValue(String(prevValue)); } catch(_){}
+    }
+
+    native.disabled = false;
+  } catch (err){
+    showToast(`Helpers load failed: ${err.message}`, 'danger', 6000);
+
+    if (!helperChoices) {
+      helperChoices = new Choices('#helperSelect', {
+        searchEnabled: true, shouldSort: false, itemSelectText: '', allowHTML: false
+      });
+    }
+    helperChoices.clearChoices();
+    helperChoices.setChoices(
+      [{ value:'', label:'Select Helper', disabled:true, selected:true }],
+      'value','label', true
+    );
+    native.disabled = false;
+  }
+
+  renderHelperChips();
+  enableAddHelperByValue();
+}
+/* ===== Meta ===== */
+async function loadMeta(){
+  try {
+    const data = await fetchJSON(`${API}/meta.php?cb=${Date.now()}`);
+
+    const driversRaw   = Array.isArray(data.drivers)   ? data.drivers   : [];
+    const helpersRaw   = Array.isArray(data.helpers)   ? data.helpers   : [];
+    const customersRaw = Array.isArray(data.customers) ? data.customers : [];
+
+    const seen = new Set();
+    state.allDrivers = driversRaw
+      .filter(d => d && d.id != null && d.name)
+      .map(d => ({
+        ...d,
+        id: String(d.id),
+        plant_id: d.plant_id != null ? String(d.plant_id) : '',
+        supervisor_name: d.supervisor_name ? String(d.supervisor_name) : null
+      }))
+      .filter(d => (seen.has(d.id) ? false : (seen.add(d.id), true)));
+
+    state.helpers = helpersRaw
+      .filter(h => h && h.id != null && h.name)
+      .map(h => ({
+        ...h,
+        id: String(h.id),
+        plant_id: h.plant_id != null ? String(h.plant_id) : ''
+      }));
+for (const h of state.helpers) {
+  helperNameById.set(String(h.id), String(h.name));
+}
+    state.customers = customersRaw;
+
+    const driverSelectEl = $('driverSelect');
+    const helperSelectEl = $('helperSelect');
+    if (!driverSelectEl || !helperSelectEl) return;
+
+    if (!driverChoices) {
+      driverChoices = new Choices(driverSelectEl, {
+        searchEnabled: true,
+        shouldSort: false,
+        itemSelectText: '',
+        allowHTML: false,
+        searchResultLimit: 50,
+        position: 'auto',
+        removeItemButton: false,
+        duplicateItemsAllowed: false
+      });
+    }
+    if (!helperChoices) {
+      helperChoices = new Choices(helperSelectEl, {
+        searchEnabled: true,
+        shouldSort: false,
+        itemSelectText: '',
+        allowHTML: false,
+        searchResultLimit: 50,
+        position: 'auto',
+        removeItemButton: false,
+        duplicateItemsAllowed: false
+      });
+    }
+
+    driverChoices.clearChoices();
+    driverChoices.setChoices(
+      [{ value:'', label:'Select Driver', disabled:true, selected:true }],
+      'value','label', true
+    );
+    helperChoices.clearChoices();
+
+    $('custList').innerHTML = state.customers.map(c => `<option value="${c.name}">`).join('');
+    $('startDate').value = todayLocal();
+
+    const wireWhenReady = () => {
+      if (driverChoices?.passedElement?.element) {
+        try { wireDriverEnablement(); } catch(_) {}
+      } else {
+        setTimeout(wireWhenReady, 0);
+      }
+    };
+    wireWhenReady();
+
+    const wireHelpersWhenReady = () => {
+      if (helperChoices?.passedElement?.element) {
+        try { wireHelperEnablement(); } catch(_) {}
+      } else {
+        setTimeout(wireHelpersWhenReady, 0);
+      }
+    };
+    wireHelpersWhenReady();
+
+  } catch (err) {
+    showToast(`Meta load failed: ${err.message}`, 'danger', 6000);
+  }
+}
+function refreshDriverChoices(plant_id){
+  if (!driverChoices) return;
+
+  // Preserve current selection if it remains available
+  const prevValue =
+    (driverChoices.getValue && driverChoices.getValue(true)) ||
+    (document.getElementById('driverSelect')?.value || '');
+
+  const youId = state.me?.driver_id ? String(state.me.driver_id) : null;
+
+  const all = Array.isArray(state.allDrivers) ? state.allDrivers : [];
+  const helperIdSet = new Set((state.helpers || []).map(h => String(h.id)));
+
+  // Limit to selected plant (if provided)
+  let pool = plant_id
+    ? all.filter(d => String(d.plant_id) === String(plant_id))
+    : [];
+
+  // Exclude users marked as helper (by role) or present in helpers table
+  pool = pool.filter(d => {
+    const role = String(d.role || '').toLowerCase();
+    const idStr = String(d.id);
+    const notHelperRole = role !== 'helper';
+    const notInHelpersTable = !helperIdSet.has(idStr);
+    return notHelperRole && notInHelpersTable;
+  });
+
+  // De-dup by id
+  const byId = new Map();
+  for (const d of pool) {
+    const idStr = String(d.id);
+    if (!byId.has(idStr)) byId.set(idStr, d);
+  }
+
+  // Sort by plain name
+  let filtered = Array.from(byId.values())
+    .sort((a,b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  // Ensure "You" appears if not already in filtered list
+  if (youId && !filtered.some(d => String(d.id) === youId)) {
+    const meRec = all.find(d => String(d.id) === youId);
+    if (meRec && (!plant_id || String(meRec.plant_id) === String(plant_id))) {
+      filtered.unshift(meRec);
+    }
+  }
+
+  // Label: ONLY name (no supervisor suffix, no role tag)
+  const formatLabel = (d) => String(d.name || '');
+
+  const choices = [{ value:'', label:'Select Driver', disabled:true, selected:true }]
+    .concat(filtered.map(d => ({
+      value: String(d.id),
+      label: (youId && String(d.id) === youId)
+        ? `${formatLabel(d)} (You)`
+        : formatLabel(d)
+    })));
+
+  driverChoices.clearChoices();
+  driverChoices.setChoices(choices, 'value', 'label', true);
+
+  if (prevValue && choices.some(c => String(c.value) === String(prevValue))) {
+    driverChoices.setChoiceByValue(String(prevValue));
+  }
+
+  // Auto-add chosen driver to chips on select
+  const selectEl = driverChoices.passedElement?.element;
+  if (selectEl) {
+    selectEl.removeEventListener('change', autoAddDriver);
+    selectEl.addEventListener('change', autoAddDriver);
+  }
+  function autoAddDriver(e){
+    const val = e.target.value;
+    if (val && !state.chosenDrivers.includes(val)) {
+      state.chosenDrivers.push(val);
+      renderDriverChips();
+    }
+    driverChoices.clearInput();
+    driverChoices.setChoiceByValue('');
+    enableAddDriverByValue?.();
+  }
+
+  enableAddDriverByValue?.();
+}
+
+/* ===== Drivers: robust getter + enable logic ===== */
+function getSelectedDriverId(){
+  if (!driverChoices || !driverChoices.getValue) {
+    return String(($('driverSelect')?.value ?? '')).trim();
+  }
+  const direct = driverChoices.getValue(true);
+  if (direct) return String(direct).trim();
+
+  const val = driverChoices.getValue();
+  if (Array.isArray(val) && val.length && val[0]?.value) return String(val[0].value).trim();
+  if (val?.value) return String(val.value).trim();
+
+  const native = driverChoices.passedElement?.element || $('driverSelect');
+  return String(native?.value || '').trim();
+}
+function getSelectedHelperId(){
+  if (!helperChoices || !helperChoices.getValue) {
+    return String(($('helperSelect')?.value ?? '')).trim();
+  }
+  const direct = helperChoices.getValue(true);
+  if (direct) return String(direct).trim();
+
+  const v = helperChoices.getValue();
+  if (Array.isArray(v) && v.length && v[0]?.value) return String(v[0].value).trim();
+  if (v?.value) return String(v.value).trim();
+
+  const native = helperChoices.passedElement?.element || $('helperSelect');
+  return String(native?.value || '').trim();
+}
+function enableAddDriverByValue(){
+  const hasVehicle = !!$('vehicle').value;
+  const picked     = getSelectedDriverId();
+  const already    = picked && state.chosenDrivers.some(x => String(x) === String(picked));
+  $('addDriver').disabled = !hasVehicle || !picked || already;
+}
+function enableAddHelperByValue(){
+  const hasVehicle = !!$('vehicle').value;
+  const picked     = getSelectedHelperId();
+  const already    = picked && state.chosenHelpers.some(x => String(x) === String(picked));
+  $('addHelper').disabled = !hasVehicle || !picked || already;
+}
+function wireDriverEnablement(){
+  if (!driverChoices || !driverChoices.passedElement || !driverChoices.passedElement.element) return;
+  const native = driverChoices.passedElement.element;
+  const container = native.closest('.choices');
+
+  const enable = () => enableAddDriverByValue();
+  ['change','input'].forEach(evt => native.addEventListener(evt, enable));
+  container?.addEventListener('choice', enable);
+  container?.addEventListener('showDropdown', enable);
+  container?.addEventListener('hideDropdown', enable);
+
+  enable();
+}
+function wireHelperEnablement(){
+  if (!helperChoices || !helperChoices.passedElement || !helperChoices.passedElement.element) return;
+  const native = helperChoices.passedElement.element;
+  const container = native.closest('.choices');
+
+  const enable = () => enableAddHelperByValue();
+  ['change','input'].forEach(evt => native.addEventListener(evt, enable));
+  container?.addEventListener('choice', enable);
+  container?.addEventListener('showDropdown', enable);
+  container?.addEventListener('hideDropdown', enable);
+
+  enable();
+}
+
+/* ===== Key handlers / buttons ===== */
+document.addEventListener('keydown', e=>{
+  const isChoicesFocused = document.activeElement?.closest('.choices'); if(!isChoicesFocused) return;
+  if(e.key==='Enter'){ e.preventDefault(); 
+    if (document.activeElement?.closest('#driverSelect') || document.activeElement?.id==='driverSelect') $('addDriver').click();
+    else $('addHelper').click();
+  }
+});
+$('addDriver').onclick = () => {
+  const picked = getSelectedDriverId();
+  if(!$('vehicle').value) return showToast('Select a vehicle first','warning');
+  if(!picked) return showToast('Pick a driver first','warning');
+  if(!state.chosenDrivers.some(x => String(x)===picked)){
+    state.chosenDrivers.push(picked);
+    formDirty=true; renderDriverChips(); renderWelcome(); loadTrips({reset:true});
+    driverChoices.removeActiveItems(); driverChoices.setChoiceByValue(''); driverChoices.clearInput();
+    enableAddDriverByValue();
+  } else { showToast('Driver already added','info'); }
+};
+$('addHelper').onclick = () => {
+  const picked = getSelectedHelperId();
+  if(!$('vehicle').value) return showToast('Select a vehicle first','warning');
+  if(!picked) return showToast('Pick a helper first','warning');
+  if(!state.chosenHelpers.some(x => String(x) === String(picked))){
+    state.chosenHelpers.push(picked);
+    formDirty = true;
+    renderHelperChips();
+    helperChoices.removeActiveItems();
+    helperChoices.setChoiceByValue('');
+    helperChoices.clearInput();
+    enableAddHelperByValue();
+  } else { showToast('Helper already added','info'); }
+};
+$('addCustomer').onclick = () => {
+  const inp = $('customerInput');
+  let name = (inp.value || '').trim();
+  if (!name) return;
+
+  name = normalizeCustomerInput(name);
+
+  const exists = state.customerTags.some(
+    n => String(n).toLowerCase() === name.toLowerCase()
+  );
+  if (!exists){
+    state.customerTags.push(name);
+    formDirty = true;
+    renderCustomerChips();
+  }
+  inp.value = '';
+};
+$('helperSelect').addEventListener('change', ()=>{ formDirty=true; enableAddHelperByValue(); });
+$('note').addEventListener('input', ()=>{ formDirty=true; });
+$('clearOngoingForm').onclick = () => { currentOngoingId=null; renderOngoingBadge(); resetFormForNewTrip(); hideSticky(); };
+
+/* ===== Plant/Vehicle change ===== */
+$('plant').addEventListener('change', async ()=>{
+  const pid=$('plant').value;
+  localStorage.setItem('td_plant', pid);
+  await loadVehiclesByPlant(pid);
+  enforceVehicleRoleLock();
+  refreshHelperChoices(pid);
+  refreshDriverChoices(pid); 
+  $('vehLabel').textContent=''; $('tripRows').innerHTML=''; state.lastTrips=[]; currentOngoingId=null; renderOngoingBadge(); hideSticky();
+  renderWelcome(); resetFormForNewTrip();
+  localStorage.removeItem('td_vehicle');
+  enableAddDriverByValue();
+  await loadTrips({reset:true});
+});
+$('vehicle').addEventListener('change', async ()=> {
+  const role = String(state.me?.role || '').toLowerCase();
+
+  // Driver with ongoing trip: revert and refresh helpers to old vehicle
+  if (role === 'driver' && currentOngoingId) {
+    if (lastVehicleId && [...$('vehicle').options].some(o => o.value === String(lastVehicleId))) {
+      $('vehicle').value = String(lastVehicleId);
+      const oldOpt = $('vehicle').selectedOptions[0];
+      $('vehLabel').textContent = oldOpt && oldOpt.value ? `Vehicle: ${oldOpt.textContent}` : '';
+      localStorage.setItem('td_vehicle', String(lastVehicleId));
+    }
+    enforceVehicleRoleLock();
+    await refreshHelperChoices($('plant')?.value || '');
+    showToast('Drivers on an ongoing trip cannot change vehicle. Ask your supervisor.', 'warning', 5000);
+    return;
+  }
+
+  // Allowed path (supervisor/admin or driver without ongoing)
+  const prevOngoingId = currentOngoingId;
+  currentOngoingId = null;
+  renderOngoingBadge();
+  hideSticky?.();
+  lockVehicleForOngoing(false);
+
+  if (prevOngoingId) {
+    try {
+      const helper_ids = (state.chosenHelpers || []).map(Number);
+      const res = await apiFetch(`${API}/trips_update.php`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          trip_id: Number(prevOngoingId),
+          set_customer_names: state.customerTags || [],
+          helper_ids,
+          helper_id: helper_ids.length ? helper_ids[0] : null,
+          note: $('note').value || null,
+          set_driver_ids: state.chosenDrivers.map(Number)
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) showToast(data.error || 'Failed to update ongoing trip','danger');
+    } catch (err) {
+      showToast(`Update failed: ${err.message}`,'danger',6000);
+    }
+  }
+
+  const opt = $('vehicle').selectedOptions[0];
+  $('vehLabel').textContent = opt && opt.value ? `Vehicle: ${opt.textContent}` : '';
+  localStorage.setItem('td_vehicle', $('vehicle').value);
+
+  await refreshHelperChoices($('plant')?.value || '');
+
+  formDirty = false;
+  await loadTrips({ reset: true });
+  enableAddDriverByValue();
+
+  if (state.me?.driver_id) {
+    const vid = $('vehicle').value ? Number($('vehicle').value) : null;
+    const pid = $('plant').value ? Number($('plant').value) : null;
+    try {
+      await apiFetch(`${API}/driver_vehicle.php`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ vehicle_id: vid, plant_id: pid })
+      });
+    } catch (_){}
+  }
+
+  lastVehicleId = $('vehicle').value || '';
+  enforceVehicleRoleLock();
+});
+
+/* ===== Sticky ===== */
+$('closeSticky').onclick = hideSticky;
+$('stickyUpdate').onclick = ()=>{ if(currentOngoingId) $('startTripBtn').click(); };
+$('stickyEnd').onclick = ()=>{ if(currentOngoingId){ const r=state.lastTrips.find(t=>t.id===currentOngoingId)||{}; openEndModal(currentOngoingId, r.start_km??0); } };
+
+/* ===== KM inputs ===== */
+$('startKm').addEventListener('input', ()=>{
+  const el=$('startKm'); const pos=el.selectionStart; const before=el.value.length;
+  const s=formatIndianNumber(el.value); el.value=s; const after=s.length; const delta=after-before;
+  el.setSelectionRange(Math.max(0,pos+delta), Math.max(0,pos+delta));
+});
+function getStartKmClean(){ return parseNumber($('startKm').value); }
+
+$('endKm').addEventListener('input', ()=>{
+  const el=$('endKm'); const pos=el.selectionStart; const before=el.value.length;
+  const s=formatIndianNumber(el.value); el.value=s; const after=s.length; const delta=after-before;
+  el.setSelectionRange(Math.max(0,pos+delta), Math.max(0,pos+delta));
+});
+function getEndKmClean(){ return parseNumber($('endKm').value); }
+
+/* ===== Geo attach ===== */
+async function attachGeoWithPrompt(body){
+  if (!('geolocation' in navigator)) return;
+  try{
+    if ('permissions' in navigator && navigator.permissions.query) {
+      const status = await navigator.permissions.query({ name: 'geolocation' });
+      const getOnce = () => new Promise(resolve => {
+        navigator.geolocation.getCurrentPosition(pos => { body.gps_lat=pos.coords.latitude; body.gps_lng=pos.coords.longitude; resolve(); }, () => resolve(), { maximumAge:600000, timeout:8000 });
+      });
+      if (status.state==='granted' || status.state==='prompt') await getOnce();
+    }else{
+      await new Promise(resolve => { navigator.geolocation.getCurrentPosition(pos => { body.gps_lat=pos.coords.latitude; body.gps_lng=pos.coords.longitude; resolve(); }, () => resolve()); });
+    }
+  }catch(_){ }
+}
+function addCustomerFromInput() {
+  const inp = $('customerInput');
+  let name = (inp?.value || '').trim();
+  if (!name) return false;
+
+  name = normalizeCustomerInput(name);
+
+  const exists = state.customerTags.some(
+    n => String(n).toLowerCase() === name.toLowerCase()
+  );
+  if (!exists) {
+    state.customerTags.push(name);
+    formDirty = true;
+    renderCustomerChips();
+  }
+  inp.value = '';
+  return true;
+}
+
+/* ===== Create / Update Trip ===== */
+$('startTripBtn').onclick = async () => {
+  const pendingDriverId = getSelectedDriverId?.() || '';
+  if (pendingDriverId && !state.chosenDrivers.some(x => String(x) === String(pendingDriverId))) {
+    state.chosenDrivers.push(String(pendingDriverId));
+    renderDriverChips();
+    try {
+      driverChoices?.removeActiveItems?.();
+      driverChoices?.setChoiceByValue?.('');
+      driverChoices?.clearInput?.();
+    } catch(_) {}
+  }
+
+  (function addTypedCustomerOnce(){
+    const inp = $('customerInput');
+    if (!inp) return;
+    let name = (inp.value || '').trim();
+    name && (function(){
+      name = normalizeCustomerInput(name);
+      const exists = state.customerTags.some(n => String(n).toLowerCase() === name.toLowerCase());
+      if (!exists) { state.customerTags.push(name); renderCustomerChips(); }
+      inp.value = '';
+    })();
+  })();
+
+  const vehicle_id = $('vehicle').value;
+  if (!vehicle_id) return showToast('Select vehicle','warning');
+
+  if (currentOngoingId) {
+    try {
+      const helper_ids = (state.chosenHelpers || []).map(Number);
+      const payload = {
+        trip_id: Number(currentOngoingId),
+        set_customer_names: state.customerTags || [],
+        helper_ids,
+        helper_id: helper_ids.length ? helper_ids[0] : null,
+        note: $('note').value || null,
+        set_driver_ids: state.chosenDrivers.map(Number)
+      };
+
+      const sk = getStartKmClean();
+      if ($('startDate').value) payload.start_date_new = $('startDate').value;
+      if (sk !== '' && !isNaN(sk)) payload.start_km_new = Number(sk);
+
+      const res = await apiFetch(`${API}/trips_update.php`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+
+      if (!res.ok || !data.ok) {
+        if (data?.error && /unknown|invalid|unsupported/i.test(String(data.error))) {
+          const helper_ids_fb = (state.chosenHelpers || []).map(Number);
+          const fallback = {
+            trip_id: Number(currentOngoingId),
+            add_customer_names: state.customerTags || [],
+            helper_ids: helper_ids_fb,
+            helper_id: helper_ids_fb.length ? helper_ids_fb[0] : null,
+            note: $('note').value || null,
+            set_driver_ids: state.chosenDrivers.map(Number)
+          };
+          const r2 = await apiFetch(`${API}/trips_update.php`, {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(fallback)
+          });
+          const d2 = await r2.json();
+          if (!r2.ok || !d2.ok) return showToast(d2.error || data.error || 'Failed to update trip','danger');
+        } else {
+          return showToast(data.error || 'Failed to update trip','danger');
+        }
+      }
+
+      await loadTrips({reset:true});
+      showToast('Ongoing trip updated.','success');
+      return;
+    } catch (err) {
+      return showToast(`Update failed: ${err.message}`,'danger',6000);
+    }
+  }
+
+  const plant_id = $('plant').value;
+  const start_date = $('startDate').value;
+  const start_km_clean = getStartKmClean();
+  const note = $('note').value || null;
+
+  if (!plant_id) return showToast('Select plant','warning');
+  if (!start_date) return showToast('Select start date','warning');
+  if (start_km_clean === '' || isNaN(start_km_clean)) return showToast('Enter starting KM','warning');
+  if (state.chosenDrivers.length === 0) return showToast('At least one driver required','warning');
+  if (state.customerTags.length === 0)  return showToast('Add at least one customer','warning');
+
+  const helper_ids = (state.chosenHelpers || []).map(Number);
+
+  const body = {
+    vehicle_id: Number(vehicle_id),
+    start_date,
+    start_km: Number(start_km_clean),
+    driver_ids: state.chosenDrivers.map(Number),
+    helper_ids,
+    helper_id: helper_ids.length ? helper_ids[0] : null,
+    customer_names: state.customerTags,
+    note
+  };
+  await attachGeoWithPrompt(body);
+
+  try {
+    const res = await apiFetch(`${API}/trips_create.php`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+
+    const raw = await res.text();
+    let data = null; try { data = JSON.parse(raw); } catch (_) {}
+    if (!data) return showToast(`Create failed: ${raw?.slice(0,200) || 'No response'}`,'danger',6000);
+    if (!res.ok || !data.ok) return showToast(data.error || 'Failed to start trip','danger',6000);
+
+    currentOngoingId = data.trip_id || null;
+
+    state.customerTags = [];
+    renderCustomerChips();
+    renderWelcome();
+
+    if (currentOngoingId) {
+      await populateFormFromOngoing(currentOngoingId);
+      await renderOngoingBadge();
+      lockVehicleForOngoing(true);
+    }
+
+    await loadTrips({reset:true});
+    showToast('Trip started (Ongoing).','success');
+  } catch (err) {
+    showToast(`Create failed: ${err.message}`,'danger',6000);
+  }
+};
+
+/* ===== Trips list (pagination) ===== */
+function setStartKmFromLastEnded(rawRows){
+  if (currentOngoingId || formDirty) return;
+  const curVal = parseNumber($('startKm').value);
+  if (curVal !== '' && !isNaN(curVal) && curVal > 0) return;
+  const lastEnded = (Array.isArray(rawRows) ? rawRows : []).find(t => String(t.status) !== 'ongoing' && t.end_km != null);
+  if (lastEnded && lastEnded.end_km != null) $('startKm').value = formatIndianNumber(lastEnded.end_km);
+}
+
+/* Render a batch (append if not reset) */
+function renderTripRows(rows, append){
+  const tbody = $('tripRows');
+  if (!append) tbody.innerHTML = '';
+
+  const frag = document.createDocumentFragment();
+  for (const r of rows){
+    const tr = document.createElement('tr');
+    if (r.status === 'ongoing') tr.classList.add('table-warning');
+    tr.innerHTML = `
+      <td><div class="small text-muted">${r.start_date_fmt||''}</div>
+          <div class="small">KM: ${r.start_km!=null ? formatIndianNumber(r.start_km) : ''}</div></td>
+      <td><div class="small">${r.drivers||'-'}</div></td>
+      <td><div class="small">${
+  (r.helpers && String(r.helpers).trim()) ||
+  (Array.isArray(r.helper_ids) && r.helper_ids.length
+     ? r.helper_ids.map(getHelperName).join(', ')
+     : (r.helper || '-'))
+}</div></td>
+      <td><div class="small">${r.customers||'-'}</div></td>
+      <td>${r.status==='ongoing'
+            ? '<span class="badge bg-warning text-dark badge-flash">ONGOING</span>'
+            : '<span class="badge bg-success">Ended</span>'}</td>
+      <td><div class="small text-muted">${r.end_date_fmt||''}</div>
+          <div class="small">${r.end_km!=null ? ('KM: '+formatIndianNumber(r.end_km)) : ''}</div></td>
+      <td class="text-end fw-semibold">${r.total_km!=null ? formatIndianNumber(r.total_km) : '-'}</td>
+      <td class="text-end">
+        ${r.status==='ongoing'
+            ? `<button class="btn btn-sm btn-outline-success me-1 endTripBtn" data-id="${r.id}" data-startkm="${r.start_km}">End</button>`
+            : ''}
+        <button class="btn btn-sm btn-outline-danger delBtn" data-id="${r.id}">Delete</button>
+      </td>`;
+    frag.appendChild(tr);
+  }
+  tbody.appendChild(frag);
+
+  document.querySelectorAll('.endTripBtn').forEach(btn=>{
+    btn.onclick = () => openEndModal(btn.dataset.id, btn.dataset.startkm);
+  });
+  document.querySelectorAll('.delBtn').forEach(btn=>{
+    btn.onclick = () => deleteTrip(btn.dataset.id);
+  });
+}
+
+/* Footer with Load more */
+function renderLoadMoreFooter(show, loading){
+  const tbody = $('tripRows');
+  const old = tbody.querySelector('tr.load-more-footer');
+  if (old) old.remove();
+  if (!show) return;
+
+  const tr = document.createElement('tr');
+  tr.className = 'load-more-footer';
+  tr.innerHTML = `
+    <td colspan="8" class="text-center">
+      <button id="btnLoadMoreTrips" class="btn btn-outline-primary btn-sm" ${loading ? 'disabled' : ''}>
+        ${loading ? '<span class="spinner-border spinner-border-sm me-2"></span>Loading...' : 'Load more'}
+      </button>
+    </td>`;
+  tbody.appendChild(tr);
+
+  const btn = $('btnLoadMoreTrips');
+  if (btn && !loading) btn.onclick = () => loadTrips({reset:false});
+}
+
+/* Main loader */
+async function loadTrips(opts = {}){
+  const reset = opts.reset !== false;
+
+  const vehicle_id = $('vehicle').value;
+  const tbody = $('tripRows');
+
+  if (!vehicle_id){
+    state.lastTrips = [];
+    currentOngoingId = null;
+    tbody.innerHTML = '';
+    renderLoadMoreFooter(false, false);
+    renderOngoingBadge(); hideSticky(); renderWelcome();
+    return;
+  }
+
+  if (reset){
+    tripsPage = 0;
+    tripsHasMore = true;
+    tripsLoading = false;
+    tripsSeenIds.clear();
+    tbody.innerHTML = '';
+  }
+  if (!tripsHasMore || tripsLoading) return;
+
+  try{
+    tripsLoading = true;
+    renderLoadMoreFooter(true, true);
+
+    const offset = tripsPage * tripsPageSize;
+    const params = new URLSearchParams({
+      vehicle_id,
+      limit: String(tripsPageSize),
+      offset: String(offset),
+      cb: String(Date.now())
+    });
+
+    let rows;
+    try {
+      const data = await fetchJSON(`${API}/trips_list.php?${params.toString()}`);
+      if (Array.isArray(data)) {
+        rows = data;
+      } else if (data && Array.isArray(data.rows)) {
+        rows = data.rows;
+        if (typeof data.has_more === 'boolean') tripsHasMore = data.has_more;
+      } else {
+        rows = [];
+      }
+    } catch (err) {
+      showToast(`Trips load failed: ${err.message}`, 'danger', 6000);
+      renderLoadMoreFooter(false, false);
+      tripsLoading = false;
+      return;
+    }
+
+    const freshRows = rows.filter(r => r && r.id != null && !tripsSeenIds.has(String(r.id)));
+    freshRows.forEach(r => tripsSeenIds.add(String(r.id)));
+
+    if (freshRows.length === 0) {
+      tripsHasMore = false;
+      renderLoadMoreFooter(false, false);
+      tripsLoading = false;
+      return;
+    }
+
+// Show all trips for the selected vehicle (no driver filter).
+let rowsToRender = freshRows;
+// If you later add an explicit “filter by driver” toggle,
+// gate the filter behind that flag instead of silently applying it here.
+
+    if (reset) state.lastTrips = [];
+    state.lastTrips = state.lastTrips.concat(rowsToRender);
+
+    if (reset){
+      setStartKmFromLastEnded(rowsToRender);
+    }
+
+    renderTripRows(rowsToRender, !reset);
+
+    if (typeof tripsHasMore !== 'boolean' || rowsToRender.length < tripsPageSize) {
+      tripsHasMore = rowsToRender.length === tripsPageSize;
+    }
+
+    tripsPage += 1;
+    renderLoadMoreFooter(tripsHasMore, false);
+
+    const ongo = state.lastTrips.find(r => r.status === 'ongoing');
+    currentOngoingId = ongo ? ongo.id : null;
+    await renderOngoingBadge();
+    lockVehicleForOngoing(!!currentOngoingId);
+    enforceVehicleRoleLock();
+    if (currentOngoingId && !formDirty) {
+      await populateFormFromOngoing(currentOngoingId);
+    } else if (!currentOngoingId && !formDirty && reset) {
+      const prevKm = $('startKm').value;
+      resetFormForNewTrip();
+      if (!parseNumber(prevKm)) setStartKmFromLastEnded(state.lastTrips);
+      else $('startKm').value = prevKm;
+    }
+
+    renderWelcome();
+  } finally {
+    tripsLoading = false;
+  }
+}
+
+/* ===== End Trip ===== */
+function openEndModal(tripId, startKm){
+  $('endTripId').value = tripId;
+  $('endDate').value = todayLocal();
+  $('endKm').value = '';
+  $('computedRun').textContent = `Start KM: ${formatIndianNumber(startKm)}`;
+
+  const modal = new bootstrap.Modal($('endTripModal'));
+  modal.show();
+
+  const updateRun = () => {
+    const ek = getEndKmClean();
+    const sk = Number(String(startKm).replace(/[^0-9]/g, ''));
+
+    if (ek === '' || isNaN(ek)) {
+      $('computedRun').textContent = `Start KM: ${formatIndianNumber(sk)}`;
+      return;
+    }
+
+    const run = ek - sk;
+    if (run > 0) {
+      $('computedRun').textContent = 
+        `Start KM: ${formatIndianNumber(sk)} → End KM: ${formatIndianNumber(ek)} → Total: ${formatIndianNumber(run)} KM`;
+    } else if (run === 0) {
+      $('computedRun').innerHTML = 
+        `<span class="text-danger">End KM must be greater than Start KM (${formatIndianNumber(sk)}) — duplicates not allowed.</span>`;
+    } else {
+      $('computedRun').innerHTML = 
+        `<span class="text-danger">End KM must be greater than Start KM (${formatIndianNumber(sk)})</span>`;
+    }
+  };
+
+  $('endKm').oninput = updateRun;
+  updateRun();
+}
+function normDateYYYYMMDD(s){
+  if(!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return s;
+}
+$('saveEndTrip').onclick = () => {
+  const id = Number($('endTripId').value || 0);
+  let end_date = $('endDate').value || '';
+  end_date = normDateYYYYMMDD(end_date);
+  const end_km = getEndKmClean();
+
+  if (!end_date) { showToast('Enter end date','warning'); return; }
+  if (end_km === '' || isNaN(end_km)) { showToast('Enter end KM','warning'); return; }
+
+  const r = state.lastTrips.find(t => String(t.id) === String(id));
+  const start_km = Number((r?.start_km ?? '').toString().replace(/[^0-9]/g,''));
+  if (!isNaN(start_km) && end_km < start_km) {
+    showToast(`End KM (${formatIndianNumber(end_km)}) must be ≥ Start KM (${formatIndianNumber(start_km)})`, 'danger', 5000);
+    return;
+  }
+
+  const body = 'trip_id='  + encodeURIComponent(String(id)) +
+               '&end_date='+ encodeURIComponent(end_date) +
+               '&end_km='  + encodeURIComponent(String(end_km));
+  const url = `${API.replace(/\/+$/,'')}/trips_end.php?cb=${Date.now()}`;
+
+  try {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url, true);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+
+    xhr.onreadystatechange = async function(){
+      if (xhr.readyState !== 4) return;
+
+      let data = null; try { data = JSON.parse(xhr.responseText); } catch(_) {}
+
+      if (xhr.status >= 200 && xhr.status < 300 && data && data.ok === true){
+        const instance = bootstrap.Modal.getInstance($('endTripModal')); instance?.hide();
+
+        currentOngoingId = null;
+        formDirty = false;
+        resetFormForNewTrip();
+        renderOngoingBadge();
+        hideSticky?.();
+        lockVehicleForOngoing(false);
+
+        await loadTrips({reset:true});
+        showToast('Trip ended.','success');
+        return;
+      }
+
+      const msg = (data && (data.error || data.message)) ||
+                  (xhr.responseText || '').slice(0,200) ||
+                  `HTTP ${xhr.status}`;
+      showToast(`Failed to end trip: ${msg}`, 'danger', 6500);
+    };
+
+    xhr.onerror = function(){
+      showToast(`Network/JS error while ending trip.`, 'danger', 6500);
+    };
+
+    xhr.send(body);
+  } catch (err){
+    showToast(`Network/JS error while ending trip: ${err?.message || err}`, 'danger', 6500);
+  }
+};
+
+/* ===== Delete Trip ===== */
+async function deleteTrip(id){
+  if(!confirm('Delete this trip?')) return;
+  try{
+    const res=await apiFetch(`${API}/trips_delete.php?cb=${Date.now()}`,{ method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ trip_id:Number(id) }) });
+    const data=await res.json(); if(!res.ok||!data.ok) return showToast(data.error||'Failed to delete trip','danger');
+    await loadTrips({reset:true}); showToast('Trip deleted.','success');
+  }catch(err){ showToast(`Delete failed: ${err.message}`,'danger',6000); }
+}
+
+/* ===== Ongoing/New Form ===== */
+async function populateFormFromOngoing(tripId){
+  try{
+    const res = await apiFetch(`${API}/trip_details.php?trip_id=${encodeURIComponent(tripId)}&cb=${Date.now()}`);
+    const d   = await res.json();
+    if (!res.ok || !d || !d.ok) return;
+
+    // Ensure the helper-name cache exists (if you added it globally)
+    if (typeof helperNameById === 'undefined') { window.helperNameById = new Map(); }
+    if (typeof lastHelperOptions === 'undefined') { window.lastHelperOptions = []; }
+
+    // 1) DRIVERS
+    if (!formDirty){
+      state.chosenDrivers = (d.driver_ids || []).map(String);
+      renderDriverChips?.();
+    }
+
+    // 2) HELPERS (ids + name cache)
+    if (!formDirty){
+      // Collect helper IDs from API (modern: helper_ids[], legacy: helper_id)
+      const ids = Array.isArray(d.helper_ids) ? d.helper_ids.map(String)
+                : (d.helper_id ? [String(d.helper_id)] : []);
+      state.chosenHelpers = ids;
+
+      // Seed/merge names into cache if API provided them
+      // Accept either: d.helpers_names: [{id, name}, ...]  OR  d.helpers: [{id, name}, ...]
+      const helpersArray = Array.isArray(d.helpers_names) ? d.helpers_names
+                        : (Array.isArray(d.helpers) ? d.helpers : []);
+      if (helpersArray && helpersArray.length){
+        for (const h of helpersArray){
+          if (h && h.id != null && h.name){
+            helperNameById.set(String(h.id), String(h.name));
+          }
+        }
+      }
+
+      // Render chips with names (will use cache/meta/last list)
+      renderHelperChips?.();
+
+      // Reset/select UI state for the dropdown
+      try {
+        helperChoices?.removeActiveItems?.();
+        helperChoices?.setChoiceByValue?.('');
+        helperChoices?.clearInput?.();
+      } catch(_) {}
+      enableAddHelperByValue?.();
+    }
+
+    // 3) CUSTOMERS
+    if (!formDirty){
+      state.customerTags = d.customers || [];
+      renderCustomerChips?.();
+    }
+
+    // 4) DATES / KM / NOTE
+    $('startDate').value   = d.start_date || todayLocal();
+    $('startKm').value     = d.start_km != null ? formatIndianNumber(d.start_km) : '';
+    $('startDate').readOnly = false;
+    $('startKm').readOnly   = false;
+
+    if (!formDirty) $('note').value = d.note || '';
+
+    // 5) Button appearance
+    const btn = $('startTripBtn');
+    btn.textContent = 'Update Ongoing Trip';
+    btn.classList.remove('btn-light','border');
+    btn.classList.add('btn-warning','text-dark');
+
+    // Make sure add buttons reflect current selection state
+    enableAddDriverByValue?.();
+    enableAddHelperByValue?.();
+
+  } catch(_){}
+}
+function resetFormForNewTrip(){
+  state.customerTags=[]; renderCustomerChips();
+  state.chosenHelpers=[]; renderHelperChips();
+  helperChoices?.removeActiveItems(); helperChoices?.setChoiceByValue(''); helperChoices?.clearInput();
+  $('startDate').value=todayLocal(); $('startKm').value='';
+  $('startDate').readOnly=false; $('startKm').readOnly=false; $('note').value='';
+  const btn=$('startTripBtn'); btn.textContent='Start Trip (Ongoing)'; btn.classList.remove('btn-warning','text-dark'); btn.classList.add('btn-light','border');
+  formDirty=false;
+  lockVehicleForOngoing(false);
+}
+
+/* ===== AUTH ===== */
+async function fetchMe(hard = false){
+  const url = `${API}/me.php?cb=${Date.now()}`;
+  const res = await fetch(url, {
+    method: 'GET',
+    credentials: 'include',
+    cache: hard ? 'reload' : 'no-store',
+    headers: {
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    }
+  });
+  if (res.status === 401) return null;
+  const txt = await res.text();
+  let data = null; try { data = JSON.parse(txt); } catch(_){}
+  if (!data || data.ok === false) return null;
+  return data.user || null;
+}
+function promptLogin(){ bootstrap.Modal.getOrCreateInstance($('loginModal')).show(); }
+
+document.getElementById('btnLogout').onclick = async (e) => {
+  e?.preventDefault?.();
+
+  try {
+    await fetch('/TripDetails/api/logout.php?cb=' + Date.now(), {
+      method: 'POST',
+      credentials: 'include',
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json' }
+    });
+  } catch {}
+
+  try { resetUIForNewUser?.(); } catch {}
+  try { localStorage.setItem('td_logout_ts', String(Date.now())); } catch {}
+  try {
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+    }
+  } catch {}
+  try {
+    const reg = await navigator.serviceWorker.getRegistration('/TripDetails/');
+    await reg?.update();
+  } catch {}
+
+  const modal = bootstrap.Modal.getOrCreateInstance($('loginModal'));
+  modal.show();
+  requireLoginThenBoot();
+};
+$('btnLogout')?.classList.add('d-none');
+function resetUIForNewUser(){
+  $('btnLogout')?.classList.add('d-none');
+  state.chosenDrivers = [];
+  state.chosenHelpers = [];
+  state.customerTags  = [];
+  state.lastTrips     = [];
+  currentOngoingId    = null;
+  formDirty           = false;
+
+  document.getElementById('driverChips').innerHTML   = '';
+  document.getElementById('helperChips').innerHTML   = '';
+  document.getElementById('customerChips').innerHTML = '';
+  document.getElementById('tripRows').innerHTML      = '';
+  document.getElementById('ongoingText').textContent = '';
+  document.getElementById('ongoingInfo').classList.add('d-none');
+  document.getElementById('mobileSticky').classList.add('d-none');
+
+  document.getElementById('vehLabel').textContent = '';
+  document.getElementById('startDate').value = todayLocal();
+  document.getElementById('startKm').value   = '';
+  document.getElementById('note').value      = '';
+
+  document.getElementById('startTripBtn').disabled = true;
+
+  document.getElementById('plant').value   = '';
+  document.getElementById('plant').disabled  = true;
+  document.getElementById('vehicle').innerHTML = '<option value="">Select Plant First</option>';
+  document.getElementById('vehicle').disabled   = true;
+
+  try { driverChoices?.removeActiveItems?.(); driverChoices?.clearChoices?.(); } catch(_){}
+  try { helperChoices?.removeActiveItems?.(); helperChoices?.clearChoices?.(); } catch(_){}
+
+  try { localStorage.removeItem('td_plant'); localStorage.removeItem('td_vehicle'); } catch(_){}
+}
+async function afterLoginSetup(){
+  $('btnLogout')?.classList.remove('d-none');
+  currentOngoingId = null;
+  formDirty = false;
+
+  state.plants = [];
+  state.vehicles = [];
+  state.drivers = [];
+  state.helpers = [];
+  state.customers = [];
+  state.chosenDrivers = [];
+  state.chosenHelpers = [];
+  state.customerTags = [];
+  state.lastTrips = [];
+
+  $('driverChips').innerHTML   = '';
+  $('helperChips').innerHTML   = '';
+  $('customerChips').innerHTML = '';
+  $('tripRows').innerHTML      = '';
+  $('ongoingText').textContent = '';
+  $('ongoingInfo').classList.add('d-none');
+  $('mobileSticky').classList.add('d-none');
+  $('vehLabel').textContent = '';
+
+  $('plant').innerHTML   = '<option value="">Select Plant</option>';
+  $('vehicle').innerHTML = '<option value="">Select Plant First</option>';
+  $('helperSelect').innerHTML  = '';
+
+  try { driverChoices?.destroy?.(); } catch(_){}
+  try { helperChoices?.destroy?.(); } catch(_){}
+  driverChoices = null;
+  helperChoices = null;
+
+  $('startDate').value = todayLocal();
+  $('startKm').value   = '';
+  $('note').value      = '';
+  lockVehicleForOngoing(false);
+
+  try { await loadMeta(); await loadPlants(); } catch(_){}
+  $('driverSelect').disabled = false;
+  driverChoices?.enable?.();
+  $('addDriver').disabled = false;
+  enableAddDriverByValue?.();
+
+  if (state.me?.driver_id) {
+    const drvId = String(state.me.driver_id);
+    state.chosenDrivers = [drvId];
+    renderDriverChips();
+  }
+  $('driverSelect').disabled = false;
+  $('addDriver').disabled    = false;
+  enableAddDriverByValue?.();
+
+  const me = state.me || {};
+  const role = String(me.role || '').toLowerCase();
+  const plantNote = $('plantNote');
+  let selectedPlantId = null;
+
+  if (role === 'driver' && me.plant_id) {
+    const pid = String(me.plant_id);
+    if ([...$('plant').options].some(o => o.value === pid)) {
+      $('plant').value = pid;
+      $('plant').disabled = true;
+      plantNote.classList.add('d-none');
+      selectedPlantId = pid;
+    } else {
+      $('plant').value = '';
+      $('plant').disabled = true;
+      plantNote.classList.remove('d-none');
+    }
+  } else if (role === 'supervisor') {
+    $('plant').disabled = false;
+    plantNote.classList.add('d-none');
+
+    const supervised = Array.isArray(me.supervised_plants) ? me.supervised_plants : [];
+
+    if (supervised.length === 1) {
+      const pid = String(supervised[0].id);
+      if ([...$('plant').options].some(o => o.value === pid)) {
+        $('plant').value = pid;
+        selectedPlantId = pid;
+      }
+    } else {
+      const savedPid = localStorage.getItem('td_plant');
+      if (savedPid && supervised.some(p => String(p.id) === String(savedPid)) &&
+          [...$('plant').options].some(o => o.value === savedPid)) {
+        $('plant').value = savedPid;
+        selectedPlantId = savedPid;
+      }
+    }
+  } else {
+    $('plant').disabled = false;
+    plantNote.classList.add('d-none');
+
+    const plantOpts = [...$('plant').options].filter(o => o.value);
+    if (plantOpts.length === 1) {
+      $('plant').value = plantOpts[0].value;
+      selectedPlantId = plantOpts[0].value;
+    } else {
+      const savedPid = localStorage.getItem('td_plant');
+      if (savedPid && [...$('plant').options].some(o => o.value === savedPid)) {
+        $('plant').value = savedPid;
+        selectedPlantId = savedPid;
+      }
+    }
+  }
+
+  if (selectedPlantId) {
+    try { await loadVehiclesByPlant(selectedPlantId); } catch(_){}
+    await refreshHelperChoices(selectedPlantId);
+    refreshDriverChoices(selectedPlantId);
+    $('vehicle').disabled = false;
+  } else {
+    $('vehicle').innerHTML = '<option value="">Select Plant First</option>';
+    $('vehicle').disabled  = true;
+    await refreshHelperChoices(null);
+    refreshDriverChoices(null);
+  }
+
+  let pickedVehicleId = null;
+  try {
+    const j = await fetchJSON(`${API}/driver_vehicle.php?cb=${Date.now()}`);
+    if (j?.vehicle_id) {
+      const vid = String(j.vehicle_id);
+      if ([...$('vehicle').options].some(o => o.value === vid)) {
+        $('vehicle').value = vid; pickedVehicleId = vid;
+      }
+    }
+  } catch(_){}
+
+  if (!pickedVehicleId) {
+    const savedVid = localStorage.getItem('td_vehicle');
+    if (savedVid && [...$('vehicle').options].some(o => o.value === savedVid)) {
+      $('vehicle').value = savedVid; pickedVehicleId = savedVid;
+    }
+  }
+
+  if (!pickedVehicleId) {
+    const vopts = [...$('vehicle').options].filter(o => o.value);
+    if (vopts.length === 1) { $('vehicle').value = vopts[0].value; pickedVehicleId = vopts[0].value; }
+  }
+
+  if (pickedVehicleId) {
+    const opt = $('vehicle').selectedOptions[0];
+    $('vehLabel').textContent = opt && opt.value ? `Vehicle: ${opt.textContent}` : '';
+    $('vehicle').disabled = false;
+  } else {
+    $('vehLabel').textContent = '';
+    if (selectedPlantId && (role === 'supervisor' || role === 'admin' || role === 'other')) {
+      $('vehicle').disabled = false;
+    } else {
+      $('vehicle').disabled = !Boolean(selectedPlantId);
+    }
+  }
+
+  $('startTripBtn').disabled = false;
+  $('startDate').value = todayLocal();
+
+  await loadTrips({reset:true});
+  renderWelcome();
+  enforceVehicleRoleLock();
+  lastVehicleId = $('vehicle').value || '';
+}
+function bindLoginHandlers(loginFn){
+  const btn  = $('loginBtn');
+  const user = $('loginUsername');
+  const pwd  = $('loginPassword');
+
+  btn.onclick = null;
+  btn.addEventListener('click', loginFn);
+
+  const submitOnEnter = (e) => { if (e.key === 'Enter') { e.preventDefault(); btn.click(); } };
+  user.onkeydown = submitOnEnter;
+  pwd.onkeydown  = submitOnEnter;
+}
+async function requireLoginThenBoot(){
+  state.me = await fetchMe(true);
+
+  if (!state.me){
+    const modal = bootstrap.Modal.getOrCreateInstance($('loginModal'));
+    modal.show();
+
+    const onLogin = async () => {
+      const username = $('loginUsername').value.trim();
+      const password = $('loginPassword').value;
+      if (!username || !password) { showToast('Enter username and password', 'warning'); return; }
+
+      const body = new URLSearchParams({ username, password }).toString();
+      const url  = `${API}/auth_login.php?cb=${Date.now()}`;
+
+      try {
+        const res = await fetch(url, {
+          method: 'POST',
+          credentials: 'include',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'application/json',
+            'Cache-Control': 'no-cache'
+          },
+          body
+        });
+
+        if (!res.ok) {
+          let msg = `Login failed (HTTP ${res.status})`;
+          try { msg = (await res.json())?.error || msg; } catch(_){}
+          showToast(msg, 'danger', 6500);
+          return;
+        }
+
+        await res.text();
+        await new Promise(r => setTimeout(r, 50));
+        await clearAppCaches();
+        state.me = await fetchMe(true);
+
+        if (!state.me){
+          showToast('Login ok, but session not detected. Check cookie domain/SameSite.', 'danger', 7000);
+          return;
+        }
+
+        resetUIForNewUser?.();
+        modal.hide();
+        await afterLoginSetup();
+      } catch(err){
+        showToast(`Login error: ${err?.message || err}`, 'danger', 7000);
+      }
+    };
+
+    bindLoginHandlers(onLogin);
+    return;
+  }
+
+  resetUIForNewUser?.();
+  await afterLoginSetup();
+}
+async function clearAppCaches(){
+  try {
+    if (!('caches' in window)) return;
+    const keys = await caches.keys();
+    await Promise.all(
+      keys.map(k => (k.startsWith('static-') ? caches.delete(k) : Promise.resolve()))
+    );
+  } catch (_) {}
+}
+
+/* ===== Name formatting helpers ===== */
+function toTitleCaseWithSpaces(str){
+  return String(str || '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b([a-z])/g, (m, c) => c.toUpperCase());
+}
+function toPascalCase(str){
+  return String(str || '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+}
+function toLowerCamelCase(str){
+  const words = String(str || '')
+    .toLowerCase()
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return '';
+  return words[0] + words.slice(1)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+}
+const USE_CAMEL = true;
+const LOWER_CAMEL = false;
+function normalizeCustomerInput(raw){
+  const s = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!USE_CAMEL) return toTitleCaseWithSpaces(s);
+  return LOWER_CAMEL ? toLowerCamelCase(s) : toPascalCase(s);
+}
+function attachLiveTitleCaseToInput(inputId){
+  const el = document.getElementById(inputId);
+  if (!el) return;
+
+  let composing = false;
+  let lastValue = el.value;
+
+  function onInput(){
+    if (composing) return;
+    const v = el.value;
+    const collapsed = v.replace(/\s+/g, ' ');
+    if (collapsed !== v){
+      const { selectionStart } = el;
+      el.value = collapsed;
+      try { el.setSelectionRange(selectionStart - (v.length - collapsed.length), selectionStart - (v.length - collapsed.length)); } catch {}
+    }
+    lastValue = el.value;
+  }
+
+  function toTitleNow(){
+    if (composing) return;
+    const before = el.value;
+    const titled = toTitleCaseWithSpaces(before);
+    if (titled !== before){
+      const atEnd = el.selectionStart === before.length && el.selectionEnd === before.length;
+      el.value = titled;
+      try {
+        if (atEnd) el.setSelectionRange(titled.length, titled.length);
+      } catch {}
+      lastValue = titled;
+    }
+  }
+
+  el.addEventListener('compositionstart', () => { composing = true; });
+  el.addEventListener('compositionend',   () => { composing = false; toTitleNow(); });
+
+  el.addEventListener('input', onInput);
+  el.addEventListener('blur',  toTitleNow);
+}
+function toCamelCase(str){
+  return String(str || '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join('');
+}
+function attachLiveCustomerFormatter(inputId){
+  const el = document.getElementById(inputId);
+  if (!el) return;
+
+  let composing = false;
+
+  function titleCaseLive() {
+    if (composing) return;
+
+    const before = el.value;
+    const caret  = el.selectionStart ?? before.length;
+
+    const collapsed = before.replace(/\s+/g, ' ');
+
+    const parts = collapsed.split(' ');
+    const after = parts
+      .map(w => w ? (w[0].toUpperCase() + w.slice(1).toLowerCase()) : '')
+      .join(' ');
+
+    if (after !== before) {
+      const delta  = before.length - after.length;
+      const newPos = Math.max(0, caret - delta);
+      el.value = after;
+      try { el.setSelectionRange(newPos, newPos); } catch {}
+    }
+  }
+
+  function onBlur(){
+    if (composing) return;
+    el.value = toTitleCaseWithSpaces(el.value);
+  }
+
+  el.addEventListener('compositionstart', () => { composing = true; });
+  el.addEventListener('compositionend',   () => { composing = false; titleCaseLive(); });
+  el.addEventListener('input', titleCaseLive);
+  el.addEventListener('blur', onBlur);
+}
+
+/* ===== INIT ===== */
+document.addEventListener('DOMContentLoaded', async ()=>{
+  $('btnLogout')?.classList.add('d-none');
+
+  $('startDate').value = todayLocal();
+  requireLoginThenBoot();
+
+  idle(() => {
+    (function(){
+      const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      const inStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+      const iosBanner = $('iosA2HS'); 
+      const dismissBtn = $('iosA2HSDismiss'); 
+      const KEY = 'td_ios_a2hs_dismissed';
+      const dismissed = ()=>{ try{ return localStorage.getItem(KEY)==='1'; }catch(_){ return false; } };
+      const setDismissed = ()=>{ try{ localStorage.setItem(KEY,'1'); }catch(_){ } };
+      if(isiOS && !inStandalone && !dismissed()) iosBanner.classList.add('show');
+      dismissBtn?.addEventListener('click', ()=>{ setDismissed(); iosBanner.classList.remove('show'); });
+    })();
+
+    attachLiveCustomerFormatter('customerInput');
+  });
+
+  const custInput = $('customerInput');
+  custInput?.addEventListener('change', () => { addCustomerFromInput(); });
+  custInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addCustomerFromInput();
+    }
+  });
+});
+
+/* PWA install code */
+(function(){
+  let deferredPrompt=null;
+  const btn=$('btnInstallApp');
+  const isiOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+  if(isStandalone||isiOS){ btn?.classList.add('d-none'); }
+  window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e; btn?.classList.remove('d-none'); });
+  btn?.addEventListener('click', async ()=>{ if(!deferredPrompt) return; btn.disabled=true; try{ deferredPrompt.prompt(); await deferredPrompt.userChoice; }catch(_){ } deferredPrompt=null; btn.disabled=false; btn.classList.add('d-none'); });
+  window.addEventListener('appinstalled',()=>{ btn?.classList.add('d-none'); });
+})();
+(function(){
+  let deferredPrompt=null;
+  const banner=$('installBanner'), btnGo=$('installNow'), btnBye=$('installDismiss');
+  const KEY='td_install_dismissed_ts', COOLDOWN=7;
+  const isStandalone=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+  const withinCooldown=()=>{ try{ const ts=Number(localStorage.getItem(KEY)||0); if(!ts) return false; return (Date.now()-ts)/(86400000)<COOLDOWN; }catch(_){ return false; } };
+  function place(){ const nav=document.querySelector('.navbar.fixed-top'); if(!nav) return; banner.style.top=(nav.offsetHeight||56)+'px'; }
+  function show(){ if(!banner) return; place(); banner.classList.remove('d-none'); requestAnimationFrame(()=>banner.classList.add('show')); }
+  function hide(){ banner.classList.remove('show'); setTimeout(()=>banner.classList.add('d-none'),250); }
+  window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e; if(isStandalone()||withinCooldown()) return; show(); });
+  btnGo?.addEventListener('click', async ()=>{ if(!deferredPrompt) return; try{ const p=deferredPrompt; deferredPrompt=null; await p.prompt(); const c=await p.userChoice; if(c.outcome==='accepted') hide(); }catch(_){ } });
+  btnBye?.addEventListener('click', ()=>{ try{ localStorage.setItem(KEY,String(Date.now())); }catch(_){ } hide(); });
+  window.addEventListener('appinstalled',()=>{ hide(); deferredPrompt=null; });
+  window.addEventListener('resize', place);
+  if(isStandalone()) hide();
+})();
+
+/* Service Worker: register your existing /TripDetails/sw.js with explicit scope */
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/TripDetails/sw.js", { scope: "/TripDetails/" })
+      .catch(console.error);
+  });
+}
+
+(function () {
+  const pwd = document.getElementById('loginPassword');
+  const btn = document.getElementById('togglePwdBtn');
+  const icon = document.getElementById('togglePwdIcon');
+  const chk = document.getElementById('showPwdChk');
+
+  if (!pwd || !btn || !icon) return;
+
+  function setShown(shown) {
+    pwd.type = shown ? 'text' : 'password';
+    btn.setAttribute('aria-pressed', shown ? 'true' : 'false');
+    btn.setAttribute('aria-label', shown ? 'Hide password' : 'Show password');
+    icon.textContent = shown ? '🙈' : '👁️';
+    if (chk) chk.checked = shown;
+  }
+
+  btn.addEventListener('click', () => {
+    setShown(pwd.type === 'password');
+    pwd.focus({ preventScroll: true });
+  });
+
+  if (chk) {
+    chk.addEventListener('change', () => setShown(chk.checked));
+  }
+})();
+</script>
+</body>
+</html>
