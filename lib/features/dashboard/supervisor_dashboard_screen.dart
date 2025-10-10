@@ -448,18 +448,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   ],
                 ),
                 const SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    'https://sstranswaysindia.com/api/mobile/image/IMG_8026.gif',
-                    height: 160,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.shrink(),
-                  ),
-                ),
-                const SizedBox(height: 16),
                 GlowingAttendanceButton(
                   animation: _glowAnimation,
                   onTap: () => Navigator.of(context)

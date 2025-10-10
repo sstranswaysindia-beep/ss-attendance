@@ -104,6 +104,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               AppAssets.logo,
                               height: 60,
                               fit: BoxFit.contain,
+                              colorBlendMode: BlendMode.dstIn,
                               errorBuilder: (_, __, ___) => Icon(
                                 Icons.verified_user,
                                 size: 40,
@@ -121,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ?.copyWith(
                                         fontWeight: FontWeight.w700,
                                         color: const Color(0xFF000C66),
-                                        fontSize: 32,
+                                        fontSize: 30,
                                       ),
                                 ),
                                 const SizedBox(height: 2),

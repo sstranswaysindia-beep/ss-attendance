@@ -663,18 +663,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   ),
                 ],
                 const SizedBox(height: 16),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: Image.network(
-                    'https://sstranswaysindia.com/api/mobile/image/IMG_8026.gif',
-                    height: 160,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) =>
-                        const SizedBox.shrink(),
-                  ),
-                ),
-                const SizedBox(height: 16),
                 Text(
                   'Quick Links',
                   style: Theme.of(context).textTheme.titleMedium,
