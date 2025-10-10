@@ -107,9 +107,18 @@ class _LoginScreenState extends State<LoginScreen> {
                             color: theme.colorScheme.primary,
                           ),
                         ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'SS Transways India',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: theme.colorScheme.primary,
+                          ),
+                        ),
                         const SizedBox(height: 16),
                         Text(
-                          'Attendance Login',
+                          'Login',
                           textAlign: TextAlign.center,
                           style: theme.textTheme.titleLarge,
                         ),
