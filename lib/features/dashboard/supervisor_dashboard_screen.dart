@@ -557,18 +557,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       ),
                       const Divider(height: 0),
                       HoverListTile(
-                        leading: const Icon(Icons.local_shipping),
-                        title: const Text('Trips'),
-                        onTap: () => Navigator.of(context)
-                            .push(
-                              MaterialPageRoute(
-                                builder: (_) => TripScreen(user: widget.user),
-                              ),
-                            )
-                            .then((_) => _loadNotifications()),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
                         leading: const Icon(Icons.edit_calendar),
                         title: const Text('Past Attendance Request'),
                         onTap: () => Navigator.of(context)
@@ -577,6 +565,18 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                 builder: (_) => AttendanceAdjustRequestScreen(
                                   user: widget.user,
                                 ),
+                              ),
+                            )
+                            .then((_) => _loadNotifications()),
+                      ),
+                      const Divider(height: 0),
+                      HoverListTile(
+                        leading: const Icon(Icons.local_shipping),
+                        title: const Text('Trips'),
+                        onTap: () => Navigator.of(context)
+                            .push(
+                              MaterialPageRoute(
+                                builder: (_) => TripScreen(user: widget.user),
                               ),
                             )
                             .then((_) => _loadNotifications()),
