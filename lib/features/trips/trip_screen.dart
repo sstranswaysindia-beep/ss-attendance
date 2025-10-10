@@ -872,29 +872,43 @@ class _TripScreenState extends State<TripScreen> {
 
       // Try to get assigned vehicle for driver
       TripVehicle? initialVehicle;
-      try {
-        final assignedVehicleId = await _repository.getAssignedVehicleId(
-          user: widget.user,
-          plantId: plantId,
-        );
-
-        print('Assigned vehicle ID from API: $assignedVehicleId');
-        print('User assignmentVehicleId: ${widget.user.assignmentVehicleId}');
-
-        if (assignedVehicleId != null) {
-          // Find the assigned vehicle in the list
-          for (final vehicle in vehicles) {
-            if (vehicle.id == assignedVehicleId) {
-              initialVehicle = vehicle;
-              print('Found assigned vehicle: ${vehicle.number} (ID: ${vehicle.id})');
-              break;
-            }
+      
+      // First try to use user's assignmentVehicleId directly
+      final userAssignedVehicleId = int.tryParse(widget.user.assignmentVehicleId ?? '');
+      if (userAssignedVehicleId != null) {
+        print('Using user assignmentVehicleId: $userAssignedVehicleId');
+        for (final vehicle in vehicles) {
+          if (vehicle.id == userAssignedVehicleId) {
+            initialVehicle = vehicle;
+            print('Found assigned vehicle from user data: ${vehicle.number} (ID: ${vehicle.id})');
+            break;
           }
         }
-      } catch (e) {
-        print('Error getting assigned vehicle: $e');
-        // Fallback to first vehicle if API fails
-        initialVehicle = vehicles.isNotEmpty ? vehicles.first : null;
+      }
+      
+      // If not found in user data, try API
+      if (initialVehicle == null) {
+        try {
+          final assignedVehicleId = await _repository.getAssignedVehicleId(
+            user: widget.user,
+            plantId: plantId,
+          );
+
+          print('Assigned vehicle ID from API: $assignedVehicleId');
+
+          if (assignedVehicleId != null) {
+            // Find the assigned vehicle in the list
+            for (final vehicle in vehicles) {
+              if (vehicle.id == assignedVehicleId) {
+                initialVehicle = vehicle;
+                print('Found assigned vehicle from API: ${vehicle.number} (ID: ${vehicle.id})');
+                break;
+              }
+            }
+          }
+        } catch (e) {
+          print('Error getting assigned vehicle from API: $e');
+        }
       }
 
       // If no assigned vehicle found, use the first available vehicle
