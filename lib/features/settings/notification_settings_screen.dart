@@ -35,23 +35,37 @@ class _NotificationSettingsScreenState
     setState(() => _isLoading = true);
 
     try {
-      // Initialize notification service
-      await _notificationService.initialize();
-
-      // Request permissions (skipped on web)
-      final hasPermission = await _notificationService.requestPermissions();
-
-      if (!hasPermission && mounted && !kIsWeb) {
-        showAppToast(
-          context,
-          'Notification permissions are required for this feature',
-          isError: true,
-        );
+      // Initialize notification service (don't throw on failure)
+      try {
+        await _notificationService.initialize();
+      } catch (e) {
+        print('Notification service initialization failed: $e');
+        // Continue anyway - user can still test notifications
       }
 
-      // Schedule daily reminders if enabled
+      // Request permissions (skipped on web)
+      try {
+        final hasPermission = await _notificationService.requestPermissions();
+        if (!hasPermission && mounted && !kIsWeb) {
+          showAppToast(
+            context,
+            'Notification permissions are required for this feature',
+            isError: true,
+          );
+        }
+      } catch (e) {
+        print('Permission request failed: $e');
+        // Continue anyway
+      }
+
+      // Schedule daily reminders if enabled (don't throw on failure)
       if (_checkInReminders || _checkOutReminders) {
-        await _notificationService.scheduleDailyReminders();
+        try {
+          await _notificationService.scheduleDailyReminders();
+        } catch (e) {
+          print('Schedule reminders failed: $e');
+          // Continue anyway
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -60,7 +74,7 @@ class _NotificationSettingsScreenState
         if (!kIsWeb) {
           showAppToast(
             context,
-            'Failed to load notification settings: ${e.toString()}',
+            'Some notification features may not work properly',
             isError: true,
           );
         }

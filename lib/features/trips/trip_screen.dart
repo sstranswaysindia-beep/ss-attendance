@@ -928,7 +928,7 @@ class _TripScreenState extends State<TripScreen> {
       if (initialVehicle == null && vehicles.isNotEmpty) {
         initialVehicle = vehicles.first;
         if (widget.user.role == UserRole.supervisor) {
-          print('Supervisor: Auto-selecting first available vehicle: ${initialVehicle.number}');
+          print('Supervisor: Auto-selecting first available vehicle: ${initialVehicle.number} (ID: ${initialVehicle.id})');
         } else {
           print('No assigned vehicle found, using first available: ${initialVehicle.number}');
         }

@@ -768,10 +768,15 @@ class TripRepository {
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
   /// Fetches the assigned vehicle for a driver from the driver_vehicle.php API
+  /// For supervisors, returns null to indicate they should use first available vehicle
   Future<int?> getAssignedVehicleId({
     required AppUser user,
     required String plantId,
   }) async {
+    // Supervisors don't have assigned vehicles - they can use any vehicle
+    if (user.role == UserRole.supervisor) {
+      return null;
+    }
     try {
       final uri = Uri.parse('${_mobileBase}driver_vehicle.php');
       final response = await _client.post(
