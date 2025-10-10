@@ -357,6 +357,7 @@ class _TripScreenState extends State<TripScreen> {
 
       // Call the update API
       await _repository.updateTrip(
+        user: widget.user,
         tripId: _ongoingTrip!.id,
         setDriverIds: driverIds,
         helperId: helperIds.isNotEmpty ? helperIds.first : null,
@@ -1107,6 +1108,7 @@ class _TripScreenState extends State<TripScreen> {
                       isCreating: _isCreatingTrip,
                       hasVehicle: _selectedVehicle != null,
                       selectedDrivers: _selectedDrivers,
+                      hasOngoingTrip: _hasOngoingTrip,
                     ),
                     const SizedBox(height: 16),
 
@@ -1744,17 +1746,6 @@ class _PlantVehicleCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (hasOngoingTrip && user.role == UserRole.driver)
-              Padding(
-                padding: const EdgeInsets.only(top: 8.0),
-                child: Text(
-                  'Vehicle fixed - Ongoing Trip (Only supervisors can change)',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.red,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
             if (isLoadingPlants)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
@@ -2078,6 +2069,7 @@ class _TripStartCard extends StatelessWidget {
     required this.isCreating,
     required this.hasVehicle,
     required this.selectedDrivers,
+    this.hasOngoingTrip = false,
   });
 
   final TextEditingController startDateController;
@@ -2094,6 +2086,7 @@ class _TripStartCard extends StatelessWidget {
   final bool isCreating;
   final bool hasVehicle;
   final List<TripDriver> selectedDrivers;
+  final bool hasOngoingTrip;
 
   @override
   Widget build(BuildContext context) {
@@ -2138,7 +2131,7 @@ class _TripStartCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  'Start Trip',
+                  hasOngoingTrip ? 'Update Trip' : 'Start Trip',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -2268,7 +2261,7 @@ class _TripStartCard extends StatelessWidget {
                         ),
                       )
                     : const Icon(Icons.play_arrow),
-                label: const Text('Start Trip'),
+                label: Text(hasOngoingTrip ? 'Update Trip' : 'Start Trip'),
               ),
             ),
           ],

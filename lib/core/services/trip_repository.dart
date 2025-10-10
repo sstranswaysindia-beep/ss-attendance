@@ -379,6 +379,7 @@ class TripRepository {
   }
 
   Future<void> updateTrip({
+    required AppUser user,
     required int tripId,
     List<String>? addCustomerNames,
     List<String>? setCustomerNames,
@@ -387,7 +388,13 @@ class TripRepository {
     List<int>? setDriverIds,
   }) async {
     final uri = Uri.parse('${_mobileBase}trips_update.php');
-    final payload = <String, dynamic>{'trip_id': tripId};
+    final payload = <String, dynamic>{
+      'trip_id': tripId,
+      'role': _roleToString(user.role),
+      if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+      if (_tryParseInt(user.driverId) != null)
+        'driverId': _tryParseInt(user.driverId),
+    };
 
     if (addCustomerNames != null && addCustomerNames.isNotEmpty) {
       payload['add_customer_names'] = addCustomerNames;
