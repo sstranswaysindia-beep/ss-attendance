@@ -286,12 +286,23 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     // Find ongoing trip for this vehicle
-    final ongoingTrip = _overview?.trips.firstWhere(
-      (trip) => trip.vehicleId == vehicle.id && trip.status == 'ongoing',
-      orElse: () => null,
+    if (_overview == null) {
+      _clearFormForNewTrip();
+      return;
+    }
+
+    final ongoingTrip = _overview!.trips.firstWhere(
+      (trip) => trip.vehicleNumber == vehicle.number && trip.status == 'ongoing',
+      orElse: () => TripRecord(
+        id: 0,
+        startDate: '',
+        endDate: '',
+        vehicleNumber: '',
+        status: '',
+      ),
     );
 
-    if (ongoingTrip != null) {
+    if (ongoingTrip.id > 0) {
       // Vehicle has ongoing trip - load the trip data into form
       _loadOngoingTripDataIntoForm(ongoingTrip);
     } else {
@@ -309,7 +320,7 @@ class _TripScreenState extends State<TripScreen> {
     _customerNames = const <String>[];
     _selectedHelpers = const <TripHelper>[];
     _selectedDrivers = const <TripDriver>[];
-    
+
     // Reset start date to today
     _selectedStartDate = DateTime.now();
     _startDateController.text = _formatDate(_selectedStartDate);
@@ -350,7 +361,7 @@ class _TripScreenState extends State<TripScreen> {
     _isCheckingOngoingTrip = true;
 
     // Get the current user's name for comparison
-    final currentUserName = widget.user.displayName ?? '';
+    final currentUserName = widget.user.displayName;
     final driverId = int.tryParse(widget.user.driverId ?? '');
 
     final ongoingTrip = _overview!.trips.firstWhere(
@@ -413,9 +424,9 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     // Load start date
-    if (trip.startDate != null) {
+    if (trip.startDate.isNotEmpty) {
       try {
-        final date = DateTime.parse(trip.startDate!);
+        final date = DateTime.parse(trip.startDate);
         _selectedStartDate = date;
         _startDateController.text = _formatDate(date);
       } catch (e) {
