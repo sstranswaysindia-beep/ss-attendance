@@ -4,7 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 
 import 'core/models/app_user.dart';
-// import 'core/services/notification_service.dart';
+import 'core/services/notification_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/driver_dashboard_screen.dart';
@@ -17,7 +17,7 @@ Future<void> main() async {
 
   // Initialize notification service
   await NotificationService().initialize();
-  
+
   // Schedule daily attendance reminders
   await NotificationService().scheduleDailyReminders();
 
