@@ -544,6 +544,14 @@ class _TripScreenState extends State<TripScreen> {
       _customerNames = const <String>[];
       _selectedHelpers = const <TripHelper>[];
       _selectedDrivers = const <TripDriver>[];
+      
+      // Clear plant and vehicle selections
+      _selectedPlant = null;
+      _selectedVehicle = null;
+      
+      // Reset start date to today
+      _selectedStartDate = DateTime.now();
+      _startDateController.text = _formatDate(_selectedStartDate);
 
       // Refresh the data
       await _loadTrips();
