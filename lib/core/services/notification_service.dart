@@ -4,6 +4,8 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -248,6 +250,178 @@ class NotificationService {
       body: 'Your advance request of ₹$amount has been $status',
       payload: 'advance_request_$status',
     );
+  }
+
+  // Attendance reminder notifications
+  Future<void> scheduleCheckInReminder({String? driverId}) async {
+    if (kIsWeb) return;
+
+    // Cancel any existing check-in reminder
+    await cancelNotification(100);
+
+    // Schedule for 9:00 AM today (if not passed) or tomorrow
+    final now = DateTime.now();
+    DateTime scheduledTime = DateTime(now.year, now.month, now.day, 9, 0);
+    
+    // If 9 AM has already passed today, schedule for tomorrow
+    if (scheduledTime.isBefore(now)) {
+      scheduledTime = scheduledTime.add(const Duration(days: 1));
+    }
+
+    await scheduleNotification(
+      id: 100,
+      title: 'Check-In Reminder',
+      body: 'Don\'t forget to check in for today! It\'s 9:00 AM.',
+      scheduledDate: scheduledTime,
+      payload: 'checkin_reminder',
+    );
+  }
+
+  Future<void> scheduleCheckOutReminder({String? driverId}) async {
+    if (kIsWeb) return;
+
+    // Cancel any existing check-out reminder
+    await cancelNotification(101);
+
+    // Schedule for 9:00 PM today (if not passed) or tomorrow
+    final now = DateTime.now();
+    DateTime scheduledTime = DateTime(now.year, now.month, now.day, 21, 0);
+    
+    // If 9 PM has already passed today, schedule for tomorrow
+    if (scheduledTime.isBefore(now)) {
+      scheduledTime = scheduledTime.add(const Duration(days: 1));
+    }
+
+    await scheduleNotification(
+      id: 101,
+      title: 'Check-Out Reminder',
+      body: 'Don\'t forget to check out for today! It\'s 9:00 PM.',
+      scheduledDate: scheduledTime,
+      payload: 'checkout_reminder',
+    );
+  }
+
+  Future<void> cancelCheckInReminder() async {
+    await cancelNotification(100);
+  }
+
+  Future<void> cancelCheckOutReminder() async {
+    await cancelNotification(101);
+  }
+
+  // Daily recurring reminders
+  Future<void> scheduleDailyReminders() async {
+    if (kIsWeb) return;
+
+    // Cancel existing reminders
+    await cancelCheckInReminder();
+    await cancelCheckOutReminder();
+
+    // Schedule check-in reminder for 9:00 AM
+    await scheduleCheckInReminder();
+    
+    // Schedule check-out reminder for 9:00 PM
+    await scheduleCheckOutReminder();
+  }
+
+  // Check if check-in is done for today
+  Future<bool> isCheckInDoneToday({required String driverId}) async {
+    if (kIsWeb) return true; // Skip on web
+
+    try {
+      final response = await http.get(
+        Uri.parse('https://sstranswaysindia.com/api/mobile/attendance_history.php'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true && data['data'] != null) {
+          final List<dynamic> records = data['data'];
+          final today = DateTime.now();
+          final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+          
+          // Check if there's a check-in record for today
+          for (final record in records) {
+            if (record['driver_id']?.toString() == driverId && 
+                record['date']?.toString().startsWith(todayStr) == true &&
+                record['action']?.toString() == 'check_in') {
+              return true;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error checking check-in status: $e');
+      }
+    }
+    return false;
+  }
+
+  // Check if check-out is done for today
+  Future<bool> isCheckOutDoneToday({required String driverId}) async {
+    if (kIsWeb) return true; // Skip on web
+
+    try {
+      final response = await http.get(
+        Uri.parse('https://sstranswaysindia.com/api/mobile/attendance_history.php'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true && data['data'] != null) {
+          final List<dynamic> records = data['data'];
+          final today = DateTime.now();
+          final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+          
+          // Check if there's a check-out record for today
+          for (final record in records) {
+            if (record['driver_id']?.toString() == driverId && 
+                record['date']?.toString().startsWith(todayStr) == true &&
+                record['action']?.toString() == 'check_out') {
+              return true;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        print('Error checking check-out status: $e');
+      }
+    }
+    return false;
+  }
+
+  // Smart check-in reminder - only sends if check-in is not done
+  Future<void> sendCheckInReminderIfNeeded({required String driverId}) async {
+    if (kIsWeb) return;
+
+    final isCheckInDone = await isCheckInDoneToday(driverId: driverId);
+    if (!isCheckInDone) {
+      await showNotification(
+        id: 100,
+        title: 'Check-In Reminder',
+        body: 'You haven\'t checked in today! Please check in now.',
+        payload: 'checkin_reminder',
+      );
+    }
+  }
+
+  // Smart check-out reminder - only sends if check-out is not done
+  Future<void> sendCheckOutReminderIfNeeded({required String driverId}) async {
+    if (kIsWeb) return;
+
+    final isCheckOutDone = await isCheckOutDoneToday(driverId: driverId);
+    if (!isCheckOutDone) {
+      await showNotification(
+        id: 101,
+        title: 'Check-Out Reminder',
+        body: 'You haven\'t checked out today! Please check out now.',
+        payload: 'checkout_reminder',
+      );
+    }
   }
 }
 

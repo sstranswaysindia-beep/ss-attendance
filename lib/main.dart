@@ -16,7 +16,10 @@ Future<void> main() async {
   Intl.defaultLocale = 'en_IN';
 
   // Initialize notification service
-  // await NotificationService().initialize();
+  await NotificationService().initialize();
+  
+  // Schedule daily attendance reminders
+  await NotificationService().scheduleDailyReminders();
 
   runApp(const SSTranswaysApp());
 }

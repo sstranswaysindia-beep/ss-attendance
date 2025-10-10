@@ -20,6 +20,8 @@ class _NotificationSettingsScreenState
   bool _salaryNotifications = true;
   bool _advanceNotifications = true;
   bool _reminderNotifications = true;
+  bool _checkInReminders = true;
+  bool _checkOutReminders = true;
 
   bool _isLoading = false;
 
@@ -45,6 +47,11 @@ class _NotificationSettingsScreenState
           'Notification permissions are required for this feature',
           isError: true,
         );
+      }
+
+      // Schedule daily reminders if enabled
+      if (_checkInReminders || _checkOutReminders) {
+        await _notificationService.scheduleDailyReminders();
       }
     } catch (e) {
       if (mounted) {
@@ -78,6 +85,46 @@ class _NotificationSettingsScreenState
         showAppToast(
           context,
           'Failed to send test notification',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _testCheckInReminder() async {
+    try {
+      await _notificationService.sendCheckInReminderIfNeeded(
+        driverId: '169', // You can make this dynamic based on logged-in user
+      );
+
+      if (mounted) {
+        showAppToast(context, 'Check-in reminder test sent');
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'Failed to send check-in reminder test',
+          isError: true,
+        );
+      }
+    }
+  }
+
+  Future<void> _testCheckOutReminder() async {
+    try {
+      await _notificationService.sendCheckOutReminderIfNeeded(
+        driverId: '169', // You can make this dynamic based on logged-in user
+      );
+
+      if (mounted) {
+        showAppToast(context, 'Check-out reminder test sent');
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'Failed to send check-out reminder test',
           isError: true,
         );
       }
@@ -175,6 +222,40 @@ class _NotificationSettingsScreenState
                       setState(() => _reminderNotifications = value);
                     },
                   ),
+
+                  // Check-In Reminders
+                  SwitchListTile(
+                    title: const Text('Check-In Reminders'),
+                    subtitle: const Text(
+                      'Get reminded at 9:00 AM if check-in is not done',
+                    ),
+                    value: _checkInReminders,
+                    onChanged: (value) {
+                      setState(() => _checkInReminders = value);
+                      if (value) {
+                        _notificationService.scheduleCheckInReminder();
+                      } else {
+                        _notificationService.cancelCheckInReminder();
+                      }
+                    },
+                  ),
+
+                  // Check-Out Reminders
+                  SwitchListTile(
+                    title: const Text('Check-Out Reminders'),
+                    subtitle: const Text(
+                      'Get reminded at 9:00 PM if check-out is not done',
+                    ),
+                    value: _checkOutReminders,
+                    onChanged: (value) {
+                      setState(() => _checkOutReminders = value);
+                      if (value) {
+                        _notificationService.scheduleCheckOutReminder();
+                      } else {
+                        _notificationService.cancelCheckOutReminder();
+                      }
+                    },
+                  ),
                 ],
               ),
             ),
@@ -211,6 +292,34 @@ class _NotificationSettingsScreenState
                         foregroundColor: Colors.white,
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _testCheckInReminder,
+                          icon: const Icon(Icons.login),
+                          label: const Text('Test Check-In Reminder'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _testCheckOutReminder,
+                          icon: const Icon(Icons.logout),
+                          label: const Text('Test Check-Out Reminder'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
