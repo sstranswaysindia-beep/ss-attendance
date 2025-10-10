@@ -50,7 +50,7 @@ class NotificationService {
         initSettings,
         onDidReceiveNotificationResponse: _onNotificationTapped,
       );
-      
+
       if (result == false) {
         throw Exception('Failed to initialize notifications');
       }

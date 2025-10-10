@@ -200,16 +200,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     }
     final parts = <String>[];
     if (years > 0) {
-      parts.add('$years year${years == 1 ? '' : 's'}');
+      parts.add('${years}Y');
     }
     if (months > 0) {
-      parts.add('$months month${months == 1 ? '' : 's'}');
+      parts.add('${months}M');
     }
     if (parts.isEmpty) {
-      parts.add('Less than a month');
+      parts.add('<1M');
     }
-    final label = parts.join(' ');
-    return label[0].toUpperCase() + label.substring(1);
+    return parts.join(' & ');
   }
 
   Future<void> _loadActiveShift() async {
@@ -444,22 +443,24 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       const SizedBox(width: 12),
                     ],
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
                         children: [
                           Chip(
-                            label: Text(dateFormatter.format(_now)),
-                            avatar: const Icon(Icons.calendar_today, size: 16),
-                          ),
-                          const SizedBox(height: 4),
-                          Chip(
                             label: Text(
-                              timeFormatter.format(_now),
-                              style: textTheme.labelSmall?.copyWith(fontSize: 11),
+                              dateFormatter.format(_now),
+                              style: textTheme.labelSmall?.copyWith(
+                                fontSize: 11,
+                              ),
                             ),
-                            avatar: const Icon(Icons.access_time, size: 14),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            avatar: const Icon(Icons.calendar_today, size: 14),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             visualDensity: VisualDensity.compact,
+                          ),
+                          const SizedBox(width: 8),
+                          Chip(
+                            label: Text(timeFormatter.format(_now)),
+                            avatar: const Icon(Icons.access_time, size: 16),
                           ),
                         ],
                       ),

@@ -102,7 +102,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Image.asset(
                               AppAssets.logo,
-                              height: 60,
+                              height: 50,
                               fit: BoxFit.contain,
                               colorBlendMode: BlendMode.dstIn,
                               errorBuilder: (_, __, ___) => Icon(
