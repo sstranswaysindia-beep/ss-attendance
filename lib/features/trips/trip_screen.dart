@@ -86,7 +86,7 @@ class _TripScreenState extends State<TripScreen> {
     _loadMeta();
     _loadTrips();
     _loadPlants();
-    _findOngoingTripForDriver();
+    _findOngoingTrip();
   }
 
   @override
@@ -128,7 +128,7 @@ class _TripScreenState extends State<TripScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         // Check for ongoing trip after loading trips
-        _findOngoingTripForDriver();
+        _findOngoingTrip();
       }
     }
   }
@@ -167,7 +167,7 @@ class _TripScreenState extends State<TripScreen> {
 
       // Refresh the data
       await _loadTrips();
-      _findOngoingTripForDriver();
+      _findOngoingTrip();
     } catch (e) {
       showAppToast(context, 'Failed to delete trip: $e', isError: true);
     }
@@ -297,24 +297,32 @@ class _TripScreenState extends State<TripScreen> {
     }
   }
 
-  void _findOngoingTripForDriver() {
-    if (widget.user.role != UserRole.driver || _isCheckingOngoingTrip) return;
+  void _findOngoingTrip() {
+    if ((widget.user.role != UserRole.driver && widget.user.role != UserRole.supervisor) || _isCheckingOngoingTrip) return;
 
-    final driverId = int.tryParse(widget.user.driverId ?? '');
-    if (driverId == null || _overview == null) return;
+    if (_overview == null) return;
 
     _isCheckingOngoingTrip = true;
 
     // Get the current user's name for comparison
     final currentUserName = widget.user.displayName ?? '';
+    final driverId = int.tryParse(widget.user.driverId ?? '');
 
     final ongoingTrip = _overview!.trips.firstWhere(
       (trip) {
         final isOngoing = trip.status == 'ongoing';
-        final hasDriverId = trip.drivers?.contains(driverId.toString()) == true;
-        final hasDriverName = trip.drivers?.contains(currentUserName) == true;
-
-        return isOngoing && (hasDriverId || hasDriverName);
+        
+        if (widget.user.role == UserRole.driver) {
+          // For drivers, check if they are assigned to this trip
+          final hasDriverId = driverId != null && trip.drivers?.contains(driverId.toString()) == true;
+          final hasDriverName = trip.drivers?.contains(currentUserName) == true;
+          return isOngoing && (hasDriverId || hasDriverName);
+        } else if (widget.user.role == UserRole.supervisor) {
+          // For supervisors, show any ongoing trip
+          return isOngoing;
+        }
+        
+        return false;
       },
       orElse: () => TripRecord(
         id: 0,
@@ -534,7 +542,7 @@ class _TripScreenState extends State<TripScreen> {
 
       // Refresh the data
       await _loadTrips();
-      _findOngoingTripForDriver();
+      _findOngoingTrip();
     } catch (e) {
       showAppToast(context, 'Failed to end trip: $e', isError: true);
     }
