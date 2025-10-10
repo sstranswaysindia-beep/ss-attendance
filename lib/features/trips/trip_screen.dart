@@ -274,7 +274,49 @@ class _TripScreenState extends State<TripScreen> {
       });
     }
 
-    final lastEndKm = vehicle?.lastEndKm;
+    // Check if the selected vehicle has an ongoing trip
+    _checkVehicleOngoingTrip(vehicle);
+  }
+
+  void _checkVehicleOngoingTrip(TripVehicle? vehicle) {
+    if (vehicle == null) {
+      // No vehicle selected - clear form
+      _clearFormForNewTrip();
+      return;
+    }
+
+    // Find ongoing trip for this vehicle
+    final ongoingTrip = _overview?.trips.firstWhere(
+      (trip) => trip.vehicleId == vehicle.id && trip.status == 'ongoing',
+      orElse: () => null,
+    );
+
+    if (ongoingTrip != null) {
+      // Vehicle has ongoing trip - load the trip data into form
+      _loadOngoingTripDataIntoForm(ongoingTrip);
+    } else {
+      // No ongoing trip - clear form and set suggested KM
+      _clearFormForNewTrip();
+      _setSuggestedStartKm(vehicle);
+    }
+  }
+
+  void _clearFormForNewTrip() {
+    // Clear all form fields
+    _startKmController.clear();
+    _noteController.clear();
+    _customerController.clear();
+    _customerNames = const <String>[];
+    _selectedHelpers = const <TripHelper>[];
+    _selectedDrivers = const <TripDriver>[];
+    
+    // Reset start date to today
+    _selectedStartDate = DateTime.now();
+    _startDateController.text = _formatDate(_selectedStartDate);
+  }
+
+  void _setSuggestedStartKm(TripVehicle vehicle) {
+    final lastEndKm = vehicle.lastEndKm;
     final currentText = _startKmController.text.trim();
     final suggestedText = _lastSuggestedStartKm?.toString();
     final shouldReplace =
@@ -356,12 +398,33 @@ class _TripScreenState extends State<TripScreen> {
         _hasOngoingTrip = false;
         _ongoingTrip = null;
       });
+
+      // Check if selected vehicle has ongoing trip and load/clear form accordingly
+      _checkVehicleOngoingTrip(_selectedVehicle);
     }
 
     _isCheckingOngoingTrip = false;
   }
 
   void _loadOngoingTripDataIntoForm(TripRecord trip) {
+    // Load start KM
+    if (trip.startKm != null) {
+      _startKmController.text = trip.startKm.toString();
+    }
+
+    // Load start date
+    if (trip.startDate != null) {
+      try {
+        final date = DateTime.parse(trip.startDate!);
+        _selectedStartDate = date;
+        _startDateController.text = _formatDate(date);
+      } catch (e) {
+        // If parsing fails, use today's date
+        _selectedStartDate = DateTime.now();
+        _startDateController.text = _formatDate(_selectedStartDate);
+      }
+    }
+
     // Load note
     if (trip.note != null && trip.note!.isNotEmpty) {
       _noteController.text = trip.note!;
@@ -544,11 +607,11 @@ class _TripScreenState extends State<TripScreen> {
       _customerNames = const <String>[];
       _selectedHelpers = const <TripHelper>[];
       _selectedDrivers = const <TripDriver>[];
-      
+
       // Clear plant and vehicle selections
       _selectedPlant = null;
       _selectedVehicle = null;
-      
+
       // Reset start date to today
       _selectedStartDate = DateTime.now();
       _startDateController.text = _formatDate(_selectedStartDate);
