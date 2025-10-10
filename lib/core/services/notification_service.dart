@@ -46,10 +46,14 @@ class NotificationService {
         iOS: iosSettings,
       );
 
-      await _notifications.initialize(
+      final result = await _notifications.initialize(
         initSettings,
         onDidReceiveNotificationResponse: _onNotificationTapped,
       );
+      
+      if (result == false) {
+        throw Exception('Failed to initialize notifications');
+      }
 
       _isInitialized = true;
     } catch (e) {
@@ -100,6 +104,7 @@ class NotificationService {
           importance: Importance.high,
           priority: Priority.high,
           showWhen: true,
+          largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
         );
 
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
@@ -141,6 +146,7 @@ class NotificationService {
           importance: Importance.high,
           priority: Priority.high,
           showWhen: true,
+          largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
         );
 
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(

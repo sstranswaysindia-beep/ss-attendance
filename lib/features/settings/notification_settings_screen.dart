@@ -55,11 +55,15 @@ class _NotificationSettingsScreenState
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(
-          context,
-          'Failed to load notification settings',
-          isError: true,
-        );
+        print('Notification settings load error: $e');
+        // Only show error if it's not a web platform issue
+        if (!kIsWeb) {
+          showAppToast(
+            context,
+            'Failed to load notification settings: ${e.toString()}',
+            isError: true,
+          );
+        }
       }
     } finally {
       if (mounted) {

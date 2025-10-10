@@ -874,56 +874,64 @@ class _TripScreenState extends State<TripScreen> {
         _vehicles = vehicles;
       });
 
-      // Try to get assigned vehicle for driver
+      // Try to get assigned vehicle for driver/supervisor
       TripVehicle? initialVehicle;
 
-      // First try to use user's assignmentVehicleId directly
-      final userAssignedVehicleId = int.tryParse(
-        widget.user.assignmentVehicleId ?? '',
-      );
-      if (userAssignedVehicleId != null) {
-        print('Using user assignmentVehicleId: $userAssignedVehicleId');
-        for (final vehicle in vehicles) {
-          if (vehicle.id == userAssignedVehicleId) {
-            initialVehicle = vehicle;
-            print(
-              'Found assigned vehicle from user data: ${vehicle.number} (ID: ${vehicle.id})',
-            );
-            break;
-          }
-        }
-      }
-
-      // If not found in user data, try API
-      if (initialVehicle == null) {
-        try {
-          final assignedVehicleId = await _repository.getAssignedVehicleId(
-            user: widget.user,
-            plantId: plantId,
-          );
-
-          print('Assigned vehicle ID from API: $assignedVehicleId');
-
-          if (assignedVehicleId != null) {
-            // Find the assigned vehicle in the list
-            for (final vehicle in vehicles) {
-              if (vehicle.id == assignedVehicleId) {
-                initialVehicle = vehicle;
-                print(
-                  'Found assigned vehicle from API: ${vehicle.number} (ID: ${vehicle.id})',
-                );
-                break;
-              }
+      // For drivers, try to get assigned vehicle
+      if (widget.user.role == UserRole.driver) {
+        // First try to use user's assignmentVehicleId directly
+        final userAssignedVehicleId = int.tryParse(
+          widget.user.assignmentVehicleId ?? '',
+        );
+        if (userAssignedVehicleId != null) {
+          print('Using user assignmentVehicleId: $userAssignedVehicleId');
+          for (final vehicle in vehicles) {
+            if (vehicle.id == userAssignedVehicleId) {
+              initialVehicle = vehicle;
+              print(
+                'Found assigned vehicle from user data: ${vehicle.number} (ID: ${vehicle.id})',
+              );
+              break;
             }
           }
-        } catch (e) {
-          print('Error getting assigned vehicle from API: $e');
+        }
+
+        // If not found in user data, try API
+        if (initialVehicle == null) {
+          try {
+            final assignedVehicleId = await _repository.getAssignedVehicleId(
+              user: widget.user,
+              plantId: plantId,
+            );
+
+            print('Assigned vehicle ID from API: $assignedVehicleId');
+
+            if (assignedVehicleId != null) {
+              // Find the assigned vehicle in the list
+              for (final vehicle in vehicles) {
+                if (vehicle.id == assignedVehicleId) {
+                  initialVehicle = vehicle;
+                  print(
+                    'Found assigned vehicle from API: ${vehicle.number} (ID: ${vehicle.id})',
+                  );
+                  break;
+                }
+              }
+            }
+          } catch (e) {
+            print('Error getting assigned vehicle from API: $e');
+          }
         }
       }
 
-      // If no assigned vehicle found, use the first available vehicle
+      // For supervisors or if no assigned vehicle found, use the first available vehicle
       if (initialVehicle == null && vehicles.isNotEmpty) {
         initialVehicle = vehicles.first;
+        if (widget.user.role == UserRole.supervisor) {
+          print('Supervisor: Auto-selecting first available vehicle: ${initialVehicle.number}');
+        } else {
+          print('No assigned vehicle found, using first available: ${initialVehicle.number}');
+        }
       }
 
       // Restore saved vehicle if available
