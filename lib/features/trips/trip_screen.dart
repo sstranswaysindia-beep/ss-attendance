@@ -73,10 +73,8 @@ class _TripScreenState extends State<TripScreen> {
   @override
   void initState() {
     super.initState();
-    
-    // Debug: Print user information
-    print('DEBUG: TripScreen initState - User: ${widget.user.displayName}, Role: ${widget.user.role}, DriverID: ${widget.user.driverId}');
-    
+
+
     _selectedPlantId =
         widget.user.plantId ??
         widget.user.assignmentPlantId ??
@@ -311,9 +309,6 @@ class _TripScreenState extends State<TripScreen> {
     // Get the current user's name for comparison
     final currentUserName = widget.user.displayName ?? '';
 
-    // Debug: Print what we're looking for
-    print('DEBUG: Looking for ongoing trip for driver ID: $driverId, name: $currentUserName');
-    print('DEBUG: Total trips loaded: ${_overview!.trips.length}');
 
     final ongoingTrip = _overview!.trips.firstWhere(
       (trip) {
@@ -321,9 +316,6 @@ class _TripScreenState extends State<TripScreen> {
         final hasDriverId = trip.drivers?.contains(driverId.toString()) == true;
         final hasDriverName = trip.drivers?.contains(currentUserName) == true;
 
-        if (isOngoing) {
-          print('DEBUG: Found ongoing trip ${trip.id}: drivers="${trip.drivers}", hasDriverId=$hasDriverId, hasDriverName=$hasDriverName');
-        }
 
         return isOngoing && (hasDriverId || hasDriverName);
       },
@@ -346,13 +338,11 @@ class _TripScreenState extends State<TripScreen> {
         _hasOngoingTrip = true;
         _ongoingTrip = ongoingTrip;
       });
-      print('DEBUG: Ongoing trip found: ${ongoingTrip.id}');
     } else {
       setState(() {
         _hasOngoingTrip = false;
         _ongoingTrip = null;
       });
-      print('DEBUG: No ongoing trip found for driver $driverId');
     }
 
     _isCheckingOngoingTrip = false;
@@ -1019,8 +1009,6 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final overview = _overview;
 
-    // Debug: Print ongoing trip state
-    print('DEBUG: Build - _hasOngoingTrip: $_hasOngoingTrip, _ongoingTrip: ${_ongoingTrip?.id}');
 
     return Scaffold(
       appBar: AppBar(title: const Text('Trips')),
@@ -1038,7 +1026,8 @@ class _TripScreenState extends State<TripScreen> {
           child: Stack(
             children: [
               // Main content with bottom padding for sticky card
-              ListView(
+              Positioned.fill(
+                child: ListView(
                 padding: EdgeInsets.only(
                   left: 16,
                   right: 16,
@@ -1139,51 +1128,9 @@ class _TripScreenState extends State<TripScreen> {
                   ] else
                     const SizedBox.shrink(),
                 ],
-              ),
-
-              // Debug info
-              Positioned(
-                top: 50,
-                left: 16,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.7),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        'DEBUG: hasOngoingTrip: $_hasOngoingTrip, ongoingTrip: ${_ongoingTrip?.id ?? "null"}',
-                        style: const TextStyle(color: Colors.white, fontSize: 12),
-                      ),
-                      const SizedBox(height: 4),
-                      ElevatedButton(
-                        onPressed: () {
-                          // Create a fake ongoing trip for testing
-                          setState(() {
-                            _hasOngoingTrip = true;
-                            _ongoingTrip = TripRecord(
-                              id: 999,
-                              status: 'ongoing',
-                              startDate: '2024-01-15',
-                              endDate: '',
-                              vehicleNumber: 'TEST-001',
-                              plantId: 1,
-                              note: 'Test ongoing trip',
-                              drivers: widget.user.driverId ?? '169',
-                              helper: 'Test Helper',
-                              customers: 'Test Customer',
-                            );
-                          });
-                        },
-                        child: const Text('Test Ongoing Trip', style: TextStyle(fontSize: 10)),
-                      ),
-                    ],
-                  ),
                 ),
               ),
+
 
               // Sticky ON-GOING TRIP CARD at the bottom
               if (_hasOngoingTrip && _ongoingTrip != null)
@@ -1191,10 +1138,17 @@ class _TripScreenState extends State<TripScreen> {
                   left: 16,
                   right: 16,
                   bottom: 16,
-                  child: _OngoingTripCard(
-                    trip: _ongoingTrip!,
-                    onUpdate: _handleUpdateTrip,
-                    onEnd: _handleEndTrip,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: Colors.red,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(8),
+                    child: _OngoingTripCard(
+                      trip: _ongoingTrip!,
+                      onUpdate: _handleUpdateTrip,
+                      onEnd: _handleEndTrip,
+                    ),
                   ),
                 ),
             ],
