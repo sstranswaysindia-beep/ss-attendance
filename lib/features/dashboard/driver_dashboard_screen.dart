@@ -584,51 +584,64 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
             padding: const EdgeInsets.all(16),
             child: ListView(
               children: [
+                // First line: Profile photo + Welcome, Name
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Welcome, ${widget.user.displayName}',
-                            style: textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          if (tenureSubtitle != null)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Chip(
-                                label: Text(tenureSubtitle),
-                                labelStyle: textTheme.labelSmall?.copyWith(
-                                  color: Theme.of(context).colorScheme.primary,
-                                ),
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.primary.withOpacity(0.12),
-                                visualDensity: VisualDensity.compact,
-                                materialTapTargetSize:
-                                    MaterialTapTargetSize.shrinkWrap,
-                              ),
-                            ),
-                        ],
+                    CircleAvatar(
+                      radius: 24,
+                      child: Text(
+                        widget.user.displayName.isNotEmpty
+                            ? widget.user.displayName[0].toUpperCase()
+                            : '?',
+                        style: textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
-                    Wrap(
-                      alignment: WrapAlignment.end,
-                      spacing: 8,
-                      children: [
-                        Chip(
-                          label: Text(dateFormatter.format(_now)),
-                          avatar: const Icon(Icons.calendar_today, size: 16),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Welcome, ${widget.user.displayName}',
+                        style: textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
                         ),
-                        Chip(
-                          label: Text(timeFormatter.format(_now)),
-                          avatar: const Icon(Icons.access_time, size: 16),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Second line: Working for X years + Date & Time
+                Row(
+                  children: [
+                    if (tenureSubtitle != null) ...[
+                      Chip(
+                        label: Text(tenureSubtitle),
+                        labelStyle: textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
                         ),
-                      ],
+                        backgroundColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withOpacity(0.12),
+                        visualDensity: VisualDensity.compact,
+                        materialTapTargetSize:
+                            MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Chip(
+                            label: Text(dateFormatter.format(_now)),
+                            avatar: const Icon(Icons.calendar_today, size: 16),
+                          ),
+                          const SizedBox(width: 8),
+                          Chip(
+                            label: Text(timeFormatter.format(_now)),
+                            avatar: const Icon(Icons.access_time, size: 16),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
