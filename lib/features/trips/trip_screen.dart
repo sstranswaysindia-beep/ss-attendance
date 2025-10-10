@@ -74,7 +74,6 @@ class _TripScreenState extends State<TripScreen> {
   void initState() {
     super.initState();
 
-
     _selectedPlantId =
         widget.user.plantId ??
         widget.user.assignmentPlantId ??
@@ -309,13 +308,11 @@ class _TripScreenState extends State<TripScreen> {
     // Get the current user's name for comparison
     final currentUserName = widget.user.displayName ?? '';
 
-
     final ongoingTrip = _overview!.trips.firstWhere(
       (trip) {
         final isOngoing = trip.status == 'ongoing';
         final hasDriverId = trip.drivers?.contains(driverId.toString()) == true;
         final hasDriverName = trip.drivers?.contains(currentUserName) == true;
-
 
         return isOngoing && (hasDriverId || hasDriverName);
       },
@@ -1009,7 +1006,6 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final overview = _overview;
 
-
     return Scaffold(
       appBar: AppBar(title: const Text('Trips')),
       body: AppGradientBackground(
@@ -1028,109 +1024,108 @@ class _TripScreenState extends State<TripScreen> {
               // Main content with bottom padding for sticky card
               Positioned.fill(
                 child: ListView(
-                padding: EdgeInsets.only(
-                  left: 16,
-                  right: 16,
-                  top: 16,
-                  bottom: _hasOngoingTrip && _ongoingTrip != null ? 120 : 16,
-                ),
-                children: [
-                  _PlantVehicleCard(
-                    plants: _plants,
-                    vehicles: _vehicles,
-                    isLoadingPlants: _isLoadingPlants,
-                    isLoadingVehicles: _isLoadingVehicles,
-                    selectedPlant: _selectedPlant,
-                    selectedVehicle: _selectedVehicle,
-                    onPlantChanged: (widget.user.role == UserRole.driver)
-                        ? (plant) {} // Empty function for drivers
-                        : (plant) {
-                            setState(() {
-                              _selectedPlant = plant;
-                              _selectedPlantId = plant.id.toString();
-                              _selectedVehicle = null;
-                            });
-                            _filterDriversForPlant(plant.id.toString());
-                            _primeHelpersForPlant(plant.id.toString());
-                            _loadVehicles(plant.id.toString());
-                          },
-                    onVehicleChanged: (vehicle) {
-                      _applyVehicleSelection(vehicle);
-                      if (_selectedPlantId != null) {
-                        unawaited(
-                          _loadHelpers(
+                  padding: EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: _hasOngoingTrip && _ongoingTrip != null ? 120 : 16,
+                  ),
+                  children: [
+                    _PlantVehicleCard(
+                      plants: _plants,
+                      vehicles: _vehicles,
+                      isLoadingPlants: _isLoadingPlants,
+                      isLoadingVehicles: _isLoadingVehicles,
+                      selectedPlant: _selectedPlant,
+                      selectedVehicle: _selectedVehicle,
+                      onPlantChanged: (widget.user.role == UserRole.driver)
+                          ? (plant) {} // Empty function for drivers
+                          : (plant) {
+                              setState(() {
+                                _selectedPlant = plant;
+                                _selectedPlantId = plant.id.toString();
+                                _selectedVehicle = null;
+                              });
+                              _filterDriversForPlant(plant.id.toString());
+                              _primeHelpersForPlant(plant.id.toString());
+                              _loadVehicles(plant.id.toString());
+                            },
+                      onVehicleChanged: (vehicle) {
+                        _applyVehicleSelection(vehicle);
+                        if (_selectedPlantId != null) {
+                          unawaited(
+                            _loadHelpers(
+                              _selectedPlantId!,
+                              vehicleId: _selectedVehicle?.id.toString(),
+                            ),
+                          );
+                        }
+                        _loadTrips();
+                      },
+                      onReloadPlants: _loadPlants,
+                      hasOngoingTrip: _hasOngoingTrip,
+                      user: widget.user,
+                    ),
+                    const SizedBox(height: 16),
+                    _DriverHelperCard(
+                      drivers: _filteredDrivers,
+                      selectedDrivers: _selectedDrivers,
+                      helpers: _helpersForPlant,
+                      selectedHelpers: _selectedHelpers,
+                      isLoadingDrivers: _isLoadingMeta,
+                      isLoadingHelpers: _isLoadingHelpers,
+                      currentDriverId: int.tryParse(widget.user.driverId ?? ''),
+                      driverFieldKey: _driverDropdownKey,
+                      helperFieldKey: _helperDropdownKey,
+                      onDriverAdded: _handleDriverAdded,
+                      onDriverRemoved: _handleDriverRemoved,
+                      onHelperAdded: _handleHelperAdded,
+                      onHelperRemoved: _handleHelperRemoved,
+                      onReloadHelpers: () {
+                        if (_selectedPlantId != null) {
+                          return _loadHelpers(
                             _selectedPlantId!,
                             vehicleId: _selectedVehicle?.id.toString(),
-                          ),
-                        );
-                      }
-                      _loadTrips();
-                    },
-                    onReloadPlants: _loadPlants,
-                    hasOngoingTrip: _hasOngoingTrip,
-                    user: widget.user,
-                  ),
-                  const SizedBox(height: 16),
-                  _DriverHelperCard(
-                    drivers: _filteredDrivers,
-                    selectedDrivers: _selectedDrivers,
-                    helpers: _helpersForPlant,
-                    selectedHelpers: _selectedHelpers,
-                    isLoadingDrivers: _isLoadingMeta,
-                    isLoadingHelpers: _isLoadingHelpers,
-                    currentDriverId: int.tryParse(widget.user.driverId ?? ''),
-                    driverFieldKey: _driverDropdownKey,
-                    helperFieldKey: _helperDropdownKey,
-                    onDriverAdded: _handleDriverAdded,
-                    onDriverRemoved: _handleDriverRemoved,
-                    onHelperAdded: _handleHelperAdded,
-                    onHelperRemoved: _handleHelperRemoved,
-                    onReloadHelpers: () {
-                      if (_selectedPlantId != null) {
-                        return _loadHelpers(
-                          _selectedPlantId!,
-                          vehicleId: _selectedVehicle?.id.toString(),
-                        );
-                      }
-                      return Future<void>.value();
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  _TripStartCard(
-                    startDateController: _startDateController,
-                    onPickStartDate: _pickStartDate,
-                    startKmController: _startKmController,
-                    noteController: _noteController,
-                    customerController: _customerController,
-                    customerSuggestions: _customerSuggestions,
-                    selectedCustomers: _customerNames,
-                    onCustomerAdded: _handleCustomerAdded,
-                    onCustomerRemoved: _handleCustomerRemoved,
-                    onCustomerSubmitted: _handleCustomerSubmitted,
-                    onStartTrip: _handleCreateTrip,
-                    isCreating: _isCreatingTrip,
-                    hasVehicle: _selectedVehicle != null,
-                    selectedDrivers: _selectedDrivers,
-                  ),
-                  const SizedBox(height: 16),
-
-                  if (_isLoading && overview == null)
-                    const Center(child: CircularProgressIndicator())
-                  else if (_error != null && overview == null)
-                    _ErrorState(message: _error!, onRetry: _loadTrips)
-                  else if (overview != null) ...[
-                    _SummarySection(summary: overview.summary),
-                    const SizedBox(height: 16),
-                    _TripsList(
-                      trips: overview.trips,
-                      onDeleteTrip: _handleDeleteTrip,
+                          );
+                        }
+                        return Future<void>.value();
+                      },
                     ),
-                  ] else
-                    const SizedBox.shrink(),
-                ],
+                    const SizedBox(height: 16),
+                    _TripStartCard(
+                      startDateController: _startDateController,
+                      onPickStartDate: _pickStartDate,
+                      startKmController: _startKmController,
+                      noteController: _noteController,
+                      customerController: _customerController,
+                      customerSuggestions: _customerSuggestions,
+                      selectedCustomers: _customerNames,
+                      onCustomerAdded: _handleCustomerAdded,
+                      onCustomerRemoved: _handleCustomerRemoved,
+                      onCustomerSubmitted: _handleCustomerSubmitted,
+                      onStartTrip: _handleCreateTrip,
+                      isCreating: _isCreatingTrip,
+                      hasVehicle: _selectedVehicle != null,
+                      selectedDrivers: _selectedDrivers,
+                    ),
+                    const SizedBox(height: 16),
+
+                    if (_isLoading && overview == null)
+                      const Center(child: CircularProgressIndicator())
+                    else if (_error != null && overview == null)
+                      _ErrorState(message: _error!, onRetry: _loadTrips)
+                    else if (overview != null) ...[
+                      _SummarySection(summary: overview.summary),
+                      const SizedBox(height: 16),
+                      _TripsList(
+                        trips: overview.trips,
+                        onDeleteTrip: _handleDeleteTrip,
+                      ),
+                    ] else
+                      const SizedBox.shrink(),
+                  ],
                 ),
               ),
-
 
               // Sticky ON-GOING TRIP CARD at the bottom
               if (_hasOngoingTrip && _ongoingTrip != null)
@@ -1138,17 +1133,10 @@ class _TripScreenState extends State<TripScreen> {
                   left: 16,
                   right: 16,
                   bottom: 16,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    padding: const EdgeInsets.all(8),
-                    child: _OngoingTripCard(
-                      trip: _ongoingTrip!,
-                      onUpdate: _handleUpdateTrip,
-                      onEnd: _handleEndTrip,
-                    ),
+                  child: _OngoingTripCard(
+                    trip: _ongoingTrip!,
+                    onUpdate: _handleUpdateTrip,
+                    onEnd: _handleEndTrip,
                   ),
                 ),
             ],
