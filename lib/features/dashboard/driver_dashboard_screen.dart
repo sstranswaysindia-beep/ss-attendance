@@ -568,6 +568,18 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   showAppToast(context, 'You have been logged out');
                 },
               ),
+              const Spacer(),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Version 1.0.1',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ],
           ),
         ),

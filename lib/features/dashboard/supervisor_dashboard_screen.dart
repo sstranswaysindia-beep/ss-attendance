@@ -387,6 +387,18 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   showAppToast(context, 'Logged out successfully');
                 },
               ),
+              const Spacer(),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  'Version 1.0.1',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
             ],
           ),
         ),
