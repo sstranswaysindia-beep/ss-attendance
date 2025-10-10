@@ -57,6 +57,7 @@ class _TripScreenState extends State<TripScreen> {
   // Ongoing trip variables
   bool _hasOngoingTrip = false;
   TripRecord? _ongoingTrip;
+  bool _isCheckingOngoingTrip = false;
 
   final GlobalKey<FormFieldState<int?>> _driverDropdownKey =
       GlobalKey<FormFieldState<int?>>();
@@ -294,64 +295,51 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _findOngoingTripForDriver() {
-    if (widget.user.role != UserRole.driver) return;
+    if (widget.user.role != UserRole.driver || _isCheckingOngoingTrip) return;
 
     final driverId = int.tryParse(widget.user.driverId ?? '');
-    if (driverId == null) return;
+    if (driverId == null || _overview == null) return;
 
-    // Check if there's an ongoing trip for this driver
-    if (_overview != null) {
-      // Get the current user's name for comparison
-      final currentUserName = widget.user.displayName ?? '';
+    _isCheckingOngoingTrip = true;
 
-      // Debug: Print what we're looking for
-      print(
-        'Looking for ongoing trip for driver ID: $driverId, name: $currentUserName',
-      );
+    // Get the current user's name for comparison
+    final currentUserName = widget.user.displayName ?? '';
 
-      final ongoingTrip = _overview!.trips.firstWhere(
-        (trip) {
-          final isOngoing = trip.status == 'ongoing';
-          final hasDriverId =
-              trip.drivers?.contains(driverId.toString()) == true;
-          final hasDriverName = trip.drivers?.contains(currentUserName) == true;
+    final ongoingTrip = _overview!.trips.firstWhere(
+      (trip) {
+        final isOngoing = trip.status == 'ongoing';
+        final hasDriverId = trip.drivers?.contains(driverId.toString()) == true;
+        final hasDriverName = trip.drivers?.contains(currentUserName) == true;
 
-          if (isOngoing) {
-            print(
-              'Found ongoing trip ${trip.id}: drivers="${trip.drivers}", hasDriverId=$hasDriverId, hasDriverName=$hasDriverName',
-            );
-          }
+        return isOngoing && (hasDriverId || hasDriverName);
+      },
+      orElse: () => TripRecord(
+        id: 0,
+        status: '',
+        startDate: '',
+        endDate: '',
+        vehicleNumber: '',
+        plantId: 0,
+        note: '',
+        drivers: '',
+        helper: '',
+        customers: '',
+      ),
+    );
 
-          return isOngoing && (hasDriverId || hasDriverName);
-        },
-        orElse: () => TripRecord(
-          id: 0,
-          status: '',
-          startDate: '',
-          endDate: '',
-          vehicleNumber: '',
-          plantId: 0,
-          note: '',
-          drivers: '',
-          helper: '',
-          customers: '',
-        ),
-      );
-
-      if (ongoingTrip.id > 0) {
-        setState(() {
-          _hasOngoingTrip = true;
-          _ongoingTrip = ongoingTrip;
-        });
-        print('Ongoing trip found: ${ongoingTrip.id}');
-      } else {
-        setState(() {
-          _hasOngoingTrip = false;
-          _ongoingTrip = null;
-        });
-        print('No ongoing trip found for driver $driverId');
-      }
+    if (ongoingTrip.id > 0) {
+      setState(() {
+        _hasOngoingTrip = true;
+        _ongoingTrip = ongoingTrip;
+      });
+    } else {
+      setState(() {
+        _hasOngoingTrip = false;
+        _ongoingTrip = null;
+      });
     }
+
+    _isCheckingOngoingTrip = false;
   }
 
   Future<void> _handleUpdateTrip() async {
@@ -644,15 +632,11 @@ class _TripScreenState extends State<TripScreen> {
           for (final vehicle in vehicles) {
             if (vehicle.id == assignedVehicleId) {
               initialVehicle = vehicle;
-              print(
-                'Auto-selected assigned vehicle: ${vehicle.number} (ID: ${vehicle.id})',
-              );
               break;
             }
           }
         }
       } catch (e) {
-        print('Failed to get assigned vehicle: $e');
         // Fallback to first vehicle if API fails
         initialVehicle = vehicles.isNotEmpty ? vehicles.first : null;
       }
@@ -660,9 +644,6 @@ class _TripScreenState extends State<TripScreen> {
       // If no assigned vehicle found, use the first available vehicle
       if (initialVehicle == null && vehicles.isNotEmpty) {
         initialVehicle = vehicles.first;
-        print(
-          'No assigned vehicle found, using first available: ${initialVehicle.number}',
-        );
       }
 
       _applyVehicleSelection(initialVehicle);
@@ -1022,12 +1003,6 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final overview = _overview;
 
-    // Check for ongoing trip when overview is available
-    if (overview != null && _overview != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _findOngoingTripForDriver();
-      });
-    }
 
     return Scaffold(
       appBar: AppBar(title: const Text('Trips')),
