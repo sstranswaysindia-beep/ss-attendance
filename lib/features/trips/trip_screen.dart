@@ -92,7 +92,7 @@ class _TripScreenState extends State<TripScreen> {
       text: _formatDate(_selectedStartDate),
     );
     _startKmController.addListener(_handleStartKmChanged);
-    
+
     // Debug user assignment data
     print('User assignment data:');
     print('  driverId: ${widget.user.driverId}');
@@ -100,7 +100,7 @@ class _TripScreenState extends State<TripScreen> {
     print('  assignmentPlantId: ${widget.user.assignmentPlantId}');
     print('  plantId: ${widget.user.plantId}');
     print('  selectedPlantId: $_selectedPlantId');
-    
+
     _loadMeta();
     _loadTrips();
     _loadPlants();
@@ -322,10 +322,14 @@ class _TripScreenState extends State<TripScreen> {
     if (currentDriverId == null || currentDriverId <= 0) return;
 
     // Check if user's assigned vehicle matches the selected vehicle
-    final assignedVehicleId = int.tryParse(widget.user.assignmentVehicleId ?? '');
+    final assignedVehicleId = int.tryParse(
+      widget.user.assignmentVehicleId ?? '',
+    );
     if (assignedVehicleId == null || assignedVehicleId != vehicle.id) return;
 
-    print('Auto-adding assigned driver: $currentDriverId for vehicle: ${vehicle.id}');
+    print(
+      'Auto-adding assigned driver: $currentDriverId for vehicle: ${vehicle.id}',
+    );
 
     // Check if driver is already selected
     final alreadySelected = _selectedDrivers.any(
@@ -872,20 +876,24 @@ class _TripScreenState extends State<TripScreen> {
 
       // Try to get assigned vehicle for driver
       TripVehicle? initialVehicle;
-      
+
       // First try to use user's assignmentVehicleId directly
-      final userAssignedVehicleId = int.tryParse(widget.user.assignmentVehicleId ?? '');
+      final userAssignedVehicleId = int.tryParse(
+        widget.user.assignmentVehicleId ?? '',
+      );
       if (userAssignedVehicleId != null) {
         print('Using user assignmentVehicleId: $userAssignedVehicleId');
         for (final vehicle in vehicles) {
           if (vehicle.id == userAssignedVehicleId) {
             initialVehicle = vehicle;
-            print('Found assigned vehicle from user data: ${vehicle.number} (ID: ${vehicle.id})');
+            print(
+              'Found assigned vehicle from user data: ${vehicle.number} (ID: ${vehicle.id})',
+            );
             break;
           }
         }
       }
-      
+
       // If not found in user data, try API
       if (initialVehicle == null) {
         try {
@@ -901,7 +909,9 @@ class _TripScreenState extends State<TripScreen> {
             for (final vehicle in vehicles) {
               if (vehicle.id == assignedVehicleId) {
                 initialVehicle = vehicle;
-                print('Found assigned vehicle from API: ${vehicle.number} (ID: ${vehicle.id})');
+                print(
+                  'Found assigned vehicle from API: ${vehicle.number} (ID: ${vehicle.id})',
+                );
                 break;
               }
             }
