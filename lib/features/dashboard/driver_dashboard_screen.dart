@@ -13,6 +13,7 @@ import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/profile_photo_widget.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
@@ -531,13 +532,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    CircleAvatar(
+                    ProfilePhotoWidget(
+                      user: widget.user,
                       radius: 28,
-                      child: Text(
-                        widget.user.displayName.isNotEmpty
-                            ? widget.user.displayName[0].toUpperCase()
-                            : '?',
-                      ),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -587,16 +584,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 // First line: Profile photo + Welcome, Name
                 Row(
                   children: [
-                    CircleAvatar(
+                    ProfilePhotoWidget(
+                      user: widget.user,
                       radius: 24,
-                      child: Text(
-                        widget.user.displayName.isNotEmpty
-                            ? widget.user.displayName[0].toUpperCase()
-                            : '?',
-                        style: textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -623,8 +613,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                           context,
                         ).colorScheme.primary.withOpacity(0.12),
                         visualDensity: VisualDensity.compact,
-                        materialTapTargetSize:
-                            MaterialTapTargetSize.shrinkWrap,
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       const SizedBox(width: 12),
                     ],

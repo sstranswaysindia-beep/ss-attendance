@@ -8,6 +8,7 @@ import '../../core/models/app_user.dart';
 import '../../core/services/profile_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/profile_photo_widget.dart';
 
 class DriverProfileScreen extends StatefulWidget {
   const DriverProfileScreen({required this.user, super.key});
@@ -19,73 +20,22 @@ class DriverProfileScreen extends StatefulWidget {
 }
 
 class _DriverProfileScreenState extends State<DriverProfileScreen> {
-  File? _profilePhoto;
-  String? _profilePhotoUrl;
   bool _isUploadingPhoto = false;
   final ProfileRepository _profileRepository = ProfileRepository();
+  late AppUser _user;
 
   @override
   void initState() {
     super.initState();
-    _profilePhotoUrl = widget.user.profilePhoto;
+    _user = widget.user;
   }
 
-  Future<void> _captureProfilePhoto() async {
-    await _showPhotoSourcePicker();
-  }
-
-  Future<void> _showPhotoSourcePicker() async {
-    final source = await showModalBottomSheet<ImageSource>(
-      context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.photo_library),
-              title: const Text('Choose from Gallery'),
-              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_camera),
-              title: const Text('Capture with Camera'),
-              onTap: () => Navigator.of(context).pop(ImageSource.camera),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (source == null) {
-      return;
-    }
-
-    final picker = ImagePicker();
-    try {
-      final xFile = await picker.pickImage(
-        source: source,
-        preferredCameraDevice: CameraDevice.front,
-        imageQuality: 85,
-      );
-
-      if (xFile == null) return;
-
-      final directory = await getApplicationDocumentsDirectory();
-      final savedPath =
-          '${directory.path}/profile_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      final savedFile = await File(xFile.path).copy(savedPath);
-
-      setState(() => _profilePhoto = savedFile);
-      await _uploadProfilePhoto(savedFile);
-      if (!mounted) return;
-    } catch (_) {
-      if (!mounted) return;
-      showAppToast(context, 'Unable to capture profile photo.', isError: true);
-    }
+  Future<void> _handlePhotoSelected(File file) async {
+    await _uploadProfilePhoto(file);
   }
 
   Future<void> _uploadProfilePhoto(File file) async {
-    final driverId = widget.user.driverId;
+    final driverId = _user.driverId;
     if (driverId == null || driverId.isEmpty) {
       showAppToast(
         context,
@@ -102,7 +52,10 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         file: file,
       );
       if (!mounted) return;
-      setState(() => _profilePhotoUrl = url);
+      
+      setState(() {
+        _user.profilePhoto = url;
+      });
       showAppToast(context, 'Profile photo updated.');
     } on ProfileFailure catch (error) {
       if (!mounted) return;
@@ -119,56 +72,55 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final user = widget.user;
-    final plantLabel = user.plantName ?? user.plantId ?? 'Not mapped';
+    final plantLabel = _user.plantName ?? _user.plantId ?? 'Not mapped';
 
     final keyInfoFields = [
       _ProfileField(
         label: 'Employee ID',
-        value: user.employeeId ?? 'Not assigned',
+        value: _user.employeeId ?? 'Not assigned',
       ),
       _ProfileField(label: 'Plant', value: plantLabel),
       _ProfileField(
         label: 'Vehicle Number',
-        value: user.vehicleNumber ?? 'Not assigned',
+        value: _user.vehicleNumber ?? 'Not assigned',
       ),
       _ProfileField(
-        label: 'Father’s Name',
-        value: user.fatherName ?? 'Not provided',
+        label: 'Father\'s Name',
+        value: _user.fatherName ?? 'Not provided',
       ),
-      _ProfileField(label: 'Aadhaar', value: user.aadhaar ?? 'Not provided'),
+      _ProfileField(label: 'Aadhaar', value: _user.aadhaar ?? 'Not provided'),
     ];
 
     final editableFields = [
       const _ProfileField(label: 'Contact Number', value: '+91 98765 43210'),
       const _ProfileField(label: 'Email', value: 'driver@example.com'),
-      _ProfileField(label: 'Address', value: user.address ?? 'Not provided'),
+      _ProfileField(label: 'Address', value: _user.address ?? 'Not provided'),
     ];
 
     final complianceFields = [
       _ProfileField(
         label: 'ESI Number',
-        value: user.esiNumber ?? 'Not provided',
+        value: _user.esiNumber ?? 'Not provided',
       ),
       _ProfileField(
         label: 'UAN Number',
-        value: user.uanNumber ?? 'Not provided',
+        value: _user.uanNumber ?? 'Not provided',
       ),
       _ProfileField(
         label: 'IFSC Code',
-        value: user.ifscCode != null
-            ? user.ifscVerified == true
-                  ? '${user.ifscCode} (Verified)'
-                  : '${user.ifscCode} (Pending verification)'
+        value: _user.ifscCode != null
+            ? _user.ifscVerified == true
+                  ? '${_user.ifscCode} (Verified)'
+                  : '${_user.ifscCode} (Pending verification)'
             : 'Not provided',
       ),
       _ProfileField(
         label: 'Bank Account',
-        value: user.bankAccount ?? 'Not provided',
+        value: _user.bankAccount ?? 'Not provided',
       ),
       _ProfileField(
         label: 'Branch Name',
-        value: user.branchName ?? 'Not provided',
+        value: _user.branchName ?? 'Not provided',
       ),
     ];
 
@@ -183,41 +135,32 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
               Center(
                 child: Column(
                   children: [
-                    Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        CircleAvatar(
-                          radius: 56,
-                          backgroundImage: _profilePhoto != null
-                              ? FileImage(_profilePhoto!)
-                              : _buildNetworkImage(
-                                  _profilePhotoUrl ?? user.profilePhoto,
-                                ),
-                        ),
-                        if (_isUploadingPhoto)
-                          const CircularProgressIndicator(color: Colors.white),
-                      ],
+                    ProfilePhotoWithUpload(
+                      user: _user,
+                      radius: 56,
+                      onPhotoSelected: _handlePhotoSelected,
+                      isUploading: _isUploadingPhoto,
+                      showBorder: true,
+                      borderColor: Theme.of(context).colorScheme.primary,
+                      borderWidth: 3,
                     ),
-                    TextButton.icon(
-                      onPressed: _captureProfilePhoto,
-                      icon: const Icon(Icons.camera_alt),
-                      label: const Text('Update Profile Photo'),
-                    ),
+                    const SizedBox(height: 12),
                     const Text(
-                      'Capture or upload a profile photo. Changes save instantly.',
+                      'Tap the camera icon to update your profile photo',
                       textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
               Text(
-                user.displayName,
+                _user.displayName,
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 4),
               Text(
-                'Employee ID: ${user.employeeId ?? 'Not assigned'}',
+                'Employee ID: ${_user.employeeId ?? 'Not assigned'}',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               Text(
@@ -225,7 +168,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               Text(
-                'Vehicle: ${user.vehicleNumber ?? 'Not assigned'}',
+                'Vehicle: ${_user.vehicleNumber ?? 'Not assigned'}',
                 style: Theme.of(context).textTheme.bodyMedium,
               ),
               const SizedBox(height: 16),
@@ -295,12 +238,3 @@ class _ProfileFieldTile extends StatelessWidget {
   }
 }
 
-ImageProvider<Object> _buildNetworkImage(String? path) {
-  if (path == null || path.isEmpty) {
-    return const NetworkImage('https://placehold.co/200x200');
-  }
-  if (path.startsWith('http')) {
-    return NetworkImage(path);
-  }
-  return NetworkImage('https://sstranswaysindia.com$path');
-}
