@@ -122,7 +122,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ?.copyWith(
                                         fontWeight: FontWeight.w700,
                                         color: const Color(0xFF000C66),
-                                        fontSize: 30,
+                                        fontSize: 29,
                                       ),
                                 ),
                                 const SizedBox(height: 2),

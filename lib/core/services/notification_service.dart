@@ -105,6 +105,7 @@ class NotificationService {
           priority: Priority.high,
           showWhen: true,
           largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+          icon: '@mipmap/ic_launcher',
         );
 
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
@@ -147,6 +148,7 @@ class NotificationService {
           priority: Priority.high,
           showWhen: true,
           largeIcon: DrawableResourceAndroidBitmap('@mipmap/ic_launcher'),
+          icon: '@mipmap/ic_launcher',
         );
 
     const DarwinNotificationDetails iosDetails = DarwinNotificationDetails(
