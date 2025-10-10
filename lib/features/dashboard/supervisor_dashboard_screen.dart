@@ -459,8 +459,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                           ),
                           const SizedBox(width: 8),
                           Chip(
-                            label: Text(timeFormatter.format(_now)),
-                            avatar: const Icon(Icons.access_time, size: 16),
+                            label: Text(
+                              timeFormatter.format(_now),
+                              style: textTheme.labelSmall?.copyWith(
+                                fontSize: 11,
+                              ),
+                            ),
+                            avatar: const Icon(Icons.access_time, size: 14),
+                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            visualDensity: VisualDensity.compact,
                           ),
                         ],
                       ),

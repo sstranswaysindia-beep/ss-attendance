@@ -356,6 +356,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       showAppToast(context, 'Select a vehicle before submitting.', isError: true);
       return;
     }
+    if (_capturedPhoto == null) {
+      showAppToast(context, 'Please capture a photo before submitting attendance.', isError: true);
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -523,7 +527,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       ),
                     const SizedBox(height: 20),
                     Text(
-                      'Attendance Photo (optional)',
+                      'Attendance Photo (required)',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 8),
@@ -549,19 +553,36 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Photos help supervisors verify attendance but are optional if the camera is unavailable.',
-                      style: Theme.of(context).textTheme.bodySmall,
+                      'Photo is required for attendance verification. Please capture a clear photo of yourself.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.red[700],
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     FilledButton(
-                      onPressed: _isSubmitting ? null : _submitAttendance,
+                      onPressed: _isSubmitting || _capturedPhoto == null ? null : _submitAttendance,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: _capturedPhoto == null 
+                            ? Colors.grey[400] 
+                            : null,
+                      ),
                       child: _isSubmitting
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : Text(_currentActionLabel),
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(_currentActionLabel),
+                                if (_capturedPhoto == null) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.camera_alt, size: 16),
+                                ],
+                              ],
+                            ),
                     ),
                     const SizedBox(height: 24),
                     _ShiftStatusCard(
