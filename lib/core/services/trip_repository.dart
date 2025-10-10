@@ -551,18 +551,9 @@ class TripRepository {
     final fallbackVehicles = _buildFallbackVehicles(user);
 
     try {
-      final uri = Uri.parse('${_mobileBase}vehicles.php');
-      final response = await _client.post(
-        uri,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(<String, dynamic>{
-          'role': _roleToString(user.role),
-          if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
-          if (_tryParseInt(user.driverId) != null)
-            'driverId': _tryParseInt(user.driverId),
-          'plantId': _tryParseInt(plantId) ?? plantId,
-        }),
-      );
+      // Use the same API as index.html: get_vehicles.php
+      final uri = Uri.parse('https://sstranswaysindia.com/TripDetails/api/get_vehicles.php?plant_id=${Uri.encodeComponent(plantId)}&cb=${DateTime.now().millisecondsSinceEpoch}');
+      final response = await _client.get(uri);
 
       if (response.statusCode >= 300) {
         debugPrint(
@@ -585,7 +576,7 @@ class TripRepository {
         throw TripFailure('Unable to load vehicles.');
       }
 
-      if (payload['status'] != 'ok') {
+      if (payload['ok'] != true) {
         debugPrint(
           'TripRepository.fetchVehiclesForPlant: server error ${payload['error']}',
         );
