@@ -92,6 +92,15 @@ class _TripScreenState extends State<TripScreen> {
       text: _formatDate(_selectedStartDate),
     );
     _startKmController.addListener(_handleStartKmChanged);
+    
+    // Debug user assignment data
+    print('User assignment data:');
+    print('  driverId: ${widget.user.driverId}');
+    print('  assignmentVehicleId: ${widget.user.assignmentVehicleId}');
+    print('  assignmentPlantId: ${widget.user.assignmentPlantId}');
+    print('  plantId: ${widget.user.plantId}');
+    print('  selectedPlantId: $_selectedPlantId');
+    
     _loadMeta();
     _loadTrips();
     _loadPlants();
