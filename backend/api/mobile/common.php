@@ -56,33 +56,54 @@ function apiEnsurePost(): void {
     }
 }
 
-function apiSaveUploadedFile(string $field, int $driverId, string $prefix): ?string {
+function apiSaveUploadedFile(string $field, int $driverId, string $prefix, ?string $customPath = null, ?string $customFilename = null): ?string {
     if (empty($_FILES[$field]) || $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
         return null;
     }
 
-$baseDir = realpath(__DIR__ . '/../../DriverDocs/uploads');
+    $baseDir = realpath(__DIR__ . '/../../DriverDocs/uploads');
     if ($baseDir === false) {
         throw new RuntimeException('Upload base directory not found.');
     }
 
-    $driverDir = $baseDir . '/' . $driverId;
+    // Use custom path if provided, otherwise use default driver ID folder
+    if ($customPath !== null) {
+        // Extract driver ID and date from custom path like "public_html/DriverDocs/uploads/169/2024-10-10/"
+        $pathParts = explode('/', trim($customPath, '/'));
+        $driverDir = $baseDir;
+        foreach ($pathParts as $part) {
+            if ($part && $part !== 'public_html' && $part !== 'DriverDocs' && $part !== 'uploads') {
+                $driverDir .= '/' . $part;
+            }
+        }
+    } else {
+        $driverDir = $baseDir . '/' . $driverId;
+    }
+
     if (!is_dir($driverDir)) {
         if (!mkdir($driverDir, 0755, true) && !is_dir($driverDir)) {
-            throw new RuntimeException('Unable to create upload directory.');
+            throw new RuntimeException('Unable to create upload directory: ' . $driverDir);
         }
     }
 
-    $extension = pathinfo($_FILES[$field]['name'], PATHINFO_EXTENSION) ?: 'jpg';
-    $extension = preg_replace('/[^a-zA-Z0-9]+/', '', $extension) ?: 'jpg';
-    $fileName = sprintf('%s_%d_%d.%s', $prefix, $driverId, time(), strtolower($extension));
+    // Use custom filename if provided, otherwise generate default
+    if ($customFilename !== null) {
+        $fileName = $customFilename;
+    } else {
+        $extension = pathinfo($_FILES[$field]['name'], PATHINFO_EXTENSION) ?: 'jpg';
+        $extension = preg_replace('/[^a-zA-Z0-9]+/', '', $extension) ?: 'jpg';
+        $fileName = sprintf('%s_%d_%d.%s', $prefix, $driverId, time(), strtolower($extension));
+    }
+    
     $targetPath = $driverDir . '/' . $fileName;
 
     if (!move_uploaded_file($_FILES[$field]['tmp_name'], $targetPath)) {
-        throw new RuntimeException('Failed to move uploaded file.');
+        throw new RuntimeException('Failed to move uploaded file to: ' . $targetPath);
     }
 
-    return "/DriverDocs/uploads/{$driverId}/{$fileName}";
+    // Return relative path from uploads directory
+    $relativePath = str_replace($baseDir, '', $driverDir) . '/' . $fileName;
+    return "/DriverDocs/uploads" . $relativePath;
 }
 
 function apiBindParams(mysqli_stmt $stmt, string $types, array $values): void {

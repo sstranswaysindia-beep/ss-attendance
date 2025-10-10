@@ -76,7 +76,11 @@ try {
         }
         $openStmt->close();
 
-        $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_in');
+        // Get custom path and filename from request if provided
+        $photoPath = $_POST['photo_path'] ?? null;
+        $photoFilename = $_POST['photo_filename'] ?? null;
+        
+        $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_in', $photoPath, $photoFilename);
 
         $insertStmt = $conn->prepare(
             'INSERT INTO attendance (
@@ -131,7 +135,12 @@ try {
     }
 
     $attendanceId = (int)$openRow['id'];
-    $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_out');
+    
+    // Get custom path and filename from request if provided
+    $photoPath = $_POST['photo_path'] ?? null;
+    $photoFilename = $_POST['photo_filename'] ?? null;
+    
+    $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_out', $photoPath, $photoFilename);
 
     $updateStmt = $conn->prepare(
         'UPDATE attendance
