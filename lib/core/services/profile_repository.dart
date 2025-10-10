@@ -14,12 +14,9 @@ class ProfileFailure implements Exception {
 }
 
 class ProfileRepository {
-  ProfileRepository({
-    http.Client? client,
-    Uri? uploadEndpoint,
-  })  : _client = client ?? http.Client(),
-        _uploadEndpoint =
-            uploadEndpoint ?? Uri.parse(_defaultUploadEndpoint);
+  ProfileRepository({http.Client? client, Uri? uploadEndpoint})
+    : _client = client ?? http.Client(),
+      _uploadEndpoint = uploadEndpoint ?? Uri.parse(_defaultUploadEndpoint);
 
   static const String _defaultUploadEndpoint =
       'https://sstranswaysindia.com/api/mobile/profile_photo_upload.php';
@@ -33,10 +30,12 @@ class ProfileRepository {
   }) async {
     // Compress the image before uploading
     final compressedFile = await _compressImage(file);
-    
+
     final request = http.MultipartRequest('POST', _uploadEndpoint)
       ..fields['driverId'] = driverId
-      ..files.add(await http.MultipartFile.fromPath('photo', compressedFile.path));
+      ..files.add(
+        await http.MultipartFile.fromPath('photo', compressedFile.path),
+      );
 
     final response = await http.Response.fromStream(await request.send());
 
@@ -59,14 +58,14 @@ class ProfileRepository {
     if (url == null || url.isEmpty) {
       throw ProfileFailure('Server did not return the uploaded photo URL.');
     }
-    
+
     // Clean up the temporary compressed file
     try {
       await compressedFile.delete();
     } catch (_) {
       // Ignore cleanup errors
     }
-    
+
     return url;
   }
 
@@ -75,7 +74,7 @@ class ProfileRepository {
       // Read the image file
       final bytes = await file.readAsBytes();
       final image = img.decodeImage(bytes);
-      
+
       if (image == null) {
         throw ProfileFailure('Unable to decode image');
       }
@@ -90,12 +89,14 @@ class ProfileRepository {
 
       // Encode as JPEG with 85% quality
       final compressedBytes = img.encodeJpg(resizedImage, quality: 85);
-      
+
       // Create a temporary file for the compressed image
       final tempDir = Directory.systemTemp;
-      final tempFile = File('${tempDir.path}/compressed_profile_${DateTime.now().millisecondsSinceEpoch}.jpg');
+      final tempFile = File(
+        '${tempDir.path}/compressed_profile_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
       await tempFile.writeAsBytes(compressedBytes);
-      
+
       return tempFile;
     } catch (e) {
       throw ProfileFailure('Failed to compress image: $e');

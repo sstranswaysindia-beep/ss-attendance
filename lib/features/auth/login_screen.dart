@@ -117,11 +117,12 @@ class _LoginScreenState extends State<LoginScreen> {
                                 Text(
                                   'SS Transways India',
                                   textAlign: TextAlign.center,
-                                  style: theme.textTheme.headlineSmall?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                    color: const Color(0xFF000C66),
-                                    fontSize: 32,
-                                  ),
+                                  style: theme.textTheme.headlineSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF000C66),
+                                        fontSize: 32,
+                                      ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(

@@ -26,7 +26,7 @@ class ProfilePhotoWidget extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final borderColor = this.borderColor ?? theme.colorScheme.primary;
-    
+
     Widget avatar = CircleAvatar(
       radius: radius,
       backgroundColor: theme.colorScheme.primary.withOpacity(0.1),
@@ -37,20 +37,14 @@ class ProfilePhotoWidget extends StatelessWidget {
       avatar = Container(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(
-            color: borderColor,
-            width: borderWidth,
-          ),
+          border: Border.all(color: borderColor, width: borderWidth),
         ),
         child: avatar,
       );
     }
 
     if (onTap != null) {
-      return GestureDetector(
-        onTap: onTap,
-        child: avatar,
-      );
+      return GestureDetector(onTap: onTap, child: avatar);
     }
 
     return avatar;
@@ -58,7 +52,7 @@ class ProfilePhotoWidget extends StatelessWidget {
 
   Widget _buildProfileImage(ThemeData theme) {
     final profilePhoto = user.profilePhoto;
-    
+
     if (profilePhoto == null || profilePhoto.isEmpty) {
       return Text(
         _getInitials(),
@@ -104,12 +98,12 @@ class ProfilePhotoWidget extends StatelessWidget {
   String _getInitials() {
     final displayName = user.displayName ?? '';
     if (displayName.isEmpty) return '?';
-    
+
     final words = displayName.trim().split(' ');
     if (words.length == 1) {
       return words[0][0].toUpperCase();
     }
-    
+
     return '${words[0][0]}${words[words.length - 1][0]}'.toUpperCase();
   }
 
@@ -117,11 +111,11 @@ class ProfilePhotoWidget extends StatelessWidget {
     if (path == null || path.isEmpty) {
       return 'https://placehold.co/200x200';
     }
-    
+
     if (path.startsWith('http')) {
       return path;
     }
-    
+
     return 'https://sstranswaysindia.com$path';
   }
 }
@@ -185,10 +179,7 @@ class _ProfilePhotoWithUploadState extends State<ProfilePhotoWithUpload> {
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.primary,
                 shape: BoxShape.circle,
-                border: Border.all(
-                  color: Colors.white,
-                  width: 2,
-                ),
+                border: Border.all(color: Colors.white, width: 2),
               ),
               padding: const EdgeInsets.all(4),
               child: Icon(
@@ -250,4 +241,3 @@ class _ProfilePhotoWithUploadState extends State<ProfilePhotoWithUpload> {
     }
   }
 }
-

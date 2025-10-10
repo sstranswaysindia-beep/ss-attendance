@@ -52,7 +52,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         file: file,
       );
       if (!mounted) return;
-      
+
       setState(() {
         _user.profilePhoto = url;
       });
@@ -237,4 +237,3 @@ class _ProfileFieldTile extends StatelessWidget {
     );
   }
 }
-

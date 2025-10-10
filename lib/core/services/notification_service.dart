@@ -262,7 +262,7 @@ class NotificationService {
     // Schedule for 9:00 AM today (if not passed) or tomorrow
     final now = DateTime.now();
     DateTime scheduledTime = DateTime(now.year, now.month, now.day, 9, 0);
-    
+
     // If 9 AM has already passed today, schedule for tomorrow
     if (scheduledTime.isBefore(now)) {
       scheduledTime = scheduledTime.add(const Duration(days: 1));
@@ -286,7 +286,7 @@ class NotificationService {
     // Schedule for 9:00 PM today (if not passed) or tomorrow
     final now = DateTime.now();
     DateTime scheduledTime = DateTime(now.year, now.month, now.day, 21, 0);
-    
+
     // If 9 PM has already passed today, schedule for tomorrow
     if (scheduledTime.isBefore(now)) {
       scheduledTime = scheduledTime.add(const Duration(days: 1));
@@ -319,7 +319,7 @@ class NotificationService {
 
     // Schedule check-in reminder for 9:00 AM
     await scheduleCheckInReminder();
-    
+
     // Schedule check-out reminder for 9:00 PM
     await scheduleCheckOutReminder();
   }
@@ -330,7 +330,9 @@ class NotificationService {
 
     try {
       final response = await http.get(
-        Uri.parse('https://sstranswaysindia.com/api/mobile/attendance_history.php'),
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/attendance_history.php',
+        ),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -339,11 +341,12 @@ class NotificationService {
         if (data['ok'] == true && data['data'] != null) {
           final List<dynamic> records = data['data'];
           final today = DateTime.now();
-          final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-          
+          final todayStr =
+              '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
           // Check if there's a check-in record for today
           for (final record in records) {
-            if (record['driver_id']?.toString() == driverId && 
+            if (record['driver_id']?.toString() == driverId &&
                 record['date']?.toString().startsWith(todayStr) == true &&
                 record['action']?.toString() == 'check_in') {
               return true;
@@ -365,7 +368,9 @@ class NotificationService {
 
     try {
       final response = await http.get(
-        Uri.parse('https://sstranswaysindia.com/api/mobile/attendance_history.php'),
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/attendance_history.php',
+        ),
         headers: {'Content-Type': 'application/json'},
       );
 
@@ -374,11 +379,12 @@ class NotificationService {
         if (data['ok'] == true && data['data'] != null) {
           final List<dynamic> records = data['data'];
           final today = DateTime.now();
-          final todayStr = '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-          
+          final todayStr =
+              '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
+
           // Check if there's a check-out record for today
           for (final record in records) {
-            if (record['driver_id']?.toString() == driverId && 
+            if (record['driver_id']?.toString() == driverId &&
                 record['date']?.toString().startsWith(todayStr) == true &&
                 record['action']?.toString() == 'check_out') {
               return true;
@@ -424,6 +430,3 @@ class NotificationService {
     }
   }
 }
-
-
-

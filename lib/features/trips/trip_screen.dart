@@ -10,9 +10,12 @@ import '../../core/models/trip_plant.dart';
 import '../../core/models/trip_record.dart';
 import '../../core/models/trip_summary.dart';
 import '../../core/models/trip_vehicle.dart';
+import '../../core/services/gps_service.dart';
+import '../../core/services/local_storage_service.dart';
 import '../../core/services/trip_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/glowing_badge.dart';
 
 class TripScreen extends StatefulWidget {
   const TripScreen({required this.user, super.key});
@@ -25,6 +28,11 @@ class TripScreen extends StatefulWidget {
 
 class _TripScreenState extends State<TripScreen> {
   final TripRepository _repository = TripRepository();
+  final GpsService _gpsService = GpsService();
+  final LocalStorageService _localStorage = LocalStorageService();
+  final FocusNode _driverFocusNode = FocusNode();
+  final FocusNode _helperFocusNode = FocusNode();
+  Timer? _autoSaveTimer;
 
   TripOverviewResponse? _overview;
   bool _isLoading = false;
@@ -69,6 +77,7 @@ class _TripScreenState extends State<TripScreen> {
   String _status = 'All';
   String? _selectedPlantId;
   int? _lastSuggestedStartKm;
+  String? _savedVehicleId;
 
   @override
   void initState() {
@@ -87,6 +96,8 @@ class _TripScreenState extends State<TripScreen> {
     _loadTrips();
     _loadPlants();
     _findOngoingTrip();
+    _restoreSavedSelections();
+    _startAutoSave();
   }
 
   @override
@@ -96,6 +107,9 @@ class _TripScreenState extends State<TripScreen> {
     _startKmController.dispose();
     _noteController.dispose();
     _customerController.dispose();
+    _driverFocusNode.dispose();
+    _helperFocusNode.dispose();
+    _autoSaveTimer?.cancel();
     super.dispose();
   }
 
@@ -274,6 +288,11 @@ class _TripScreenState extends State<TripScreen> {
       });
     }
 
+    // Save vehicle selection to local storage
+    if (vehicle != null) {
+      _localStorage.saveVehicleId(vehicle.id.toString());
+    }
+
     // Check if the selected vehicle has an ongoing trip
     _checkVehicleOngoingTrip(vehicle);
   }
@@ -292,7 +311,8 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     final ongoingTrip = _overview!.trips.firstWhere(
-      (trip) => trip.vehicleNumber == vehicle.number && trip.status == 'ongoing',
+      (trip) =>
+          trip.vehicleNumber == vehicle.number && trip.status == 'ongoing',
       orElse: () => TripRecord(
         id: 0,
         startDate: '',
@@ -327,7 +347,29 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _setSuggestedStartKm(TripVehicle vehicle) {
-    final lastEndKm = vehicle.lastEndKm;
+    // First try to get from vehicle's lastEndKm
+    var lastEndKm = vehicle.lastEndKm;
+    
+    // If not available, find from trip history
+    if (lastEndKm == null && _overview != null) {
+      final lastEndedTrip = _overview!.trips.firstWhere(
+        (trip) => trip.vehicleNumber == vehicle.number && 
+                  trip.status.toLowerCase() == 'ended' && 
+                  trip.endKm != null,
+        orElse: () => TripRecord(
+          id: 0,
+          startDate: '',
+          endDate: '',
+          vehicleNumber: '',
+          status: '',
+        ),
+      );
+      
+      if (lastEndedTrip.id > 0) {
+        lastEndKm = lastEndedTrip.endKm?.toInt();
+      }
+    }
+
     final currentText = _startKmController.text.trim();
     final suggestedText = _lastSuggestedStartKm?.toString();
     final shouldReplace =
@@ -787,7 +829,17 @@ class _TripScreenState extends State<TripScreen> {
         initialVehicle = vehicles.first;
       }
 
-      _applyVehicleSelection(initialVehicle);
+      // Restore saved vehicle if available
+      if (_savedVehicleId != null) {
+        final savedVehicle = vehicles.firstWhere(
+          (v) => v.id.toString() == _savedVehicleId,
+          orElse: () => initialVehicle,
+        );
+        _applyVehicleSelection(savedVehicle);
+        _savedVehicleId = null; // Clear after use
+      } else {
+        _applyVehicleSelection(initialVehicle);
+      }
 
       unawaited(
         _loadHelpers(plantId, vehicleId: _selectedVehicle?.id.toString()),
@@ -1066,6 +1118,9 @@ class _TripScreenState extends State<TripScreen> {
     setState(() => _isCreatingTrip = true);
 
     try {
+      // Get GPS coordinates
+      final gpsLocation = await _gpsService.getLocationWithPrompt();
+      
       await _repository.createTrip(
         vehicleId: vehicle.id,
         startDate: startDate,
@@ -1078,6 +1133,8 @@ class _TripScreenState extends State<TripScreen> {
             .toList(growable: false),
         customerNames: _customerNames,
         note: _noteController.text.trim(),
+        gpsLat: gpsLocation?['lat'],
+        gpsLng: gpsLocation?['lng'],
       );
 
       showAppToast(context, 'Trip started successfully.');
@@ -1144,9 +1201,12 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final overview = _overview;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Trips')),
-      body: AppGradientBackground(
+    return KeyboardListener(
+      focusNode: FocusNode(),
+      onKeyEvent: _handleKeyEvent,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Trips')),
+        body: AppGradientBackground(
         child: RefreshIndicator(
           onRefresh: () async {
             await Future.wait([_loadTrips(), _loadPlants(), _loadMeta()]);
@@ -1184,6 +1244,8 @@ class _TripScreenState extends State<TripScreen> {
                                 _selectedPlantId = plant.id.toString();
                                 _selectedVehicle = null;
                               });
+                              // Save plant selection to local storage
+                              _localStorage.savePlantId(plant.id.toString());
                               _filterDriversForPlant(plant.id.toString());
                               _primeHelpersForPlant(plant.id.toString());
                               _loadVehicles(plant.id.toString());
@@ -1215,10 +1277,12 @@ class _TripScreenState extends State<TripScreen> {
                       currentDriverId: int.tryParse(widget.user.driverId ?? ''),
                       driverFieldKey: _driverDropdownKey,
                       helperFieldKey: _helperDropdownKey,
-                      onDriverAdded: _handleDriverAdded,
-                      onDriverRemoved: _handleDriverRemoved,
-                      onHelperAdded: _handleHelperAdded,
-                      onHelperRemoved: _handleHelperRemoved,
+                      driverFocusNode: _driverFocusNode,
+                      helperFocusNode: _helperFocusNode,
+                      onDriverAdded: (driver) => _handleDriverAdded(driver),
+                      onDriverRemoved: (driver) => _handleDriverRemoved(driver),
+                      onHelperAdded: (helper) => _handleHelperAdded(helper),
+                      onHelperRemoved: (helper) => _handleHelperRemoved(helper),
                       onReloadHelpers: () {
                         if (_selectedPlantId != null) {
                           return _loadHelpers(
@@ -1283,6 +1347,65 @@ class _TripScreenState extends State<TripScreen> {
         ),
       ),
     );
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.enter) {
+      // Check if focus is on driver or helper dropdown
+      if (_driverFocusNode.hasFocus) {
+        // Find the first available driver and add it
+        if (_filteredDrivers.isNotEmpty) {
+          _handleDriverAdded(_filteredDrivers.first);
+        }
+      } else if (_helperFocusNode.hasFocus) {
+        // Find the first available helper and add it
+        if (_helpersForPlant.isNotEmpty) {
+          _handleHelperAdded(_helpersForPlant.first);
+        }
+      }
+    }
+  }
+
+  Future<void> _restoreSavedSelections() async {
+    try {
+      // Restore plant selection
+      final savedPlantId = await _localStorage.getPlantId();
+      if (savedPlantId != null && _selectedPlantId != savedPlantId) {
+        // Only restore if user has permission to change plant
+        if (widget.user.role != UserRole.driver) {
+          _selectedPlantId = savedPlantId;
+        }
+      }
+
+      // Restore vehicle selection after plants are loaded
+      final savedVehicleId = await _localStorage.getVehicleId();
+      if (savedVehicleId != null && _selectedVehicle == null) {
+        // This will be handled after vehicles are loaded
+        _savedVehicleId = savedVehicleId;
+      }
+    } catch (e) {
+      // Ignore storage errors
+    }
+  }
+
+  void _startAutoSave() {
+    _autoSaveTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _saveFormState();
+    });
+  }
+
+  void _saveFormState() {
+    try {
+      // Save form state to local storage
+      if (_selectedPlant != null) {
+        _localStorage.savePlantId(_selectedPlant!.id.toString());
+      }
+      if (_selectedVehicle != null) {
+        _localStorage.saveVehicleId(_selectedVehicle!.id.toString());
+      }
+    } catch (e) {
+      // Ignore storage errors
+    }
   }
 }
 
@@ -1537,22 +1660,48 @@ class _TripTile extends StatelessWidget {
                         horizontal: 12,
                         vertical: 6,
                       ),
-                      child: Text(
-                        trip.status.toUpperCase(),
-                        style: theme.textTheme.labelMedium?.copyWith(
-                          color: statusColor,
-                          fontWeight: FontWeight.bold,
-                          shadows: (isOngoing || isEnded)
-                              ? [
-                                  Shadow(
-                                    color: statusColor.withOpacity(0.5),
-                                    blurRadius: 4,
-                                  ),
-                                ]
-                              : null,
+                      child: (isOngoing || isEnded)
+                          ? GlowingBadge(
+                              color: isOngoing ? Colors.orange : Colors.green,
+                              child: Text(
+                                trip.status.toUpperCase(),
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: statusColor,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                          : Text(
+                              trip.status.toUpperCase(),
+                              style: theme.textTheme.labelMedium?.copyWith(
+                                color: statusColor,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    // Run KM display
+                    if (trip.startKm != null && trip.endKm != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Text(
+                          'Run: ${(trip.endKm! - trip.startKm!).toInt()} km',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: Colors.blue.shade700,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: () => onDelete(trip),
@@ -1931,6 +2080,8 @@ class _DriverHelperCard extends StatelessWidget {
     required this.currentDriverId,
     required this.driverFieldKey,
     required this.helperFieldKey,
+    required this.driverFocusNode,
+    required this.helperFocusNode,
     required this.onDriverAdded,
     required this.onDriverRemoved,
     required this.onHelperAdded,
@@ -1947,6 +2098,8 @@ class _DriverHelperCard extends StatelessWidget {
   final int? currentDriverId;
   final GlobalKey<FormFieldState<int?>> driverFieldKey;
   final GlobalKey<FormFieldState<int?>> helperFieldKey;
+  final FocusNode driverFocusNode;
+  final FocusNode helperFocusNode;
   final ValueChanged<TripDriver> onDriverAdded;
   final ValueChanged<TripDriver> onDriverRemoved;
   final ValueChanged<TripHelper> onHelperAdded;
@@ -2020,6 +2173,7 @@ class _DriverHelperCard extends StatelessWidget {
             const SizedBox(height: 16),
             DropdownButtonFormField<int?>(
               key: driverFieldKey,
+              focusNode: driverFocusNode,
               decoration: buildDropdownDecoration('Add Driver'),
               value: null,
               isExpanded: true,
@@ -2105,6 +2259,7 @@ class _DriverHelperCard extends StatelessWidget {
             const SizedBox(height: 20),
             DropdownButtonFormField<int?>(
               key: helperFieldKey,
+              focusNode: helperFocusNode,
               decoration: buildDropdownDecoration('Add Helper'),
               value: null,
               isExpanded: true,
@@ -2451,29 +2606,19 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
                 // Header with glowing tag-style "Ongoing Trip"
                 Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade700,
-                        borderRadius: BorderRadius.circular(20),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.orange.shade300.withOpacity(0.8),
-                            blurRadius: 8,
-                            spreadRadius: 2,
-                          ),
-                          BoxShadow(
-                            color: Colors.orange.shade500.withOpacity(0.6),
-                            blurRadius: 12,
-                            spreadRadius: 1,
-                          ),
-                        ],
-                      ),
-                      child: Text(
-                        "ONGOING",
+                    GlowingBadge(
+                      color: Colors.orange,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade700,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          "ONGOING",
                         style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
