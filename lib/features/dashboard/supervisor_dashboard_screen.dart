@@ -391,7 +391,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Version 1.0.1',
+                  'Version 1.0.2',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.blue[600],
                     fontSize: 14,
