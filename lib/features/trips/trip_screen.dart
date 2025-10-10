@@ -831,12 +831,17 @@ class _TripScreenState extends State<TripScreen> {
 
       // Restore saved vehicle if available
       if (_savedVehicleId != null) {
-        final savedVehicle = vehicles.firstWhere(
-          (v) => v.id.toString() == _savedVehicleId,
-          orElse: () => initialVehicle,
-        );
-        _applyVehicleSelection(savedVehicle);
-        _savedVehicleId = null; // Clear after use
+        try {
+          final savedVehicle = vehicles.firstWhere(
+            (v) => v.id.toString() == _savedVehicleId,
+          );
+          _applyVehicleSelection(savedVehicle);
+          _savedVehicleId = null; // Clear after use
+        } catch (e) {
+          // If saved vehicle not found, use initial vehicle
+          _applyVehicleSelection(initialVehicle);
+          _savedVehicleId = null;
+        }
       } else {
         _applyVehicleSelection(initialVehicle);
       }
@@ -1346,6 +1351,7 @@ class _TripScreenState extends State<TripScreen> {
           ),
         ),
       ),
+    ),
     );
   }
 
@@ -1678,8 +1684,6 @@ class _TripTile extends StatelessWidget {
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
-                        ),
-                      ),
                     ),
                     const SizedBox(width: 8),
                     // Run KM display
@@ -2582,8 +2586,6 @@ class _OngoingTripCard extends StatefulWidget {
 class _OngoingTripCardState extends State<_OngoingTripCard> {
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       child: Card(
@@ -2619,85 +2621,81 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
                         ),
                         child: Text(
                           "ONGOING",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12,
-                          letterSpacing: 0.5,
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                       ),
+                    ),
+                    const Spacer(),
+                    Row(
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: widget.onUpdate,
+                          icon: const Icon(Icons.update, size: 16),
+                          label: const Text('Update'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: widget.onEnd,
+                          icon: const Icon(Icons.flag, size: 16),
+                          label: const Text('End'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
                 const SizedBox(height: 12),
-
-                // Trip info - simplified like in your image
+                // Trip info
                 Row(
                   children: [
                     Text(
                       "#${widget.trip.id}",
-                      style: theme.textTheme.titleLarge?.copyWith(
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
                     ),
+                    const SizedBox(width: 16),
+                    if (widget.trip.vehicleNumber.isNotEmpty)
+                      Text(
+                        widget.trip.vehicleNumber,
+                        style: const TextStyle(fontSize: 14),
+                      ),
                     const SizedBox(width: 16),
                     if (widget.trip.startDate.isNotEmpty)
                       Text(
                         widget.trip.startDate,
-                        style: theme.textTheme.bodyMedium,
+                        style: const TextStyle(fontSize: 12),
                       ),
-                    const SizedBox(width: 16),
+                    const Spacer(),
                     if (widget.trip.startKm != null)
                       Text(
-                        "KM ${widget.trip.startKm!.toInt()}",
-                        style: theme.textTheme.bodyMedium?.copyWith(
+                        "${widget.trip.startKm!.toInt()} km",
+                        style: const TextStyle(
                           fontWeight: FontWeight.w600,
+                          fontSize: 14,
                         ),
                       ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: widget.onUpdate,
-                        icon: const Icon(Icons.keyboard_arrow_up, size: 18),
-                        label: const Text(
-                          "Update",
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange.shade600,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: widget.onEnd,
-                        icon: const Icon(Icons.flag, size: 18),
-                        label: const Text(
-                          "End",
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade600,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ],
