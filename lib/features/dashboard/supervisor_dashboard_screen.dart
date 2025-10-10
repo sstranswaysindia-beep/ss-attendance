@@ -393,8 +393,9 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 child: Text(
                   'Version 1.0.1',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.grey[600],
-                    fontSize: 12,
+                    color: Colors.blue[600],
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
                   ),
                   textAlign: TextAlign.center,
                 ),
