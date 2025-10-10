@@ -466,7 +466,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                               ),
                             ),
                             avatar: const Icon(Icons.access_time, size: 14),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             visualDensity: VisualDensity.compact,
                           ),
                         ],

@@ -647,7 +647,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                               ),
                             ),
                             avatar: const Icon(Icons.access_time, size: 14),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             visualDensity: VisualDensity.compact,
                           ),
                         ],
