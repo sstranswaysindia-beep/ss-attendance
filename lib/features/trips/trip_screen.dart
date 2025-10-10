@@ -298,7 +298,10 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _findOngoingTrip() {
-    if ((widget.user.role != UserRole.driver && widget.user.role != UserRole.supervisor) || _isCheckingOngoingTrip) return;
+    if ((widget.user.role != UserRole.driver &&
+            widget.user.role != UserRole.supervisor) ||
+        _isCheckingOngoingTrip)
+      return;
 
     if (_overview == null) return;
 
@@ -311,17 +314,19 @@ class _TripScreenState extends State<TripScreen> {
     final ongoingTrip = _overview!.trips.firstWhere(
       (trip) {
         final isOngoing = trip.status == 'ongoing';
-        
+
         if (widget.user.role == UserRole.driver) {
           // For drivers, check if they are assigned to this trip
-          final hasDriverId = driverId != null && trip.drivers?.contains(driverId.toString()) == true;
+          final hasDriverId =
+              driverId != null &&
+              trip.drivers?.contains(driverId.toString()) == true;
           final hasDriverName = trip.drivers?.contains(currentUserName) == true;
           return isOngoing && (hasDriverId || hasDriverName);
         } else if (widget.user.role == UserRole.supervisor) {
           // For supervisors, show any ongoing trip
           return isOngoing;
         }
-        
+
         return false;
       },
       orElse: () => TripRecord(

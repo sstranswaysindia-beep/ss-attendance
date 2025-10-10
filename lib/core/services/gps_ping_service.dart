@@ -21,12 +21,14 @@ class GpsPingService {
   bool _isSending = false;
   bool _hasWarned = false;
 
-  void start({required void Function(String message, {bool isError}) showToast}) {
+  void start({
+    required void Function(String message, {bool isError}) showToast,
+  }) {
     // Skip GPS pinging on web platform
     if (kIsWeb) {
       return;
     }
-    
+
     _timer?.cancel();
     _hasWarned = false;
 
@@ -39,7 +41,9 @@ class GpsPingService {
     _timer = null;
   }
 
-  Future<void> _sendPing(void Function(String message, {bool isError}) showToast) async {
+  Future<void> _sendPing(
+    void Function(String message, {bool isError}) showToast,
+  ) async {
     if (_isSending) {
       return;
     }
@@ -100,6 +104,8 @@ class GpsPingService {
       return null;
     }
 
-    return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    return Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
   }
 }

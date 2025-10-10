@@ -53,7 +53,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'SS Transways Attendance',
+      title: 'SS Transways India',
       theme: baseTheme.copyWith(
         textTheme: textTheme,
         appBarTheme: baseTheme.appBarTheme.copyWith(

@@ -102,11 +102,11 @@ class _LoginScreenState extends State<LoginScreen> {
                           children: [
                             Image.asset(
                               AppAssets.logo,
-                              height: 80,
+                              height: 60,
                               fit: BoxFit.contain,
                               errorBuilder: (_, __, ___) => Icon(
                                 Icons.verified_user,
-                                size: 56,
+                                size: 40,
                                 color: theme.colorScheme.primary,
                               ),
                             ),
@@ -116,8 +116,8 @@ class _LoginScreenState extends State<LoginScreen> {
                               textAlign: TextAlign.center,
                               style: theme.textTheme.headlineSmall?.copyWith(
                                 fontWeight: FontWeight.w700,
-                                color: theme.colorScheme.primary,
-                                fontSize: 28,
+                                color: const Color(0xFF050A30),
+                                fontSize: 32,
                               ),
                             ),
                           ],
