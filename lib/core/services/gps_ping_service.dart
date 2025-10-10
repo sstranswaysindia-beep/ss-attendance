@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../models/app_user.dart';
@@ -21,6 +22,11 @@ class GpsPingService {
   bool _hasWarned = false;
 
   void start({required void Function(String message, {bool isError}) showToast}) {
+    // Skip GPS pinging on web platform
+    if (kIsWeb) {
+      return;
+    }
+    
     _timer?.cancel();
     _hasWarned = false;
 

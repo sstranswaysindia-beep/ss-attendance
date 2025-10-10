@@ -335,6 +335,9 @@ class _TripScreenState extends State<TripScreen> {
         _hasOngoingTrip = true;
         _ongoingTrip = ongoingTrip;
       });
+      
+      // Load ongoing trip data into form
+      _loadOngoingTripDataIntoForm(ongoingTrip);
     } else {
       setState(() {
         _hasOngoingTrip = false;
@@ -343,6 +346,42 @@ class _TripScreenState extends State<TripScreen> {
     }
 
     _isCheckingOngoingTrip = false;
+  }
+
+  void _loadOngoingTripDataIntoForm(TripRecord trip) {
+    // Load note
+    if (trip.note != null && trip.note!.isNotEmpty) {
+      _noteController.text = trip.note!;
+    }
+    
+    // Load customers
+    if (trip.customers != null && trip.customers!.isNotEmpty) {
+      _customerNames = trip.customers!.split(',').map((c) => c.trim()).toList();
+    }
+    
+    // Load helper
+    if (trip.helper != null && trip.helper!.isNotEmpty) {
+      // Find helper in the loaded helpers list
+      final helper = _helpers.firstWhere(
+        (h) => h.name == trip.helper,
+        orElse: () => TripHelper(id: 0, name: trip.helper!, plantId: 0),
+      );
+      if (helper.id > 0) {
+        _selectedHelpers = [helper];
+      }
+    }
+    
+    // Load drivers
+    if (trip.drivers != null && trip.drivers!.isNotEmpty) {
+      final driverNames = trip.drivers!.split(',').map((d) => d.trim()).toList();
+      _selectedDrivers = driverNames.map((name) {
+        return TripDriver(
+          id: 0, // We don't have driver IDs from the trip record
+          name: name,
+          plantId: 0,
+        );
+      }).toList();
+    }
   }
 
   Future<void> _handleUpdateTrip() async {
@@ -2091,13 +2130,13 @@ class _TripStartCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final canStart =
-        !isCreating &&
+    final canStart = !isCreating &&
         hasVehicle &&
         selectedDrivers.isNotEmpty &&
         selectedCustomers.isNotEmpty &&
-        startKmController.text.trim().isNotEmpty &&
-        startDateController.text.trim().isNotEmpty;
+        (hasOngoingTrip || 
+         (startKmController.text.trim().isNotEmpty &&
+          startDateController.text.trim().isNotEmpty));
     final selectedChipColor = Colors.teal.shade100;
     final selectedChipTextColor = Colors.teal.shade900;
     final suggestionChipColor = Colors.orange.shade100;
