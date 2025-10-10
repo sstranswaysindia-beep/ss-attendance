@@ -2349,7 +2349,7 @@ class _DriverHelperCard extends StatelessWidget {
   }
 }
 
-class _TripStartCard extends StatelessWidget {
+class _TripStartCard extends StatefulWidget {
   const _TripStartCard({
     required this.startDateController,
     required this.onPickStartDate,
@@ -2385,16 +2385,30 @@ class _TripStartCard extends StatelessWidget {
   final bool hasOngoingTrip;
 
   @override
+  State<_TripStartCard> createState() => _TripStartCardState();
+}
+
+class _TripStartCardState extends State<_TripStartCard> {
+  List<String> _getFilteredSuggestions(String searchText, List<String> suggestions) {
+    if (searchText.isEmpty) {
+      return suggestions;
+    }
+    return suggestions.where((suggestion) {
+      return suggestion.toLowerCase().contains(searchText.toLowerCase());
+    }).toList();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final canStart =
-        !isCreating &&
-        hasVehicle &&
-        selectedDrivers.isNotEmpty &&
-        selectedCustomers.isNotEmpty &&
-        (hasOngoingTrip ||
-            (startKmController.text.trim().isNotEmpty &&
-                startDateController.text.trim().isNotEmpty));
+        !widget.isCreating &&
+        widget.hasVehicle &&
+        widget.selectedDrivers.isNotEmpty &&
+        widget.selectedCustomers.isNotEmpty &&
+        (widget.hasOngoingTrip ||
+            (widget.startKmController.text.trim().isNotEmpty &&
+                widget.startDateController.text.trim().isNotEmpty));
     final selectedChipColor = Colors.teal.shade100;
     final selectedChipTextColor = Colors.teal.shade900;
     final suggestionChipColor = Colors.orange.shade100;
@@ -2428,7 +2442,7 @@ class _TripStartCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  hasOngoingTrip ? 'Update Trip' : 'Start Trip',
+                  widget.hasOngoingTrip ? 'Update Trip' : 'Start Trip',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -2440,22 +2454,22 @@ class _TripStartCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: TextField(
-                    controller: startDateController,
+                    controller: widget.startDateController,
                     readOnly: true,
                     decoration: buildFieldDecoration(
                       'Start Date',
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.calendar_today),
-                        onPressed: onPickStartDate,
+                        onPressed: widget.onPickStartDate,
                       ),
                     ),
-                    onTap: onPickStartDate,
+                    onTap: widget.onPickStartDate,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: TextField(
-                    controller: startKmController,
+                    controller: widget.startKmController,
                     keyboardType: TextInputType.number,
                     decoration: buildFieldDecoration('Start KM'),
                   ),
@@ -2464,19 +2478,22 @@ class _TripStartCard extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             TextField(
-              controller: customerController,
+              controller: widget.customerController,
               decoration: buildFieldDecoration(
                 'Add Customer',
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.add_circle_outline),
-                  onPressed: onCustomerSubmitted,
+                  onPressed: widget.onCustomerSubmitted,
                 ),
               ),
               textInputAction: TextInputAction.done,
-              onSubmitted: (_) => onCustomerSubmitted(),
+              onSubmitted: (_) => widget.onCustomerSubmitted(),
+              onChanged: (value) {
+                setState(() {});
+              },
             ),
             const SizedBox(height: 12),
-            if (selectedCustomers.isEmpty)
+            if (widget.selectedCustomers.isEmpty)
               Text(
                 'No customers added yet.',
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -2487,7 +2504,7 @@ class _TripStartCard extends StatelessWidget {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: selectedCustomers
+                children: widget.selectedCustomers
                     .map(
                       (name) => InputChip(
                         backgroundColor: selectedChipColor,
@@ -2498,12 +2515,12 @@ class _TripStartCard extends StatelessWidget {
                         ),
                         deleteIconColor: selectedChipTextColor,
                         label: Text(name),
-                        onDeleted: () => onCustomerRemoved(name),
+                        onDeleted: () => widget.onCustomerRemoved(name),
                       ),
                     )
                     .toList(growable: false),
               ),
-            if (customerSuggestions.isNotEmpty) ...[
+            if (widget.customerSuggestions.isNotEmpty) ...[
               const SizedBox(height: 16),
               Text(
                 'Suggestions',
@@ -2515,7 +2532,7 @@ class _TripStartCard extends StatelessWidget {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: customerSuggestions
+                children: _getFilteredSuggestions(widget.customerController.text, widget.customerSuggestions)
                     .take(12)
                     .map(
                       (suggestion) => ActionChip(
@@ -2531,7 +2548,7 @@ class _TripStartCard extends StatelessWidget {
                           color: Colors.deepOrange,
                         ),
                         label: Text(suggestion),
-                        onPressed: () => onCustomerAdded(suggestion),
+                        onPressed: () => widget.onCustomerAdded(suggestion),
                       ),
                     )
                     .toList(growable: false),
@@ -2539,7 +2556,7 @@ class _TripStartCard extends StatelessWidget {
             ],
             const SizedBox(height: 16),
             TextField(
-              controller: noteController,
+              controller: widget.noteController,
               maxLines: 2,
               decoration: buildFieldDecoration('Note (optional)'),
             ),
@@ -2547,8 +2564,8 @@ class _TripStartCard extends StatelessWidget {
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
-                onPressed: canStart ? () => onStartTrip() : null,
-                icon: isCreating
+                onPressed: canStart ? () => widget.onStartTrip() : null,
+                icon: widget.isCreating
                     ? const SizedBox(
                         width: 16,
                         height: 16,
@@ -2558,7 +2575,7 @@ class _TripStartCard extends StatelessWidget {
                         ),
                       )
                     : const Icon(Icons.play_arrow),
-                label: Text(hasOngoingTrip ? 'Update Trip' : 'Start Trip'),
+                label: Text(widget.hasOngoingTrip ? 'Update Trip' : 'Start Trip'),
               ),
             ),
           ],
