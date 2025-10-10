@@ -65,7 +65,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   void initState() {
     super.initState();
     _now = DateTime.now();
-    _ticker = Timer.periodic(const Duration(seconds: 30), (_) {
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _now = DateTime.now());
     });
 
@@ -343,10 +343,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    ProfilePhotoWidget(
-                      user: user,
-                      radius: 28,
-                    ),
+                    ProfilePhotoWidget(user: user, radius: 28),
                     const SizedBox(height: 12),
                     Text(
                       user.displayName,
@@ -403,10 +400,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 // First line: Profile photo + Welcome, Name
                 Row(
                   children: [
-                    ProfilePhotoWidget(
-                      user: widget.user,
-                      radius: 24,
-                    ),
+                    ProfilePhotoWidget(user: widget.user, radius: 24),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
