@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 
 import '../models/attendance_record.dart';
 import '../models/daily_attendance_summary.dart';
@@ -49,13 +51,13 @@ class AttendanceRepository {
     Uri? statsEndpoint,
     Uri? deleteEndpoint,
     Uri? adjustRequestEndpoint,
-  })  : _client = client ?? http.Client(),
-        _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
-        _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
-        _statsEndpoint = statsEndpoint ?? Uri.parse(_defaultStatsEndpoint),
-        _deleteEndpoint = deleteEndpoint ?? Uri.parse(_defaultDeleteEndpoint),
-        _adjustRequestEndpoint =
-            adjustRequestEndpoint ?? Uri.parse(_defaultAdjustRequestEndpoint);
+  }) : _client = client ?? http.Client(),
+       _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
+       _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
+       _statsEndpoint = statsEndpoint ?? Uri.parse(_defaultStatsEndpoint),
+       _deleteEndpoint = deleteEndpoint ?? Uri.parse(_defaultDeleteEndpoint),
+       _adjustRequestEndpoint =
+           adjustRequestEndpoint ?? Uri.parse(_defaultAdjustRequestEndpoint);
 
   static const String _defaultSubmitEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_submit.php';
@@ -109,7 +111,26 @@ class AttendanceRepository {
     }
 
     if (photoFile != null && await photoFile.exists()) {
-      request.files.add(await http.MultipartFile.fromPath('photo', photoFile.path));
+      // Import ImageUtils for compression
+      final compressedBytes = await _compressPhotoForUpload(photoFile.path);
+      if (compressedBytes != null) {
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'photo',
+            compressedBytes,
+            filename: 'attendance_photo.jpg',
+          ),
+        );
+
+        // Add server path information for proper folder structure
+        final now = DateTime.now();
+        final dateFolder =
+            '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        request.fields['photo_path'] =
+            'public_html/DriverDocs/uploads/$driverId/$dateFolder/';
+        request.fields['photo_filename'] =
+            '${action == AttendanceAction.checkIn ? 'checkin' : 'checkout'}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}-${now.second.toString().padLeft(2, '0')}.jpg';
+      }
     }
 
     final streamedResponse = await request.send();
@@ -120,7 +141,9 @@ class AttendanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw AttendanceFailure('Invalid response from server (status: $statusCode).');
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
     }
 
     if (statusCode != 200 || payload['status'] != 'ok') {
@@ -136,7 +159,8 @@ class AttendanceRepository {
     required DateTime month,
     int? limit,
   }) async {
-    final formattedMonth = '${month.year.toString().padLeft(4, '0')}-${month.month.toString().padLeft(2, '0')}';
+    final formattedMonth =
+        '${month.year.toString().padLeft(4, '0')}-${month.month.toString().padLeft(2, '0')}';
     final params = <String, String>{
       'driverId': driverId,
       'month': formattedMonth,
@@ -152,14 +176,21 @@ class AttendanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw AttendanceFailure('Invalid response from server (status: $statusCode).');
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
     }
 
     if (statusCode != 200 || payload['status'] != 'ok') {
-      throw AttendanceFailure(payload['error']?.toString() ?? 'Unable to load attendance history.');
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load attendance history.',
+      );
     }
 
-    final items = payload['records'] as List<dynamic>? ?? payload['data'] as List<dynamic>? ?? const [];
+    final items =
+        payload['records'] as List<dynamic>? ??
+        payload['data'] as List<dynamic>? ??
+        const [];
     return items
         .map((item) => AttendanceRecord.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
@@ -169,7 +200,11 @@ class AttendanceRepository {
     required String driverId,
     required DateTime month,
   }) async {
-    final records = await fetchHistory(driverId: driverId, month: month, limit: 1);
+    final records = await fetchHistory(
+      driverId: driverId,
+      month: month,
+      limit: 1,
+    );
     return records.isNotEmpty ? records.first : null;
   }
 
@@ -223,11 +258,15 @@ class AttendanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw AttendanceFailure('Invalid response from server (status: ${response.statusCode}).');
+      throw AttendanceFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
     }
 
     if (response.statusCode >= 300 || payload['status'] != 'ok') {
-      throw AttendanceFailure(payload['error']?.toString() ?? 'Unable to submit request.');
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to submit request.',
+      );
     }
   }
 
@@ -235,10 +274,12 @@ class AttendanceRepository {
     required String driverId,
     int limit = 12,
   }) async {
-    final uri = _statsEndpoint.replace(queryParameters: <String, String>{
-      'driverId': driverId,
-      'limit': limit.toString(),
-    });
+    final uri = _statsEndpoint.replace(
+      queryParameters: <String, String>{
+        'driverId': driverId,
+        'limit': limit.toString(),
+      },
+    );
 
     final response = await _client.get(uri);
     final statusCode = response.statusCode;
@@ -246,11 +287,15 @@ class AttendanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw AttendanceFailure('Invalid response from server (status: $statusCode).');
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
     }
 
     if (statusCode != 200 || payload['status'] != 'ok') {
-      throw AttendanceFailure(payload['error']?.toString() ?? 'Unable to load statistics.');
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load statistics.',
+      );
     }
 
     final stats = payload['stats'] as List<dynamic>? ?? const [];
@@ -275,8 +320,12 @@ class AttendanceRepository {
       if (inDateTime == null) {
         continue;
       }
-      final key = '${inDateTime.year}-${inDateTime.month.toString().padLeft(2, '0')}-${inDateTime.day.toString().padLeft(2, '0')}';
-      final bucket = buckets.putIfAbsent(key, () => _DailyAccumulator(date: inDateTime));
+      final key =
+          '${inDateTime.year}-${inDateTime.month.toString().padLeft(2, '0')}-${inDateTime.day.toString().padLeft(2, '0')}';
+      final bucket = buckets.putIfAbsent(
+        key,
+        () => _DailyAccumulator(date: inDateTime),
+      );
       bucket.addInTime(inDateTime);
 
       final outTimeRaw = record.outTime;
@@ -298,14 +347,43 @@ class AttendanceRepository {
       ..sort((a, b) => b.date.compareTo(a.date));
 
     return summaries
-        .map((bucket) => DailyAttendanceSummary(
-              dateLabel: bucket.formattedDate,
-              inTimes: bucket.inTimes,
-              outTimes: bucket.outTimes,
-              totalMinutes: bucket.totalMinutes,
-              hasOpenShift: bucket.hasOpenShift,
-            ))
+        .map(
+          (bucket) => DailyAttendanceSummary(
+            dateLabel: bucket.formattedDate,
+            inTimes: bucket.inTimes,
+            outTimes: bucket.outTimes,
+            totalMinutes: bucket.totalMinutes,
+            hasOpenShift: bucket.hasOpenShift,
+          ),
+        )
         .toList(growable: false);
+  }
+
+  /// Compress photo for upload with proper quality and size
+  Future<Uint8List?> _compressPhotoForUpload(String imagePath) async {
+    try {
+      final file = File(imagePath);
+      if (!await file.exists()) return null;
+
+      final bytes = await file.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) return null;
+
+      // Resize image to max 800x800 while maintaining aspect ratio
+      final resizedImage = img.copyResize(
+        image,
+        width: image.width > image.height ? 800 : null,
+        height: image.height > image.width ? 800 : null,
+        maintainAspect: true,
+      );
+
+      // Compress as JPEG with 85% quality for optimal file size
+      final compressedBytes = img.encodeJpg(resizedImage, quality: 85);
+      return Uint8List.fromList(compressedBytes);
+    } catch (e) {
+      print('Error compressing photo for upload: $e');
+      return null;
+    }
   }
 }
 
@@ -336,11 +414,24 @@ class _DailyAccumulator {
 
   int get totalMinutes => _total.inMinutes;
 
-  String get formattedDate => '${date.day.toString().padLeft(2, '0')} ${_monthNames[date.month - 1]} ${date.year}';
+  String get formattedDate =>
+      '${date.day.toString().padLeft(2, '0')} ${_monthNames[date.month - 1]} ${date.year}';
 
-  static String _formatTime(DateTime dt) => '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
+  static String _formatTime(DateTime dt) =>
+      '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
 }
 
 const List<String> _monthNames = <String>[
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];

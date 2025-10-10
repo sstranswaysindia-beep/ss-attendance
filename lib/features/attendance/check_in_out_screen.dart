@@ -333,7 +333,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   Future<void> _handleCheckInOut() async {
     // First capture photo, then submit attendance
     await _capturePhoto();
-    
+
     // If photo was captured successfully, proceed with submission
     if (_capturedPhoto != null) {
       await _submitAttendance();
@@ -354,19 +354,23 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       }
 
       final directory = await getApplicationDocumentsDirectory();
-      
+
       // Create date-based folder structure
       final now = DateTime.now();
       final dateFolder = DateFormat('yyyy-MM-dd').format(now);
-      final dateDir = Directory('${directory.path}/attendance_photos/$dateFolder');
-      
+      final dateDir = Directory(
+        '${directory.path}/attendance_photos/$dateFolder',
+      );
+
       // Create directory if it doesn't exist
       if (!await dateDir.exists()) {
         await dateDir.create(recursive: true);
       }
 
       // Create filename with action type and timestamp
-      final actionType = _currentAction == CheckFlowAction.checkIn ? 'checkin' : 'checkout';
+      final actionType = _currentAction == CheckFlowAction.checkIn
+          ? 'checkin'
+          : 'checkout';
       final timeStamp = DateFormat('HH-mm-ss').format(now);
       final fileName = '${actionType}_${timeStamp}.jpg';
       final savedPath = '${dateDir.path}/$fileName';
@@ -374,7 +378,14 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
       if (!mounted) return;
       setState(() => _capturedPhoto = savedFile);
-      showAppToast(context, 'Photo captured and saved to $dateFolder folder.');
+
+      // Show file size information
+      final fileSize = await savedFile.length();
+      final sizeKB = (fileSize / 1024).toStringAsFixed(1);
+      showAppToast(
+        context,
+        'Photo captured and saved to $dateFolder folder. Size: ${sizeKB}KB',
+      );
     } catch (_) {
       if (!mounted) return;
       showAppToast(context, 'Unable to capture photo.', isError: true);
@@ -503,8 +514,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       return <String, dynamic>{
         'latitude': position.latitude,
         'longitude': position.longitude,
-        if (position.timestamp != null)
-          'timestamp': position.timestamp!.toIso8601String(),
+        'timestamp': position.timestamp.toIso8601String(),
         'accuracy': position.accuracy,
         'altitude': position.altitude,
         'speed': position.speed,
@@ -596,23 +606,26 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.camera_alt, color: Colors.blue.shade700),
+                              Icon(
+                                Icons.camera_alt,
+                                color: Colors.blue.shade700,
+                              ),
                               const SizedBox(width: 8),
                               Text(
                                 'Photo Capture',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                  color: Colors.blue.shade700,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(
+                                      color: Colors.blue.shade700,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Text(
                             'Camera will open automatically when you click ${_currentActionLabel.toLowerCase()}. Photo will be saved to organized date folders.',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: Colors.blue.shade600,
-                            ),
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(color: Colors.blue.shade600),
                           ),
                           if (_capturedPhoto != null) ...[
                             const SizedBox(height: 12),
@@ -627,10 +640,11 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                             const SizedBox(height: 8),
                             Text(
                               'Photo captured successfully!',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.green.shade600,
-                                fontWeight: FontWeight.w500,
-                              ),
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Colors.green.shade600,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                             ),
                           ],
                         ],
@@ -639,9 +653,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     const SizedBox(height: 20),
                     FilledButton(
                       onPressed: _isSubmitting ? null : _handleCheckInOut,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: null,
-                      ),
+                      style: FilledButton.styleFrom(backgroundColor: null),
                       child: _isSubmitting
                           ? const SizedBox(
                               width: 20,
