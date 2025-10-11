@@ -200,7 +200,9 @@ class AuthRepository {
       print('AuthRepository: Final vehicles count: ${vehicles.length}');
 
       // For supervisors, prioritize full_name from users table over driver name
-      final displayName = (role == UserRole.supervisor && userJson['full_name']?.toString().isNotEmpty == true)
+      final displayName =
+          (role == UserRole.supervisor &&
+              userJson['full_name']?.toString().isNotEmpty == true)
           ? userJson['full_name']?.toString() ?? username
           : (driverJson['name']?.toString() ?? username);
 
