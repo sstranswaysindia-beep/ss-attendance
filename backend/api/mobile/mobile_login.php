@@ -82,6 +82,7 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
     
     // Get vehicles for all supervised plants
     if (!empty($supervisedPlantIds)) {
+        error_log("Supervisor {$userRow['username']} supervises plants: " . implode(',', $supervisedPlantIds));
         $placeholders = str_repeat('?,', count($supervisedPlantIds) - 1) . '?';
         $vehicleStmt = $conn->prepare(
             "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) ORDER BY plant_id, vehicle_no"
@@ -91,6 +92,10 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
             $vehicleStmt->execute();
             $vehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $vehicleStmt->close();
+            error_log("Found " . count($vehicles) . " vehicles for supervisor {$userRow['username']}");
+            foreach ($vehicles as $vehicle) {
+                error_log("Vehicle: {$vehicle['vehicle_no']} (ID: {$vehicle['id']}, Plant: {$vehicle['plant_id']})");
+            }
         }
     }
     
