@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -109,7 +110,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             setState(() {
               _isLoading = false;
             });
-            
+
             // Don't treat login page as an error - allow user to login in WebView
             // The login flow should work directly in the WebView
           },
@@ -146,6 +147,10 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             icon: const Icon(Icons.arrow_back),
             onPressed: () => Navigator.of(context).pop(),
           ),
+          systemOverlayStyle: const SystemUiOverlayStyle(
+            statusBarColor: Colors.transparent,
+            statusBarIconBrightness: Brightness.dark,
+          ),
         ),
         body: const Center(
           child: Column(
@@ -173,13 +178,19 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             icon: const Icon(Icons.open_in_browser),
             onPressed: () {
               launchUrl(
-                Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                Uri.parse(
+                  'https://sstranswaysindia.com/AverageCalculator/index.php',
+                ),
                 mode: LaunchMode.externalApplication,
               );
             },
             tooltip: 'Open in Browser',
           ),
         ],
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.dark,
+        ),
       ),
       body: _hasError
           ? Center(
@@ -193,12 +204,16 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text('Please try opening in your browser or check your connection.'),
+                  const Text(
+                    'Please try opening in your browser or check your connection.',
+                  ),
                   const SizedBox(height: 16),
                   ElevatedButton.icon(
                     onPressed: () {
                       launchUrl(
-                        Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                        Uri.parse(
+                          'https://sstranswaysindia.com/AverageCalculator/index.php',
+                        ),
                         mode: LaunchMode.externalApplication,
                       );
                     },
