@@ -551,7 +551,32 @@ class TripRepository {
     final fallbackVehicles = _buildFallbackVehicles(user);
 
     try {
-      // Use the same API as index.html: get_vehicles.php
+      // For supervisors, use vehicles from login response (all supervised plants)
+      if (user.role == UserRole.supervisor && user.availableVehicles.isNotEmpty) {
+        final uniqueVehicles = <int, TripVehicle>{};
+        
+        // Add vehicles from login response (all supervised plants)
+        for (final driverVehicle in user.availableVehicles) {
+          final vehicle = TripVehicle(
+            id: int.tryParse(driverVehicle.id) ?? 0,
+            number: driverVehicle.vehicleNumber,
+          );
+          if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
+            uniqueVehicles[vehicle.id] = vehicle;
+          }
+        }
+        
+        // Add fallback vehicles
+        for (final vehicle in fallbackVehicles) {
+          uniqueVehicles[vehicle.id] = vehicle;
+        }
+        
+        if (uniqueVehicles.isNotEmpty) {
+          return uniqueVehicles.values.toList(growable: false);
+        }
+      }
+
+      // For drivers or when supervisor vehicles are not available, use API
       final uri = Uri.parse('https://sstranswaysindia.com/TripDetails/api/get_vehicles.php?plant_id=${Uri.encodeComponent(plantId)}&cb=${DateTime.now().millisecondsSinceEpoch}');
       final response = await _client.get(uri);
 
