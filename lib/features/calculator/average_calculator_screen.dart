@@ -180,7 +180,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             // Overlay buttons positioned below status bar
             Positioned(
-              top: 8,
+              top: MediaQuery.of(context).padding.top + 8,
               left: 8,
               child: Container(
                 decoration: BoxDecoration(
@@ -206,7 +206,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             ),
             Positioned(
-              top: 8,
+              top: MediaQuery.of(context).padding.top + 8,
               right: 8,
               child: Container(
                 decoration: BoxDecoration(
@@ -288,7 +288,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             const Center(child: CircularProgressIndicator()),
           // Overlay buttons positioned below status bar
           Positioned(
-            top: 8,
+            top: MediaQuery.of(context).padding.top + 8,
             left: 8,
             child: Container(
               decoration: BoxDecoration(
@@ -314,7 +314,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             ),
           ),
           Positioned(
-            top: 8,
+            top: MediaQuery.of(context).padding.top + 8,
             right: 8,
             child: Container(
               decoration: BoxDecoration(
