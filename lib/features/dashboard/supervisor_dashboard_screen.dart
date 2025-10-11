@@ -614,30 +614,33 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text('Plant & Vehicle', style: textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _SupervisorInfoCard(
-                        icon: Icons.factory_outlined,
-                        label: 'Plant',
-                        value: plantLabel,
-                        helperText: helperSupervisorText,
+                // Only show Plant & Vehicle section for supervisors with driver_id
+                if (widget.user.driverId != null && widget.user.driverId!.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Text('Plant & Vehicle', style: textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _SupervisorInfoCard(
+                          icon: Icons.factory_outlined,
+                          label: 'Plant',
+                          value: plantLabel,
+                          helperText: helperSupervisorText,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _SupervisorInfoCard(
-                        icon: Icons.fire_truck,
-                        label: 'Vehicle',
-                        value: vehicleLabel,
-                        helperText: null,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _SupervisorInfoCard(
+                          icon: Icons.fire_truck,
+                          label: 'Vehicle',
+                          value: vehicleLabel,
+                          helperText: null,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),

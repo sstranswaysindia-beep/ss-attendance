@@ -654,7 +654,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     FilledButton(
                       onPressed: _isSubmitting ? null : _handleCheckInOut,
                       style: FilledButton.styleFrom(
-                        backgroundColor: _currentAction == CheckFlowAction.checkIn 
+                        backgroundColor:
+                            _currentAction == CheckFlowAction.checkIn
                             ? const Color(0xFF77DD77) // Check-in green
                             : const Color(0xFFDFCE34), // Check-out yellow
                       ),
@@ -664,15 +665,24 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                               height: 20,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
                               ),
                             )
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                                const Icon(
+                                  Icons.camera_alt,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
                                 const SizedBox(width: 8),
-                                Text(_currentActionLabel, style: const TextStyle(color: Colors.white)),
+                                Text(
+                                  _currentActionLabel,
+                                  style: const TextStyle(color: Colors.white),
+                                ),
                               ],
                             ),
                     ),
