@@ -24,22 +24,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   @override
   void initState() {
     super.initState();
-    if (kIsWeb) {
-      // On web, open in new tab and close this screen
-      _openInNewTab();
-    } else {
-      // On mobile, use WebView
-      _initializeWebView();
-      // Set a timeout for slow loading
-      _loadingTimeout = Timer(const Duration(seconds: 10), () {
-        if (mounted && _isLoading) {
-          setState(() {
-            _hasError = true;
-            _isLoading = false;
-          });
-        }
-      });
-    }
+    // Always open in external browser - no WebView complications
+    _openInNewTab();
   }
 
   @override
@@ -49,33 +35,23 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   }
 
   void _openInNewTab() async {
-    // The Average Calculator requires authentication, so we need to open it in a new tab
-    // where the user can login with their web credentials
+    // Wait a moment to show the loading screen, then open browser
+    await Future.delayed(const Duration(milliseconds: 500));
+    
     final url = Uri.parse(
       'https://sstranswaysindia.com/AverageCalculator/index.php',
     );
     try {
       if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.platformDefault);
+        await launchUrl(url, mode: LaunchMode.externalApplication);
         // Close this screen after opening external link
         if (mounted) {
           Navigator.of(context).pop();
         }
-      } else {
-        // Fallback: show manual link option
-        if (mounted) {
-          setState(() {
-            _hasError = true;
-          });
-        }
       }
     } catch (e) {
       print('Error opening Average Calculator: $e');
-      if (mounted) {
-        setState(() {
-          _hasError = true;
-        });
-      }
+      // Don't set error state - let user use manual button
     }
   }
 
@@ -138,118 +114,45 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // On web, just open external link
-    if (kIsWeb) {
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Average Calculator'),
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          systemOverlayStyle: const SystemUiOverlayStyle(
-            statusBarColor: Colors.transparent,
-            statusBarIconBrightness: Brightness.dark,
-          ),
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Opening Average Calculator in your browser...'),
-            ],
-          ),
-        ),
-      );
-    }
-
-    // On mobile, simple WebView with AppBar
+    // Always open in external browser - no WebView complications
+    _openInNewTab();
+    
+    // Return a simple loading screen while opening browser
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Average Calculator'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_browser),
-            onPressed: () {
-              launchUrl(
-                Uri.parse(
-                  'https://sstranswaysindia.com/AverageCalculator/index.php',
-                ),
-                mode: LaunchMode.externalApplication,
-              );
-            },
-            tooltip: 'Open in Browser',
-          ),
-        ],
-        systemOverlayStyle: const SystemUiOverlayStyle(
-          statusBarColor: Colors.transparent,
-          statusBarIconBrightness: Brightness.dark,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 24),
+            const Text(
+              'Opening Average Calculator...',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'The calculator will open in your browser.',
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              onPressed: () {
+                launchUrl(
+                  Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                  mode: LaunchMode.externalApplication,
+                );
+              },
+              icon: const Icon(Icons.open_in_browser),
+              label: const Text('Open Manually'),
+            ),
+            const SizedBox(height: 16),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Go Back'),
+            ),
+          ],
         ),
       ),
-      body: _hasError
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'Unable to Load Calculator',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Please try opening in your browser or check your connection.',
-                  ),
-                  const SizedBox(height: 16),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      launchUrl(
-                        Uri.parse(
-                          'https://sstranswaysindia.com/AverageCalculator/index.php',
-                        ),
-                        mode: LaunchMode.externalApplication,
-                      );
-                    },
-                    icon: const Icon(Icons.open_in_browser),
-                    label: const Text('Open in Browser'),
-                  ),
-                  const SizedBox(height: 8),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _hasError = false;
-                        _isLoading = true;
-                      });
-                      _initializeWebView();
-                    },
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : Stack(
-              children: [
-                WebViewWidget(controller: _controller),
-                if (_isLoading)
-                  const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading Calculator...'),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
     );
   }
 }
