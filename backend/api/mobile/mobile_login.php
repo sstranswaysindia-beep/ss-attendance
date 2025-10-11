@@ -90,9 +90,15 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
         if ($vehicleStmt) {
             $vehicleStmt->bind_param(str_repeat('i', count($supervisedPlantIds)), ...$supervisedPlantIds);
             $vehicleStmt->execute();
-            $vehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $allVehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $vehicleStmt->close();
-            error_log("Found " . count($vehicles) . " vehicles for supervisor {$userRow['username']}");
+            
+            // Filter out vehicles with NULL plant_id
+            $vehicles = array_filter($allVehicles, function($vehicle) {
+                return !is_null($vehicle['plant_id']);
+            });
+            
+            error_log("Found " . count($allVehicles) . " total vehicles, " . count($vehicles) . " valid vehicles for supervisor {$userRow['username']}");
             foreach ($vehicles as $vehicle) {
                 error_log("Vehicle: {$vehicle['vehicle_no']} (ID: {$vehicle['id']}, Plant: {$vehicle['plant_id']})");
             }
