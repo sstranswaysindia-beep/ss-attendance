@@ -96,6 +96,8 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
             foreach ($vehicles as $vehicle) {
                 error_log("Vehicle: {$vehicle['vehicle_no']} (ID: {$vehicle['id']}, Plant: {$vehicle['plant_id']})");
             }
+        } else {
+            error_log("Failed to prepare vehicle statement for supervisor {$userRow['username']}");
         }
     }
     
