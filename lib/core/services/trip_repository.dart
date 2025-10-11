@@ -576,30 +576,26 @@ class TripRepository {
         );
 
         if (supervisesThisPlant) {
-          // Filter vehicles from login response by selected plant
-          final plantVehicles = <TripVehicle>[];
+          // For supervisors, show ALL vehicles from ALL supervised plants
+          final allVehicles = <TripVehicle>[];
           for (final driverVehicle in user.availableVehicles) {
-            // If vehicle has plantId, filter by it; otherwise include all vehicles
-            if (driverVehicle.plantId == null ||
-                driverVehicle.plantId == selectedPlantIdInt) {
-              final vehicle = TripVehicle(
-                id: int.tryParse(driverVehicle.id) ?? 0,
-                number: driverVehicle.vehicleNumber,
+            final vehicle = TripVehicle(
+              id: int.tryParse(driverVehicle.id) ?? 0,
+              number: driverVehicle.vehicleNumber,
+            );
+            if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
+              allVehicles.add(vehicle);
+              print(
+                'TripRepository: Added vehicle for supervisor: ${vehicle.number} (ID: ${vehicle.id}) from plant ${driverVehicle.plantId ?? "unknown"}',
               );
-              if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
-                plantVehicles.add(vehicle);
-                print(
-                  'TripRepository: Added vehicle for plant $selectedPlantIdInt: ${vehicle.number} (ID: ${vehicle.id})',
-                );
-              }
             }
           }
 
           print(
-            'TripRepository: Total vehicles for plant $selectedPlantIdInt: ${plantVehicles.length}',
+            'TripRepository: Total vehicles available to supervisor: ${allVehicles.length}',
           );
-          if (plantVehicles.isNotEmpty) {
-            return plantVehicles;
+          if (allVehicles.isNotEmpty) {
+            return allVehicles;
           }
         } else {
           // Supervisor doesn't supervise this plant, return empty list
