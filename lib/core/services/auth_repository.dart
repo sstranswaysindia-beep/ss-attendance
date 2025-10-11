@@ -86,26 +86,39 @@ class AuthRepository {
       }
 
       // Handle supervisors without driver_id (fallback case)
-      if (role == UserRole.supervisor && driverJson == null && supervisorJson != null) {
+      if (role == UserRole.supervisor &&
+          driverJson == null &&
+          supervisorJson != null) {
         final displayName = userJson['username']?.toString() ?? username;
-        
+
         // Process vehicles for supervisors without driver_id
         final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
+        print('AuthRepository: Processing vehicles for supervisor without driver_id');
+        print('AuthRepository: Vehicles JSON count: ${vehiclesJson.length}');
         final vehicles = vehiclesJson
-            .map((item) => DriverVehicle.fromJson(item as Map<String, dynamic>))
+            .map((item) {
+              print('AuthRepository: Vehicle item: $item');
+              return DriverVehicle.fromJson(item as Map<String, dynamic>);
+            })
             .where(
-              (vehicle) =>
-                  vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty,
+              (vehicle) {
+                final isValid = vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty;
+                print('AuthRepository: Vehicle ${vehicle.vehicleNumber} (ID: ${vehicle.id}) - Valid: $isValid');
+                return isValid;
+              },
             )
             .toList(growable: false);
-        
+        print('AuthRepository: Final vehicles count for supervisor: ${vehicles.length}');
+
         return AppUser(
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
-          supervisedPlants: (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
-              .cast<Map<String, dynamic>>(),
-          supervisedPlantIds: supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [],
+          supervisedPlants:
+              (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
+                  .cast<Map<String, dynamic>>(),
+          supervisedPlantIds:
+              supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [],
           availableVehicles: vehicles,
         );
       }
@@ -150,13 +163,22 @@ class AuthRepository {
           : driverJson['vehicleNumber']?.toString();
 
       final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
+      print('AuthRepository: Processing vehicles for driver/supervisor with driver_id');
+      print('AuthRepository: Vehicles JSON count: ${vehiclesJson.length}');
       final vehicles = vehiclesJson
-          .map((item) => DriverVehicle.fromJson(item as Map<String, dynamic>))
+          .map((item) {
+            print('AuthRepository: Vehicle item: $item');
+            return DriverVehicle.fromJson(item as Map<String, dynamic>);
+          })
           .where(
-            (vehicle) =>
-                vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty,
+            (vehicle) {
+              final isValid = vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty;
+              print('AuthRepository: Vehicle ${vehicle.vehicleNumber} (ID: ${vehicle.id}) - Valid: $isValid');
+              return isValid;
+            },
           )
           .toList(growable: false);
+      print('AuthRepository: Final vehicles count: ${vehicles.length}');
 
       return AppUser(
         id: userJson['id']?.toString() ?? username,
@@ -188,9 +210,11 @@ class AuthRepository {
         availableVehicles: vehicles,
         joiningDate: joiningDate,
         supervisorName: supervisorName,
-        supervisedPlants: (supervisorJson?['supervisedPlants'] as List<dynamic>? ?? [])
-            .cast<Map<String, dynamic>>(),
-        supervisedPlantIds: supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
+        supervisedPlants:
+            (supervisorJson?['supervisedPlants'] as List<dynamic>? ?? [])
+                .cast<Map<String, dynamic>>(),
+        supervisedPlantIds:
+            supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
       );
     } on AuthFailure {
       rethrow;

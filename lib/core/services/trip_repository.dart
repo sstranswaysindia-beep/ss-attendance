@@ -553,16 +553,20 @@ class TripRepository {
     try {
       // For supervisors, use vehicles from login response (all supervised plants)
       if (user.role == UserRole.supervisor && user.availableVehicles.isNotEmpty) {
+        print('TripRepository: Using vehicles from login response for supervisor');
+        print('TripRepository: Available vehicles count: ${user.availableVehicles.length}');
         final uniqueVehicles = <int, TripVehicle>{};
         
         // Add vehicles from login response (all supervised plants)
         for (final driverVehicle in user.availableVehicles) {
+          print('TripRepository: Processing vehicle: ${driverVehicle.vehicleNumber} (ID: ${driverVehicle.id})');
           final vehicle = TripVehicle(
             id: int.tryParse(driverVehicle.id) ?? 0,
             number: driverVehicle.vehicleNumber,
           );
           if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
             uniqueVehicles[vehicle.id] = vehicle;
+            print('TripRepository: Added vehicle: ${vehicle.number} (ID: ${vehicle.id})');
           }
         }
         
@@ -571,9 +575,13 @@ class TripRepository {
           uniqueVehicles[vehicle.id] = vehicle;
         }
         
+        print('TripRepository: Total vehicles for supervisor: ${uniqueVehicles.length}');
         if (uniqueVehicles.isNotEmpty) {
           return uniqueVehicles.values.toList(growable: false);
         }
+      } else if (user.role == UserRole.supervisor) {
+        print('TripRepository: Supervisor has no available vehicles from login response');
+        print('TripRepository: availableVehicles.length: ${user.availableVehicles.length}');
       }
 
       // For drivers or when supervisor vehicles are not available, use API
