@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import '../calculator/average_calculator_screen.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/advance_request.dart';
@@ -14,7 +14,6 @@ import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
-import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
@@ -181,31 +180,12 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     }
   }
 
-  Future<void> _openAverageCalculator() async {
-    final url = Uri.parse(
-      'https://sstranswaysindia.com/AverageCalculator/index.php',
+  void _openAverageCalculator() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const AverageCalculatorScreen(),
+      ),
     );
-    try {
-      if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
-      } else {
-        if (mounted) {
-          showAppToast(
-            context,
-            'Unable to open Average Calculator',
-            isError: true,
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        showAppToast(
-          context,
-          'Error opening Average Calculator',
-          isError: true,
-        );
-      }
-    }
   }
 
   String? _tenureText() {
@@ -321,28 +301,9 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     final timeFormatter = DateFormat('HH:mm:ss');
     final user = widget.user;
 
-    final plantLabel = user.assignmentPlantName?.isNotEmpty == true
-        ? user.assignmentPlantName!
-        : (user.plantName?.isNotEmpty == true
-              ? user.plantName!
-              : (user.plantId?.isNotEmpty == true
-                    ? user.plantId!
-                    : 'Not mapped'));
-
-    final vehicleLabel = user.assignmentVehicleNumber?.isNotEmpty == true
-        ? user.assignmentVehicleNumber!
-        : (user.vehicleNumber?.isNotEmpty == true
-              ? user.vehicleNumber!
-              : 'Not assigned');
-
     final tenureText = _tenureText();
     final tenureSubtitle = tenureText != null
         ? 'Working for $tenureText'
-        : null;
-    final supervisorName = user.supervisorName;
-    final helperSupervisorText =
-        supervisorName != null && supervisorName.isNotEmpty
-        ? 'Supervisor: $supervisorName'
         : null;
 
     return Scaffold(
@@ -671,54 +632,6 @@ class _SupervisorNotification {
   final NotificationType type;
 }
 
-class _SupervisorInfoCard extends StatelessWidget {
-  const _SupervisorInfoCard({
-    required this.icon,
-    required this.label,
-    required this.value,
-    this.helperText,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String? helperText;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: theme.colorScheme.primary),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (helperText != null) ...[
-              const SizedBox(height: 4),
-              Text(helperText!, style: theme.textTheme.bodySmall),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _SupervisedPlantsCard extends StatelessWidget {
   const _SupervisedPlantsCard({required this.user});
@@ -786,7 +699,6 @@ class _SupervisedPlantsCard extends StatelessWidget {
               children: user.supervisedPlants.map((plant) {
                 final plantName =
                     plant['plant_name']?.toString() ?? 'Unknown Plant';
-                final plantId = plant['id']?.toString() ?? '';
 
                 return Chip(
                   label: Text(
