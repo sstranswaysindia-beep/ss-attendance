@@ -41,10 +41,12 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
 
   Future<void> _loadSavedUser() async {
     try {
-      final savedUser = await AuthStorageService.getUser();
+      // For testing purposes, let's disable persistent login
+      // Users will be logged out when app is killed from background
+      await AuthStorageService.clearUser(); // Clear any saved user data
       if (mounted) {
         setState(() {
-          _currentUser = savedUser;
+          _currentUser = null;
           _isLoading = false;
         });
       }

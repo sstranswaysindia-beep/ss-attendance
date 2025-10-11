@@ -69,59 +69,119 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     // On web, show a loading screen since we're opening external link
     if (kIsWeb) {
       return Scaffold(
-        appBar: AppBar(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          toolbarHeight: 48,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.black, size: 20),
-            onPressed: () => Navigator.of(context).pop(),
-            padding: EdgeInsets.zero,
-          ),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.black, size: 20),
-              onPressed: () => Navigator.of(context).pop(),
-              padding: EdgeInsets.zero,
+        body: Stack(
+          children: [
+            const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Opening Average Calculator...'),
+                ],
+              ),
+            ),
+            // Overlay buttons
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.arrow_back, color: Colors.black, size: 18),
+                  onPressed: () => Navigator.of(context).pop(),
+                  padding: const EdgeInsets.all(8),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.black, size: 18),
+                  onPressed: () => Navigator.of(context).pop(),
+                  padding: const EdgeInsets.all(8),
+                ),
+              ),
             ),
           ],
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text('Opening Average Calculator...'),
-            ],
-          ),
         ),
       );
     }
 
-    // On mobile, show WebView
+    // On mobile, show WebView with overlay buttons
     return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        toolbarHeight: 48, // Reduced from default 56
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-          padding: EdgeInsets.zero,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.black, size: 20),
-            onPressed: () => Navigator.of(context).pop(),
-            padding: EdgeInsets.zero,
-          ),
-        ],
-      ),
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
           if (_isLoading) const Center(child: CircularProgressIndicator()),
+          // Overlay buttons
+          Positioned(
+            top: 8,
+            left: 8,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.black, size: 18),
+                onPressed: () => Navigator.of(context).pop(),
+                padding: const EdgeInsets.all(8),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.1),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.close, color: Colors.black, size: 18),
+                onPressed: () => Navigator.of(context).pop(),
+                padding: const EdgeInsets.all(8),
+              ),
+            ),
+          ),
         ],
       ),
     );
