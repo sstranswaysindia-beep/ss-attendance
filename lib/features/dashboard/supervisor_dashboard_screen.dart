@@ -181,6 +181,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   }
 
   void _openAverageCalculator() {
+    print('Opening Average Calculator...');
     Navigator.of(context).push(
       MaterialPageRoute(builder: (context) => const AverageCalculatorScreen()),
     );
