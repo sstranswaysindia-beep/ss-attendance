@@ -616,15 +616,13 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                             )
                             .then((_) => _loadNotifications()),
                       ),
-                      // Show Average Calculator only for supervisors without driver_id
-                      if (widget.user.driverId == null || widget.user.driverId!.isEmpty) ...[
-                        const Divider(height: 0),
-                        HoverListTile(
-                          leading: const Icon(Icons.calculate),
-                          title: const Text('Average Calculator'),
-                          onTap: () => _openAverageCalculator(),
-                        ),
-                      ],
+                      // Show Average Calculator for all supervisors
+                      const Divider(height: 0),
+                      HoverListTile(
+                        leading: const Icon(Icons.calculate),
+                        title: const Text('Average Calculator'),
+                        onTap: () => _openAverageCalculator(),
+                      ),
                     ],
                   ),
                 ),
