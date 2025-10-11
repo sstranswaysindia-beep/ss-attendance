@@ -91,7 +91,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             setState(() {
               _isLoading = false;
             });
-            
+
             // Don't treat login page as an error - allow user to login in WebView
             // The login flow should work directly in the WebView
           },
@@ -122,8 +122,9 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     // On web, show a loading screen since we're opening external link
     if (kIsWeb) {
       return Scaffold(
-        body: Stack(
-          children: [
+        body: SafeArea(
+          child: Stack(
+            children: [
             if (_hasError)
               Center(
                 child: Column(
@@ -180,7 +181,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             // Overlay buttons positioned below status bar
             Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
+              top: 8,
               left: 8,
               child: Container(
                 decoration: BoxDecoration(
@@ -206,7 +207,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             ),
             Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
+              top: 8,
               right: 8,
               child: Container(
                 decoration: BoxDecoration(
@@ -227,15 +228,17 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 ),
               ),
             ),
-          ],
+            ],
+          ),
         ),
       );
     }
 
     // On mobile, show WebView with overlay buttons positioned below status bar
     return Scaffold(
-      body: Stack(
-        children: [
+      body: SafeArea(
+        child: Stack(
+          children: [
           if (_hasError)
             Center(
               child: Column(
@@ -288,7 +291,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             const Center(child: CircularProgressIndicator()),
           // Overlay buttons positioned below status bar
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
+            top: 8,
             left: 8,
             child: Container(
               decoration: BoxDecoration(
@@ -314,7 +317,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             ),
           ),
           Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
+            top: 8,
             right: 8,
             child: Container(
               decoration: BoxDecoration(
@@ -335,7 +338,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }
