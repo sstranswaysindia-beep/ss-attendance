@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/advance_request.dart';
 import '../../core/models/attendance_record.dart';
 import '../../core/services/approvals_repository.dart';
+import '../../core/widgets/app_toast.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
@@ -175,6 +177,23 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
             ),
           ],
         );
+      }
+    }
+  }
+
+  Future<void> _openAverageCalculator() async {
+    final url = Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php');
+    try {
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          showAppToast(context, 'Unable to open Average Calculator', isError: true);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, 'Error opening Average Calculator', isError: true);
       }
     }
   }
@@ -597,6 +616,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                             )
                             .then((_) => _loadNotifications()),
                       ),
+                      // Show Average Calculator only for supervisors without driver_id
+                      if (widget.user.driverId == null || widget.user.driverId!.isEmpty) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.calculate),
+                          title: const Text('Average Calculator'),
+                          onTap: () => _openAverageCalculator(),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -615,7 +643,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   ),
                 ),
                 // Show different sections based on supervisor type
-                if (widget.user.driverId != null && widget.user.driverId!.isNotEmpty) ...[
+                if (widget.user.driverId != null &&
+                    widget.user.driverId!.isNotEmpty) ...[
                   // Supervisors with driver_id: Show Plant & Vehicle
                   const SizedBox(height: 16),
                   Text('Plant & Vehicle', style: textTheme.titleMedium),
@@ -721,7 +750,7 @@ class _SupervisedPlantsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     if (user.supervisedPlants.isEmpty) {
       return Card(
         child: Padding(
@@ -777,9 +806,10 @@ class _SupervisedPlantsCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: user.supervisedPlants.map((plant) {
-                final plantName = plant['plant_name']?.toString() ?? 'Unknown Plant';
+                final plantName =
+                    plant['plant_name']?.toString() ?? 'Unknown Plant';
                 final plantId = plant['id']?.toString() ?? '';
-                
+
                 return Chip(
                   label: Text(
                     plantName,
