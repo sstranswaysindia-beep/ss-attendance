@@ -137,235 +137,104 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // On web, show a loading screen since we're opening external link
+    // On web, just open external link
     if (kIsWeb) {
       return Scaffold(
-        body: Stack(
-          children: [
-              if (_hasError)
-                Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(
-                        Icons.error_outline,
-                        size: 64,
-                        color: Colors.red,
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Unable to Open Average Calculator',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'There was an error opening the calculator.\nPlease click below to open manually.',
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          launchUrl(
-                            Uri.parse(
-                              'https://sstranswaysindia.com/AverageCalculator/index.php',
-                            ),
-                            mode: LaunchMode.platformDefault,
-                          );
-                        },
-                        icon: const Icon(Icons.open_in_new),
-                        label: const Text('Open Average Calculator'),
-                      ),
-                      const SizedBox(height: 16),
-                      TextButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        child: const Text('Go Back'),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(),
-                      SizedBox(height: 16),
-                      Text('Opening Average Calculator...'),
-                    ],
-                  ),
-                ),
-              // Overlay buttons positioned below status bar
-              Positioned(
-                top: MediaQuery.of(context).padding.top + 16,
-                left: 16,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.arrow_back,
-                      color: Colors.black,
-                      size: 18,
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: MediaQuery.of(context).padding.top + 16,
-                right: 16,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: IconButton(
-                    icon: const Icon(
-                      Icons.close,
-                      color: Colors.black,
-                      size: 18,
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                    padding: const EdgeInsets.all(8),
-                  ),
-                ),
-              ),
-          ],
+        appBar: AppBar(
+          title: const Text('Average Calculator'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text('Opening Average Calculator in your browser...'),
+            ],
+          ),
         ),
       );
     }
 
-    // On mobile, show WebView with overlay buttons positioned below status bar
+    // On mobile, simple WebView with AppBar
     return Scaffold(
-      body: Stack(
-        children: [
-            if (_hasError)
-              Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: Colors.red,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Unable to Load Average Calculator',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'There was an error loading the calculator.\nPlease try opening in your browser or retry.',
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        ElevatedButton.icon(
-                          onPressed: () {
-                            launchUrl(
-                              Uri.parse(
-                                'https://sstranswaysindia.com/AverageCalculator/index.php',
-                              ),
-                              mode: LaunchMode.externalApplication,
-                            );
-                          },
-                          icon: const Icon(Icons.open_in_browser),
-                          label: const Text('Open in Browser'),
-                        ),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              _hasError = false;
-                              _isLoading = true;
-                            });
-                            _initializeWebView();
-                          },
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              )
-            else
-              WebViewWidget(controller: _controller),
-            if (_isLoading && !_hasError)
-              const Center(child: CircularProgressIndicator()),
-            // Overlay buttons positioned below status bar
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              left: 16,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back,
-                    color: Colors.black,
-                    size: 18,
-                  ),
-                  onPressed: () => Navigator.of(context).pop(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ),
-            ),
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 16,
-              right: 16,
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.black, size: 18),
-                  onPressed: () => Navigator.of(context).pop(),
-                  padding: const EdgeInsets.all(8),
-                ),
-              ),
-            ),
+      appBar: AppBar(
+        title: const Text('Average Calculator'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.open_in_browser),
+            onPressed: () {
+              launchUrl(
+                Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                mode: LaunchMode.externalApplication,
+              );
+            },
+            tooltip: 'Open in Browser',
+          ),
         ],
       ),
+      body: _hasError
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Unable to Load Calculator',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Please try opening in your browser or check your connection.'),
+                  const SizedBox(height: 16),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      launchUrl(
+                        Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                        mode: LaunchMode.externalApplication,
+                      );
+                    },
+                    icon: const Icon(Icons.open_in_browser),
+                    label: const Text('Open in Browser'),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _hasError = false;
+                        _isLoading = true;
+                      });
+                      _initializeWebView();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : Stack(
+              children: [
+                WebViewWidget(controller: _controller),
+                if (_isLoading)
+                  const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Loading Calculator...'),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
     );
   }
 }
