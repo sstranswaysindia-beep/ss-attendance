@@ -614,8 +614,9 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ),
                   ),
                 ),
-                // Only show Plant & Vehicle section for supervisors with driver_id
+                // Show different sections based on supervisor type
                 if (widget.user.driverId != null && widget.user.driverId!.isNotEmpty) ...[
+                  // Supervisors with driver_id: Show Plant & Vehicle
                   const SizedBox(height: 16),
                   Text('Plant & Vehicle', style: textTheme.titleMedium),
                   const SizedBox(height: 8),
@@ -640,6 +641,12 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       ),
                     ],
                   ),
+                ] else ...[
+                  // Supervisors without driver_id: Show all supervised plants
+                  const SizedBox(height: 16),
+                  Text('Supervised Plants', style: textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  _SupervisedPlantsCard(user: widget.user),
                 ],
               ],
             ),
@@ -699,6 +706,93 @@ class _SupervisorInfoCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(helperText!, style: theme.textTheme.bodySmall),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupervisedPlantsCard extends StatelessWidget {
+  const _SupervisedPlantsCard({required this.user});
+
+  final AppUser user;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    
+    if (user.supervisedPlants.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Icon(Icons.factory_outlined, color: theme.colorScheme.primary),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'No supervised plants',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Contact admin to assign plants',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.factory_outlined, color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Text(
+                  'Supervised Plants (${user.supervisedPlants.length})',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: user.supervisedPlants.map((plant) {
+                final plantName = plant['plant_name']?.toString() ?? 'Unknown Plant';
+                final plantId = plant['id']?.toString() ?? '';
+                
+                return Chip(
+                  label: Text(
+                    plantName,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onPrimary,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  backgroundColor: theme.colorScheme.primary,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                );
+              }).toList(),
+            ),
           ],
         ),
       ),
