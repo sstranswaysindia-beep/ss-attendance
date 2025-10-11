@@ -63,6 +63,9 @@ class AuthRepository {
       final userJson =
           payload['user'] as Map<String, dynamic>? ??
           (throw AuthFailure('Missing user information from server.'));
+      
+      // Debug: Print user data from API
+      print('AuthRepository: User data from API: $userJson');
 
       final role = _parseRole(userJson['role']?.toString());
 
@@ -70,6 +73,11 @@ class AuthRepository {
           payload['driver'] as Map<String, dynamic>?;
       Map<String, dynamic>? supervisorJson =
           payload['supervisor'] as Map<String, dynamic>?;
+      
+      // Debug: Print flow information
+      print('AuthRepository: Role: $role');
+      print('AuthRepository: Has driverJson: ${driverJson != null}');
+      print('AuthRepository: Has supervisorJson: ${supervisorJson != null}');
 
       // Handle admin users
       if (role == UserRole.admin && driverJson == null) {
@@ -89,9 +97,10 @@ class AuthRepository {
       if (role == UserRole.supervisor &&
           driverJson == null &&
           supervisorJson != null) {
-        final displayName = userJson['full_name']?.toString() ?? 
-                           userJson['username']?.toString() ?? 
-                           username;
+        final displayName =
+            userJson['full_name']?.toString() ??
+            userJson['username']?.toString() ??
+            username;
 
         // Process vehicles for supervisors without driver_id
         final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
