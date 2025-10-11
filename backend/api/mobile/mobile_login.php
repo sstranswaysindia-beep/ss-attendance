@@ -55,7 +55,7 @@ $driverInfo = null;
 $vehicles = [];
 $supervisorInfo = null;
 
-// Handle supervisors - fetch supervised plants
+// Handle supervisors - fetch supervised plants and create driver record if needed
 if (strcasecmp($userRow['role'], 'supervisor') === 0) {
     $supervisedPlants = [];
     $supervisedPlantIds = [];
@@ -91,6 +91,50 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
             $vehicleStmt->execute();
             $vehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $vehicleStmt->close();
+        }
+    }
+    
+    // Create driver record for supervisor if they don't have one (for attendance purposes)
+    if (empty($userRow['driver_id'])) {
+        $supervisorName = $userRow['username'];
+        $primaryPlantId = !empty($supervisedPlantIds) ? $supervisedPlantIds[0] : null;
+        
+        if ($primaryPlantId) {
+            // Check if driver record already exists for this supervisor
+            $existingDriverStmt = $conn->prepare('SELECT id FROM drivers WHERE name = ? AND role = "supervisor" LIMIT 1');
+            $existingDriverStmt->bind_param('s', $supervisorName);
+            $existingDriverStmt->execute();
+            $existingDriver = $existingDriverStmt->get_result()->fetch_assoc();
+            $existingDriverStmt->close();
+            
+            if (!$existingDriver) {
+                // Create driver record for supervisor
+                $createDriverStmt = $conn->prepare(
+                    'INSERT INTO drivers (name, role, plant_id, status, created_at, updated_at) VALUES (?, "supervisor", ?, "active", NOW(), NOW())'
+                );
+                $createDriverStmt->bind_param('si', $supervisorName, $primaryPlantId);
+                $createDriverStmt->execute();
+                $newDriverId = $createDriverStmt->insert_id;
+                $createDriverStmt->close();
+                
+                // Update user record with the new driver_id
+                $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
+                $updateUserStmt->bind_param('ii', $newDriverId, $userRow['id']);
+                $updateUserStmt->execute();
+                $updateUserStmt->close();
+                
+                // Update userRow for further processing
+                $userRow['driver_id'] = $newDriverId;
+            } else {
+                // Update user record with existing driver_id
+                $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
+                $updateUserStmt->bind_param('ii', $existingDriver['id'], $userRow['id']);
+                $updateUserStmt->execute();
+                $updateUserStmt->close();
+                
+                // Update userRow for further processing
+                $userRow['driver_id'] = $existingDriver['id'];
+            }
         }
     }
     

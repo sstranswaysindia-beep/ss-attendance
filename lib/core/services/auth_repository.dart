@@ -85,7 +85,7 @@ class AuthRepository {
         );
       }
 
-      // Handle supervisors without driver_id
+      // Handle supervisors without driver_id (fallback case)
       if (role == UserRole.supervisor && driverJson == null && supervisorJson != null) {
         final displayName = userJson['username']?.toString() ?? username;
         
