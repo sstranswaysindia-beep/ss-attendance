@@ -89,6 +89,16 @@ class AuthRepository {
       if (role == UserRole.supervisor && driverJson == null && supervisorJson != null) {
         final displayName = userJson['username']?.toString() ?? username;
         
+        // Process vehicles for supervisors without driver_id
+        final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
+        final vehicles = vehiclesJson
+            .map((item) => DriverVehicle.fromJson(item as Map<String, dynamic>))
+            .where(
+              (vehicle) =>
+                  vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty,
+            )
+            .toList(growable: false);
+        
         return AppUser(
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
@@ -96,6 +106,7 @@ class AuthRepository {
           supervisedPlants: (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
               .cast<Map<String, dynamic>>(),
           supervisedPlantIds: supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [],
+          availableVehicles: vehicles,
         );
       }
 

@@ -186,7 +186,9 @@ if (!empty($userRow['driver_id'])) {
             ?? null;
         $supervisorName = $assignmentSupervisorName ?: $defaultSupervisorName;
 
-        if ($effectivePlantId) {
+        // For supervisors, keep vehicles from all supervised plants
+        // For drivers, fetch vehicles from assigned plant only
+        if ($effectivePlantId && $userRow['role'] !== 'supervisor') {
             $vehicleStmt = $conn->prepare(
                 'SELECT id, vehicle_no FROM vehicles WHERE plant_id = ? ORDER BY vehicle_no'
             );
@@ -195,6 +197,7 @@ if (!empty($userRow['driver_id'])) {
             $vehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
             $vehicleStmt->close();
         }
+        // For supervisors, $vehicles already contains vehicles from all supervised plants
 
         $driverInfo = [
             'driverId'       => (int)$driver['id'],
