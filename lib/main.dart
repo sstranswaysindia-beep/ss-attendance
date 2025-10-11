@@ -41,9 +41,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
 
   Future<void> _loadSavedUser() async {
     try {
-      print('Loading saved user...');
       final savedUser = await AuthStorageService.getUser();
-      print('Saved user: $savedUser');
       if (mounted) {
         setState(() {
           _currentUser = savedUser;
@@ -51,7 +49,6 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
         });
       }
     } catch (e) {
-      print('Error loading saved user: $e');
       if (mounted) {
         setState(() {
           _currentUser = null;
@@ -62,18 +59,14 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
   }
 
   void _handleLogin(AppUser user) async {
-    print('Saving user: ${user.displayName}');
     await AuthStorageService.saveUser(user);
-    print('User saved successfully');
     if (mounted) {
       setState(() => _currentUser = user);
     }
   }
 
   void _handleLogout() async {
-    print('Logging out user');
     await AuthStorageService.clearUser();
-    print('User cleared successfully');
     if (mounted) {
       setState(() => _currentUser = null);
     }
