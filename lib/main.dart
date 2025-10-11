@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -15,6 +16,17 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('en_IN', null);
   Intl.defaultLocale = 'en_IN';
+
+  // Set system UI overlay style globally
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+      statusBarBrightness: Brightness.light,
+      systemNavigationBarColor: Colors.white,
+      systemNavigationBarIconBrightness: Brightness.dark,
+    ),
+  );
 
   // Initialize notification service
   // await NotificationService().initialize();
@@ -84,28 +96,45 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
     );
     final textTheme = GoogleFonts.josefinSansTextTheme(baseTheme.textTheme);
 
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'SS Transways India',
-      theme: baseTheme.copyWith(
-        textTheme: textTheme,
-        appBarTheme: baseTheme.appBarTheme.copyWith(
-          titleTextStyle: textTheme.headlineSmall?.copyWith(
-            fontSize: 24,
-            fontWeight: FontWeight.w600,
-            color: colorScheme.onSurface,
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'SS Transways India',
+        theme: baseTheme.copyWith(
+          textTheme: textTheme,
+          appBarTheme: baseTheme.appBarTheme.copyWith(
+            titleTextStyle: textTheme.headlineSmall?.copyWith(
+              fontSize: 24,
+              fontWeight: FontWeight.w600,
+              color: colorScheme.onSurface,
+            ),
+            systemOverlayStyle: const SystemUiOverlayStyle(
+              statusBarColor: Colors.transparent,
+              statusBarIconBrightness: Brightness.dark,
+              statusBarBrightness: Brightness.light,
+            ),
+            elevation: 0,
+            backgroundColor: Colors.transparent,
+            surfaceTintColor: Colors.transparent,
           ),
         ),
+        home: _isLoading
+            ? const Scaffold(
+                body: Center(
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            : _currentUser == null
+                ? LoginScreen(onLogin: _handleLogin)
+                : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
       ),
-      home: _isLoading
-          ? const Scaffold(
-              body: Center(
-                child: CircularProgressIndicator(),
-              ),
-            )
-          : _currentUser == null
-              ? LoginScreen(onLogin: _handleLogin)
-              : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
     );
   }
 }
