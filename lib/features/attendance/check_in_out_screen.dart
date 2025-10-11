@@ -656,7 +656,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       style: FilledButton.styleFrom(
                         backgroundColor:
                             _currentAction == CheckFlowAction.checkIn
-                            ? const Color(0xFF77DD77) // Check-in green
+                            ? const Color(0xFF07DD05) // Check-in green
                             : const Color(0xFFDFCE34), // Check-out yellow
                       ),
                       child: _isSubmitting
