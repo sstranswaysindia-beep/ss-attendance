@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 class AverageCalculatorScreen extends StatefulWidget {
   const AverageCalculatorScreen({super.key});
@@ -44,7 +46,20 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   }
 
   void _initializeWebView() {
-    _controller = WebViewController()
+    late final PlatformWebViewControllerCreationParams params;
+    
+    if (WebViewPlatform.instance is WebKitWebViewPlatform) {
+      params = WebKitWebViewControllerCreationParams(
+        allowsInlineMediaPlayback: true,
+        mediaTypesRequiringUserAction: const <PlaybackMediaTypes>{},
+      );
+    } else {
+      params = const PlatformWebViewControllerCreationParams();
+    }
+
+    final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
+
+    controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -72,6 +87,14 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       ..loadRequest(
         Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
       );
+
+    if (controller.platform is AndroidWebViewController) {
+      AndroidWebViewController.enableDebugging(true);
+      (controller.platform as AndroidWebViewController)
+          .setMediaPlaybackRequiresUserGesture(false);
+    }
+
+    _controller = controller;
   }
 
   @override
