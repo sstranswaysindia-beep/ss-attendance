@@ -182,9 +182,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
   void _openAverageCalculator() {
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const AverageCalculatorScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => const AverageCalculatorScreen()),
     );
   }
 
@@ -631,7 +629,6 @@ class _SupervisorNotification {
   final String message;
   final NotificationType type;
 }
-
 
 class _SupervisedPlantsCard extends StatelessWidget {
   const _SupervisedPlantsCard({required this.user});

@@ -5,7 +5,8 @@ class AverageCalculatorScreen extends StatefulWidget {
   const AverageCalculatorScreen({super.key});
 
   @override
-  State<AverageCalculatorScreen> createState() => _AverageCalculatorScreenState();
+  State<AverageCalculatorScreen> createState() =>
+      _AverageCalculatorScreenState();
 }
 
 class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
@@ -43,19 +44,18 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Average Calculator'),
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: theme.colorScheme.onPrimary,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: Colors.black),
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.close),
+            icon: const Icon(Icons.close, color: Colors.black),
             onPressed: () => Navigator.of(context).pop(),
           ),
         ],
@@ -63,10 +63,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       body: Stack(
         children: [
           WebViewWidget(controller: _controller),
-          if (_isLoading)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
         ],
       ),
     );
