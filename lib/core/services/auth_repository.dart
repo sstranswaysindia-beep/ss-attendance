@@ -63,7 +63,7 @@ class AuthRepository {
       final userJson =
           payload['user'] as Map<String, dynamic>? ??
           (throw AuthFailure('Missing user information from server.'));
-      
+
       // Debug: Print user data from API
       print('AuthRepository: User data from API: $userJson');
 
@@ -73,7 +73,7 @@ class AuthRepository {
           payload['driver'] as Map<String, dynamic>?;
       Map<String, dynamic>? supervisorJson =
           payload['supervisor'] as Map<String, dynamic>?;
-      
+
       // Debug: Print flow information
       print('AuthRepository: Role: $role');
       print('AuthRepository: Has driverJson: ${driverJson != null}');
@@ -199,9 +199,14 @@ class AuthRepository {
           .toList(growable: false);
       print('AuthRepository: Final vehicles count: ${vehicles.length}');
 
+      // For supervisors, prioritize full_name from users table over driver name
+      final displayName = (role == UserRole.supervisor && userJson['full_name']?.toString().isNotEmpty == true)
+          ? userJson['full_name']?.toString() ?? username
+          : (driverJson['name']?.toString() ?? username);
+
       return AppUser(
         id: userJson['id']?.toString() ?? username,
-        displayName: driverJson['name']?.toString() ?? username,
+        displayName: displayName,
         role: role,
         employeeId: driverJson['employeeId']?.toString(),
         driverId: driverJson['driverId']?.toString(),
