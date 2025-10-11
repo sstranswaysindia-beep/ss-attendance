@@ -89,7 +89,9 @@ class AuthRepository {
       if (role == UserRole.supervisor &&
           driverJson == null &&
           supervisorJson != null) {
-        final displayName = userJson['username']?.toString() ?? username;
+        final displayName = userJson['full_name']?.toString() ?? 
+                           userJson['username']?.toString() ?? 
+                           username;
 
         // Process vehicles for supervisors without driver_id
         final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];

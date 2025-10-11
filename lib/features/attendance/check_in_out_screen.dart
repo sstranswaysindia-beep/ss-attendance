@@ -345,7 +345,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     try {
       final xFile = await picker.pickImage(
         source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.rear,
+        preferredCameraDevice: CameraDevice.front,
         imageQuality: 85,
       );
 
