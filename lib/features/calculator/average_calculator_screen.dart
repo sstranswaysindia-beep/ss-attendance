@@ -14,6 +14,7 @@ class AverageCalculatorScreen extends StatefulWidget {
 class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -48,13 +49,22 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       ..setNavigationDelegate(
         NavigationDelegate(
           onPageStarted: (String url) {
+            print('Average Calculator: Page started loading: $url');
             setState(() {
               _isLoading = true;
             });
           },
           onPageFinished: (String url) {
+            print('Average Calculator: Page finished loading: $url');
             setState(() {
               _isLoading = false;
+            });
+          },
+          onWebResourceError: (WebResourceError error) {
+            print('Average Calculator: WebView error: ${error.description}');
+            setState(() {
+              _isLoading = false;
+              _hasError = true;
             });
           },
         ),
@@ -139,8 +149,36 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     return Scaffold(
       body: Stack(
         children: [
-          WebViewWidget(controller: _controller),
-          if (_isLoading) const Center(child: CircularProgressIndicator()),
+          if (_hasError)
+            Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Failed to load Average Calculator',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('Please check your internet connection'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _hasError = false;
+                        _isLoading = true;
+                      });
+                      _initializeWebView();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          else
+            WebViewWidget(controller: _controller),
+          if (_isLoading && !_hasError) const Center(child: CircularProgressIndicator()),
           // Overlay buttons positioned below status bar
           SafeArea(
             child: Positioned(
