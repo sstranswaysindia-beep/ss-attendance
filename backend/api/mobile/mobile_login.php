@@ -143,6 +143,10 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
         'supervisedPlantIds' => $supervisedPlantIds,
         'totalSupervisedPlants' => count($supervisedPlants),
     ];
+    
+    // Debug: Log supervisor plant information
+    error_log("Supervisor {$userRow['username']} (ID: {$userRow['id']}) supervises " . count($supervisedPlantIds) . " plants: " . implode(',', $supervisedPlantIds));
+    error_log("Supervisor vehicles count: " . count($vehicles));
 }
 
 if (!empty($userRow['driver_id'])) {

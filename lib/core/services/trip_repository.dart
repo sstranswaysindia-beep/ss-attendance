@@ -551,37 +551,27 @@ class TripRepository {
     final fallbackVehicles = _buildFallbackVehicles(user);
 
     try {
-      // For supervisors, use vehicles from login response (all supervised plants)
-      if (user.role == UserRole.supervisor && user.availableVehicles.isNotEmpty) {
-        print('TripRepository: Using vehicles from login response for supervisor');
-        print('TripRepository: Available vehicles count: ${user.availableVehicles.length}');
-        final uniqueVehicles = <int, TripVehicle>{};
+      // For supervisors, check if they supervise the selected plant
+      if (user.role == UserRole.supervisor) {
+        print('TripRepository: Supervisor - checking supervised plants');
+        print('TripRepository: Selected plantId: $plantId');
+        print('TripRepository: Supervised plant IDs: ${user.supervisedPlantIds}');
         
-        // Add vehicles from login response (all supervised plants)
-        for (final driverVehicle in user.availableVehicles) {
-          print('TripRepository: Processing vehicle: ${driverVehicle.vehicleNumber} (ID: ${driverVehicle.id})');
-          final vehicle = TripVehicle(
-            id: int.tryParse(driverVehicle.id) ?? 0,
-            number: driverVehicle.vehicleNumber,
-          );
-          if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
-            uniqueVehicles[vehicle.id] = vehicle;
-            print('TripRepository: Added vehicle: ${vehicle.number} (ID: ${vehicle.id})');
-          }
-        }
+        // Check if supervisor supervises the selected plant
+        final selectedPlantIdInt = int.tryParse(plantId);
+        final supervisesThisPlant = selectedPlantIdInt != null && 
+            user.supervisedPlantIds.contains(selectedPlantIdInt);
         
-        // Add fallback vehicles
-        for (final vehicle in fallbackVehicles) {
-          uniqueVehicles[vehicle.id] = vehicle;
-        }
+        print('TripRepository: Supervisor supervises selected plant: $supervisesThisPlant');
         
-        print('TripRepository: Total vehicles for supervisor: ${uniqueVehicles.length}');
-        if (uniqueVehicles.isNotEmpty) {
-          return uniqueVehicles.values.toList(growable: false);
+        if (supervisesThisPlant) {
+          // Use API to get vehicles for the specific selected plant
+          print('TripRepository: Supervisor supervises this plant, using API for specific plant vehicles');
+        } else {
+          // Supervisor doesn't supervise this plant, return empty list
+          print('TripRepository: Supervisor does not supervise this plant, returning empty vehicle list');
+          return const <TripVehicle>[];
         }
-      } else if (user.role == UserRole.supervisor) {
-        print('TripRepository: Supervisor has no available vehicles from login response');
-        print('TripRepository: availableVehicles.length: ${user.availableVehicles.length}');
       }
 
       // For drivers or when supervisor vehicles are not available, use API
