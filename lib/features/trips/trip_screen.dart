@@ -873,6 +873,11 @@ class _TripScreenState extends State<TripScreen> {
       setState(() {
         _vehicles = vehicles;
       });
+      
+      print('TripScreen: Loaded ${vehicles.length} vehicles');
+      for (final vehicle in vehicles) {
+        print('TripScreen: Vehicle: ${vehicle.number} (ID: ${vehicle.id})');
+      }
 
       // Try to get assigned vehicle for driver/supervisor
       TripVehicle? initialVehicle;
@@ -2136,11 +2141,25 @@ class _PlantVehicleCard extends StatelessWidget {
                           );
                         })
                         .toList(growable: false),
-                    onChanged: isLoadingVehicles || vehicles.isEmpty
-                        ? null
-                        : (hasOngoingTrip && user.role == UserRole.driver)
-                        ? null
-                        : onVehicleChanged,
+                    onChanged: (() {
+                      print('Vehicle dropdown onChanged evaluation');
+                      print('isLoadingVehicles: $isLoadingVehicles');
+                      print('vehicles.isEmpty: ${vehicles.isEmpty}');
+                      print('hasOngoingTrip: $hasOngoingTrip');
+                      print('user.role: ${user.role}');
+                      print('user.role == UserRole.driver: ${user.role == UserRole.driver}');
+                      
+                      if (isLoadingVehicles || vehicles.isEmpty) {
+                        print('Vehicle dropdown disabled: loading or empty');
+                        return null;
+                      }
+                      if (hasOngoingTrip && user.role == UserRole.driver) {
+                        print('Vehicle dropdown disabled: driver with ongoing trip');
+                        return null;
+                      }
+                      print('Vehicle dropdown enabled');
+                      return onVehicleChanged;
+                    })(),
                   ),
                 ),
               ],
