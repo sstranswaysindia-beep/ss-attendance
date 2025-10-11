@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 
 import 'core/models/app_user.dart';
+import 'core/services/auth_storage_service.dart';
 // import 'core/services/notification_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
@@ -30,13 +31,45 @@ class SSTranswaysApp extends StatefulWidget {
 
 class _SSTranswaysAppState extends State<SSTranswaysApp> {
   AppUser? _currentUser;
+  bool _isLoading = true;
 
-  void _handleLogin(AppUser user) {
-    setState(() => _currentUser = user);
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedUser();
   }
 
-  void _handleLogout() {
-    setState(() => _currentUser = null);
+  Future<void> _loadSavedUser() async {
+    try {
+      final savedUser = await AuthStorageService.getUser();
+      if (mounted) {
+        setState(() {
+          _currentUser = savedUser;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _currentUser = null;
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  void _handleLogin(AppUser user) async {
+    await AuthStorageService.saveUser(user);
+    if (mounted) {
+      setState(() => _currentUser = user);
+    }
+  }
+
+  void _handleLogout() async {
+    await AuthStorageService.clearUser();
+    if (mounted) {
+      setState(() => _currentUser = null);
+    }
   }
 
   @override
@@ -64,9 +97,15 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
           ),
         ),
       ),
-      home: _currentUser == null
-          ? LoginScreen(onLogin: _handleLogin)
-          : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
+      home: _isLoading
+          ? const Scaffold(
+              body: Center(
+                child: CircularProgressIndicator(),
+              ),
+            )
+          : _currentUser == null
+              ? LoginScreen(onLogin: _handleLogin)
+              : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
     );
   }
 }

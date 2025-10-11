@@ -16,4 +16,12 @@ class DriverVehicle {
       plantId: json['plantId'] != null ? int.tryParse(json['plantId'].toString()) : null,
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'vehicleNumber': vehicleNumber,
+      'plantId': plantId,
+    };
+  }
 }

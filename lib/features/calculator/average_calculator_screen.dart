@@ -43,20 +43,21 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return Scaffold(
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        toolbarHeight: 48, // Reduced from default 56
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
+          icon: const Icon(Icons.arrow_back, color: Colors.black, size: 20),
           onPressed: () => Navigator.of(context).pop(),
+          padding: EdgeInsets.zero,
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.close, color: Colors.black),
+            icon: const Icon(Icons.close, color: Colors.black, size: 20),
             onPressed: () => Navigator.of(context).pop(),
+            padding: EdgeInsets.zero,
           ),
         ],
       ),
