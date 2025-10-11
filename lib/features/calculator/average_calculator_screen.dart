@@ -118,39 +118,51 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     _openInNewTab();
     
     // Return a simple loading screen while opening browser
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 24),
-            const Text(
-              'Opening Average Calculator...',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.dark,
+        statusBarBrightness: Brightness.light,
+        systemNavigationBarColor: Colors.white,
+        systemNavigationBarIconBrightness: Brightness.dark,
+      ),
+      child: Scaffold(
+        extendBodyBehindAppBar: false,
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 24),
+                const Text(
+                  'Opening Average Calculator...',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'The calculator will open in your browser.',
+                  style: TextStyle(fontSize: 14, color: Colors.grey),
+                ),
+                const SizedBox(height: 32),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    launchUrl(
+                      Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                      mode: LaunchMode.externalApplication,
+                    );
+                  },
+                  icon: const Icon(Icons.open_in_browser),
+                  label: const Text('Open Manually'),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Go Back'),
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            const Text(
-              'The calculator will open in your browser.',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-            const SizedBox(height: 32),
-            ElevatedButton.icon(
-              onPressed: () {
-                launchUrl(
-                  Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
-                  mode: LaunchMode.externalApplication,
-                );
-              },
-              icon: const Icon(Icons.open_in_browser),
-              label: const Text('Open Manually'),
-            ),
-            const SizedBox(height: 16),
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Go Back'),
-            ),
-          ],
+          ),
         ),
       ),
     );
