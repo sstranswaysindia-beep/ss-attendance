@@ -60,94 +60,136 @@ if (strcasecmp($userRow['role'], 'supervisor') === 0) {
     $supervisedPlants = [];
     $supervisedPlantIds = [];
     
-    $sqlSup = "
-        SELECT DISTINCT p.id, p.plant_name
-        FROM plants p
-        LEFT JOIN supervisor_plants sp ON sp.plant_id = p.id
-        WHERE p.supervisor_user_id = ? OR sp.user_id = ?
-        ORDER BY p.plant_name
-    ";
-    $stSup = $conn->prepare($sqlSup);
-    if ($stSup) {
-        $stSup->bind_param('ii', $userRow['id'], $userRow['id']);
-        $stSup->execute();
-        $resSup = $stSup->get_result();
-        while ($rowSup = $resSup->fetch_assoc()) {
-            $pid = (int)$rowSup['id'];
-            $supervisedPlants[] = ['id' => $pid, 'plant_name' => (string)$rowSup['plant_name']];
-            $supervisedPlantIds[] = $pid;
+    try {
+        $sqlSup = "
+            SELECT DISTINCT p.id, p.plant_name
+            FROM plants p
+            LEFT JOIN supervisor_plants sp ON sp.plant_id = p.id
+            WHERE p.supervisor_user_id = ? OR sp.user_id = ?
+            ORDER BY p.plant_name
+        ";
+        $stSup = $conn->prepare($sqlSup);
+        if ($stSup) {
+            $stSup->bind_param('ii', $userRow['id'], $userRow['id']);
+            $stSup->execute();
+            $resSup = $stSup->get_result();
+            while ($rowSup = $resSup->fetch_assoc()) {
+                $pid = (int)$rowSup['id'];
+                $supervisedPlants[] = ['id' => $pid, 'plant_name' => (string)$rowSup['plant_name']];
+                $supervisedPlantIds[] = $pid;
+            }
+            $stSup->close();
+            error_log("Supervisor {$userRow['username']} supervises " . count($supervisedPlantIds) . " plants");
+        } else {
+            error_log("Failed to prepare supervised plants query for supervisor {$userRow['username']}");
         }
-        $stSup->close();
+    } catch (Exception $e) {
+        error_log("Exception fetching supervised plants for supervisor {$userRow['username']}: " . $e->getMessage());
+        // Continue with empty supervised plants - supervisor can still login
     }
     
     // Get vehicles for all supervised plants
     if (!empty($supervisedPlantIds)) {
-        error_log("Supervisor {$userRow['username']} supervises plants: " . implode(',', $supervisedPlantIds));
-        $placeholders = str_repeat('?,', count($supervisedPlantIds) - 1) . '?';
-        $vehicleStmt = $conn->prepare(
-            "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) ORDER BY plant_id, vehicle_no"
-        );
-        if ($vehicleStmt) {
-            $vehicleStmt->bind_param(str_repeat('i', count($supervisedPlantIds)), ...$supervisedPlantIds);
-            $vehicleStmt->execute();
-            $allVehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
-            $vehicleStmt->close();
-            
-            // Filter out vehicles with NULL plant_id
-            $vehicles = array_filter($allVehicles, function($vehicle) {
-                return !is_null($vehicle['plant_id']);
-            });
-            
-            error_log("Found " . count($allVehicles) . " total vehicles, " . count($vehicles) . " valid vehicles for supervisor {$userRow['username']}");
-            foreach ($vehicles as $vehicle) {
-                error_log("Vehicle: {$vehicle['vehicle_no']} (ID: {$vehicle['id']}, Plant: {$vehicle['plant_id']})");
+        try {
+            error_log("Supervisor {$userRow['username']} supervises plants: " . implode(',', $supervisedPlantIds));
+            $placeholders = str_repeat('?,', count($supervisedPlantIds) - 1) . '?';
+            $vehicleStmt = $conn->prepare(
+                "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) ORDER BY plant_id, vehicle_no"
+            );
+            if ($vehicleStmt) {
+                $vehicleStmt->bind_param(str_repeat('i', count($supervisedPlantIds)), ...$supervisedPlantIds);
+                $vehicleStmt->execute();
+                $allVehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $vehicleStmt->close();
+                
+                // Filter out vehicles with NULL plant_id
+                $vehicles = array_filter($allVehicles, function($vehicle) {
+                    return !is_null($vehicle['plant_id']);
+                });
+                
+                error_log("Found " . count($allVehicles) . " total vehicles, " . count($vehicles) . " valid vehicles for supervisor {$userRow['username']}");
+                foreach ($vehicles as $vehicle) {
+                    error_log("Vehicle: {$vehicle['vehicle_no']} (ID: {$vehicle['id']}, Plant: {$vehicle['plant_id']})");
+                }
+            } else {
+                error_log("Failed to prepare vehicle statement for supervisor {$userRow['username']}");
             }
-        } else {
-            error_log("Failed to prepare vehicle statement for supervisor {$userRow['username']}");
+        } catch (Exception $e) {
+            error_log("Exception fetching vehicles for supervisor {$userRow['username']}: " . $e->getMessage());
+            // Continue with empty vehicles - supervisor can still login
         }
     }
     
     // Create driver record for supervisor if they don't have one (for attendance purposes)
     if (empty($userRow['driver_id'])) {
-        $supervisorName = $userRow['username'];
+        $supervisorName = $userRow['full_name'] ?? $userRow['username'];
         $primaryPlantId = !empty($supervisedPlantIds) ? $supervisedPlantIds[0] : null;
         
         if ($primaryPlantId) {
-            // Check if driver record already exists for this supervisor
-            $existingDriverStmt = $conn->prepare('SELECT id FROM drivers WHERE name = ? AND role = "supervisor" LIMIT 1');
-            $existingDriverStmt->bind_param('s', $supervisorName);
-            $existingDriverStmt->execute();
-            $existingDriver = $existingDriverStmt->get_result()->fetch_assoc();
-            $existingDriverStmt->close();
-            
-            if (!$existingDriver) {
-                // Create driver record for supervisor
-                $createDriverStmt = $conn->prepare(
-                    'INSERT INTO drivers (name, role, plant_id, status, created_at, updated_at) VALUES (?, "supervisor", ?, "active", NOW(), NOW())'
-                );
-                $createDriverStmt->bind_param('si', $supervisorName, $primaryPlantId);
-                $createDriverStmt->execute();
-                $newDriverId = $createDriverStmt->insert_id;
-                $createDriverStmt->close();
-                
-                // Update user record with the new driver_id
-                $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
-                $updateUserStmt->bind_param('ii', $newDriverId, $userRow['id']);
-                $updateUserStmt->execute();
-                $updateUserStmt->close();
-                
-                // Update userRow for further processing
-                $userRow['driver_id'] = $newDriverId;
-            } else {
-                // Update user record with existing driver_id
-                $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
-                $updateUserStmt->bind_param('ii', $existingDriver['id'], $userRow['id']);
-                $updateUserStmt->execute();
-                $updateUserStmt->close();
-                
-                // Update userRow for further processing
-                $userRow['driver_id'] = $existingDriver['id'];
+            try {
+                // Check if driver record already exists for this supervisor
+                $existingDriverStmt = $conn->prepare('SELECT id FROM drivers WHERE name = ? AND role = "supervisor" LIMIT 1');
+                if ($existingDriverStmt) {
+                    $existingDriverStmt->bind_param('s', $supervisorName);
+                    $existingDriverStmt->execute();
+                    $existingDriver = $existingDriverStmt->get_result()->fetch_assoc();
+                    $existingDriverStmt->close();
+                    
+                    if (!$existingDriver) {
+                        // Create driver record for supervisor
+                        $createDriverStmt = $conn->prepare(
+                            'INSERT INTO drivers (name, role, plant_id, status, created_at, updated_at) VALUES (?, "supervisor", ?, "active", NOW(), NOW())'
+                        );
+                        if ($createDriverStmt) {
+                            $createDriverStmt->bind_param('si', $supervisorName, $primaryPlantId);
+                            if ($createDriverStmt->execute()) {
+                                $newDriverId = $createDriverStmt->insert_id;
+                                $createDriverStmt->close();
+                                
+                                // Update user record with the new driver_id
+                                $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
+                                if ($updateUserStmt) {
+                                    $updateUserStmt->bind_param('ii', $newDriverId, $userRow['id']);
+                                    $updateUserStmt->execute();
+                                    $updateUserStmt->close();
+                                    
+                                    // Update userRow for further processing
+                                    $userRow['driver_id'] = $newDriverId;
+                                    error_log("Created new driver record for supervisor {$supervisorName} with ID {$newDriverId}");
+                                } else {
+                                    error_log("Failed to prepare user update statement for supervisor {$supervisorName}");
+                                }
+                            } else {
+                                error_log("Failed to execute driver creation for supervisor {$supervisorName}: " . $createDriverStmt->error);
+                                $createDriverStmt->close();
+                            }
+                        } else {
+                            error_log("Failed to prepare driver creation statement for supervisor {$supervisorName}");
+                        }
+                    } else {
+                        // Update user record with existing driver_id
+                        $updateUserStmt = $conn->prepare('UPDATE users SET driver_id = ? WHERE id = ?');
+                        if ($updateUserStmt) {
+                            $updateUserStmt->bind_param('ii', $existingDriver['id'], $userRow['id']);
+                            $updateUserStmt->execute();
+                            $updateUserStmt->close();
+                            
+                            // Update userRow for further processing
+                            $userRow['driver_id'] = $existingDriver['id'];
+                            error_log("Linked existing driver record {$existingDriver['id']} to supervisor {$supervisorName}");
+                        } else {
+                            error_log("Failed to prepare user update statement for existing driver record");
+                        }
+                    }
+                } else {
+                    error_log("Failed to prepare existing driver check statement for supervisor {$supervisorName}");
+                }
+            } catch (Exception $e) {
+                error_log("Exception during driver record creation for supervisor {$supervisorName}: " . $e->getMessage());
+                // Continue without driver_id - supervisor can still function
             }
+        } else {
+            error_log("No supervised plants found for supervisor {$supervisorName} - cannot create driver record");
         }
     }
     
