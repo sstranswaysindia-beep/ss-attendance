@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -17,6 +18,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _hasError = false;
+  Timer? _loadingTimeout;
 
   @override
   void initState() {
@@ -27,7 +29,22 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     } else {
       // On mobile, use WebView
       _initializeWebView();
+      // Set a timeout for slow loading
+      _loadingTimeout = Timer(const Duration(seconds: 10), () {
+        if (mounted && _isLoading) {
+          setState(() {
+            _hasError = true;
+            _isLoading = false;
+          });
+        }
+      });
     }
+  }
+
+  @override
+  void dispose() {
+    _loadingTimeout?.cancel();
+    super.dispose();
   }
 
   void _openInNewTab() async {
@@ -88,10 +105,11 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
           },
           onPageFinished: (String url) {
             print('Average Calculator: Page finished loading: $url');
+            _loadingTimeout?.cancel(); // Cancel timeout when page loads
             setState(() {
               _isLoading = false;
             });
-
+            
             // Don't treat login page as an error - allow user to login in WebView
             // The login flow should work directly in the WebView
           },
@@ -122,9 +140,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
     // On web, show a loading screen since we're opening external link
     if (kIsWeb) {
       return Scaffold(
-        body: SafeArea(
-          child: Stack(
-            children: [
+        body: Stack(
+          children: [
               if (_hasError)
                 Center(
                   child: Column(
@@ -181,8 +198,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 ),
               // Overlay buttons positioned below status bar
               Positioned(
-                top: 50,
-                left: 8,
+                top: MediaQuery.of(context).padding.top + 16,
+                left: 16,
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.9),
@@ -207,8 +224,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 ),
               ),
               Positioned(
-                top: 50,
-                right: 8,
+                top: MediaQuery.of(context).padding.top + 16,
+                right: 16,
                 child: Container(
                   decoration: BoxDecoration(
                     color: Colors.white.withOpacity(0.9),
@@ -232,17 +249,15 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                   ),
                 ),
               ),
-            ],
-          ),
+          ],
         ),
       );
     }
 
     // On mobile, show WebView with overlay buttons positioned below status bar
     return Scaffold(
-      body: SafeArea(
-        child: Stack(
-          children: [
+      body: Stack(
+        children: [
             if (_hasError)
               Center(
                 child: Column(
@@ -302,8 +317,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               const Center(child: CircularProgressIndicator()),
             // Overlay buttons positioned below status bar
             Positioned(
-              top: 50,
-              left: 8,
+              top: MediaQuery.of(context).padding.top + 16,
+              left: 16,
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.9),
@@ -328,8 +343,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               ),
             ),
             Positioned(
-              top: 50,
-              right: 8,
+              top: MediaQuery.of(context).padding.top + 16,
+              right: 16,
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.9),
@@ -349,8 +364,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 ),
               ),
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
