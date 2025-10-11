@@ -33,6 +33,8 @@ class AppUser {
     this.availableVehicles = const <DriverVehicle>[],
     this.joiningDate,
     this.supervisorName,
+    this.supervisedPlants = const <Map<String, dynamic>>[],
+    this.supervisedPlantIds = const <dynamic>[],
   });
 
   final String id;
@@ -64,4 +66,6 @@ class AppUser {
   final List<DriverVehicle> availableVehicles;
   final DateTime? joiningDate;
   final String? supervisorName;
+  final List<Map<String, dynamic>> supervisedPlants;
+  final List<dynamic> supervisedPlantIds;
 }

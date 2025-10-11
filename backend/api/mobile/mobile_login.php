@@ -53,6 +53,53 @@ if (hash('sha256', $password) === $userRow['password']) {
 
 $driverInfo = null;
 $vehicles = [];
+$supervisorInfo = null;
+
+// Handle supervisors - fetch supervised plants
+if (strcasecmp($userRow['role'], 'supervisor') === 0) {
+    $supervisedPlants = [];
+    $supervisedPlantIds = [];
+    
+    $sqlSup = "
+        SELECT DISTINCT p.id, p.plant_name
+        FROM plants p
+        LEFT JOIN supervisor_plants sp ON sp.plant_id = p.id
+        WHERE p.supervisor_user_id = ? OR sp.user_id = ?
+        ORDER BY p.plant_name
+    ";
+    $stSup = $conn->prepare($sqlSup);
+    if ($stSup) {
+        $stSup->bind_param('ii', $userRow['id'], $userRow['id']);
+        $stSup->execute();
+        $resSup = $stSup->get_result();
+        while ($rowSup = $resSup->fetch_assoc()) {
+            $pid = (int)$rowSup['id'];
+            $supervisedPlants[] = ['id' => $pid, 'plant_name' => (string)$rowSup['plant_name']];
+            $supervisedPlantIds[] = $pid;
+        }
+        $stSup->close();
+    }
+    
+    // Get vehicles for all supervised plants
+    if (!empty($supervisedPlantIds)) {
+        $placeholders = str_repeat('?,', count($supervisedPlantIds) - 1) . '?';
+        $vehicleStmt = $conn->prepare(
+            "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) ORDER BY plant_id, vehicle_no"
+        );
+        if ($vehicleStmt) {
+            $vehicleStmt->bind_param(str_repeat('i', count($supervisedPlantIds)), ...$supervisedPlantIds);
+            $vehicleStmt->execute();
+            $vehicles = $vehicleStmt->get_result()->fetch_all(MYSQLI_ASSOC);
+            $vehicleStmt->close();
+        }
+    }
+    
+    $supervisorInfo = [
+        'supervisedPlants' => $supervisedPlants,
+        'supervisedPlantIds' => $supervisedPlantIds,
+        'totalSupervisedPlants' => count($supervisedPlants),
+    ];
+}
 
 if (!empty($userRow['driver_id'])) {
     $driverStmt = $conn->prepare(
@@ -192,10 +239,12 @@ apiRespond(200, [
         'role'     => $userRow['role'],
     ],
     'driver' => $driverInfo,
+    'supervisor' => $supervisorInfo,
     'vehicles' => array_map(static function (array $row): array {
         return [
             'id'            => (int)$row['id'],
             'vehicleNumber' => $row['vehicle_no'],
+            'plantId'       => isset($row['plant_id']) ? (int)$row['plant_id'] : null,
         ];
     }, $vehicles),
 ]);

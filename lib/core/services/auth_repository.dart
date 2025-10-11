@@ -68,10 +68,10 @@ class AuthRepository {
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
-      if (role != UserRole.admin && driverJson == null) {
-        throw AuthFailure('Missing driver mapping from server.');
-      }
+      Map<String, dynamic>? supervisorJson =
+          payload['supervisor'] as Map<String, dynamic>?;
 
+      // Handle admin users
       if (role == UserRole.admin && driverJson == null) {
         final displayName =
             userJson['full_name']?.toString() ??
@@ -83,6 +83,25 @@ class AuthRepository {
           displayName: displayName,
           role: role,
         );
+      }
+
+      // Handle supervisors without driver_id
+      if (role == UserRole.supervisor && driverJson == null && supervisorJson != null) {
+        final displayName = userJson['username']?.toString() ?? username;
+        
+        return AppUser(
+          id: userJson['id']?.toString() ?? username,
+          displayName: displayName,
+          role: role,
+          supervisedPlants: (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
+              .cast<Map<String, dynamic>>(),
+          supervisedPlantIds: supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [],
+        );
+      }
+
+      // Handle drivers or supervisors with driver_id
+      if (role != UserRole.admin && driverJson == null) {
+        throw AuthFailure('Missing driver mapping from server.');
       }
 
       driverJson ??= <String, dynamic>{};
@@ -158,6 +177,9 @@ class AuthRepository {
         availableVehicles: vehicles,
         joiningDate: joiningDate,
         supervisorName: supervisorName,
+        supervisedPlants: (supervisorJson?['supervisedPlants'] as List<dynamic>? ?? [])
+            .cast<Map<String, dynamic>>(),
+        supervisedPlantIds: supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
       );
     } on AuthFailure {
       rethrow;
