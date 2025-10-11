@@ -33,7 +33,9 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   void _openInNewTab() async {
     // The Average Calculator requires authentication, so we need to open it in a new tab
     // where the user can login with their web credentials
-    final url = Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php');
+    final url = Uri.parse(
+      'https://sstranswaysindia.com/AverageCalculator/index.php',
+    );
     try {
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.platformDefault);
@@ -61,7 +63,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
 
   void _initializeWebView() {
     late final PlatformWebViewControllerCreationParams params;
-    
+
     if (WebViewPlatform.instance is WebKitWebViewPlatform) {
       params = WebKitWebViewControllerCreationParams(
         allowsInlineMediaPlayback: true,
@@ -71,7 +73,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       params = const PlatformWebViewControllerCreationParams();
     }
 
-    final WebViewController controller = WebViewController.fromPlatformCreationParams(params);
+    final WebViewController controller =
+        WebViewController.fromPlatformCreationParams(params);
 
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -89,13 +92,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
               _isLoading = false;
             });
             
-            // Check if we were redirected to login page
-            if (url.contains('/login.php')) {
-              print('Average Calculator: Redirected to login page');
-              setState(() {
-                _hasError = true;
-              });
-            }
+            // Don't treat login page as an error - allow user to login in WebView
+            // The login flow should work directly in the WebView
           },
           onWebResourceError: (WebResourceError error) {
             print('Average Calculator: WebView error: ${error.description}');
@@ -131,19 +129,30 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Colors.red,
+                    ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Average Calculator Requires Login',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      'Unable to Open Average Calculator',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 8),
-                    const Text('The Average Calculator requires web login credentials.\nPlease click below to open in your browser and login.'),
+                    const Text(
+                      'There was an error opening the calculator.\nPlease click below to open manually.',
+                    ),
                     const SizedBox(height: 16),
                     ElevatedButton.icon(
                       onPressed: () {
                         launchUrl(
-                          Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                          Uri.parse(
+                            'https://sstranswaysindia.com/AverageCalculator/index.php',
+                          ),
                           mode: LaunchMode.platformDefault,
                         );
                       },
@@ -186,7 +195,11 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                   ],
                 ),
                 child: IconButton(
-                  icon: const Icon(Icons.arrow_back, color: Colors.black, size: 18),
+                  icon: const Icon(
+                    Icons.arrow_back,
+                    color: Colors.black,
+                    size: 18,
+                  ),
                   onPressed: () => Navigator.of(context).pop(),
                   padding: const EdgeInsets.all(8),
                 ),
@@ -231,11 +244,13 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                   const Icon(Icons.error_outline, size: 64, color: Colors.red),
                   const SizedBox(height: 16),
                   const Text(
-                    'Average Calculator Requires Login',
+                    'Unable to Load Average Calculator',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text('The Average Calculator requires web login credentials.\nPlease use the button below to open in your browser.'),
+                  const Text(
+                    'There was an error loading the calculator.\nPlease try opening in your browser or retry.',
+                  ),
                   const SizedBox(height: 16),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -243,7 +258,9 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                       ElevatedButton.icon(
                         onPressed: () {
                           launchUrl(
-                            Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                            Uri.parse(
+                              'https://sstranswaysindia.com/AverageCalculator/index.php',
+                            ),
                             mode: LaunchMode.externalApplication,
                           );
                         },
@@ -267,7 +284,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             )
           else
             WebViewWidget(controller: _controller),
-          if (_isLoading && !_hasError) const Center(child: CircularProgressIndicator()),
+          if (_isLoading && !_hasError)
+            const Center(child: CircularProgressIndicator()),
           // Overlay buttons positioned below status bar
           Positioned(
             top: 8,
@@ -285,7 +303,11 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                 ],
               ),
               child: IconButton(
-                icon: const Icon(Icons.arrow_back, color: Colors.black, size: 18),
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: Colors.black,
+                  size: 18,
+                ),
                 onPressed: () => Navigator.of(context).pop(),
                 padding: const EdgeInsets.all(8),
               ),
