@@ -182,18 +182,28 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   }
 
   Future<void> _openAverageCalculator() async {
-    final url = Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php');
+    final url = Uri.parse(
+      'https://sstranswaysindia.com/AverageCalculator/index.php',
+    );
     try {
       if (await canLaunchUrl(url)) {
         await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
         if (mounted) {
-          showAppToast(context, 'Unable to open Average Calculator', isError: true);
+          showAppToast(
+            context,
+            'Unable to open Average Calculator',
+            isError: true,
+          );
         }
       }
     } catch (e) {
       if (mounted) {
-        showAppToast(context, 'Error opening Average Calculator', isError: true);
+        showAppToast(
+          context,
+          'Error opening Average Calculator',
+          isError: true,
+        );
       }
     }
   }
