@@ -642,41 +642,11 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ),
                   ),
                 ),
-                // Show different sections based on supervisor type
-                if (widget.user.driverId != null &&
-                    widget.user.driverId!.isNotEmpty) ...[
-                  // Supervisors with driver_id: Show Plant & Vehicle
-                  const SizedBox(height: 16),
-                  Text('Plant & Vehicle', style: textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _SupervisorInfoCard(
-                          icon: Icons.factory_outlined,
-                          label: 'Plant',
-                          value: plantLabel,
-                          helperText: helperSupervisorText,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _SupervisorInfoCard(
-                          icon: Icons.fire_truck,
-                          label: 'Vehicle',
-                          value: vehicleLabel,
-                          helperText: null,
-                        ),
-                      ),
-                    ],
-                  ),
-                ] else ...[
-                  // Supervisors without driver_id: Show all supervised plants
-                  const SizedBox(height: 16),
-                  Text('Supervised Plants', style: textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  _SupervisedPlantsCard(user: widget.user),
-                ],
+                // All supervisors show supervised plants (no vehicles)
+                const SizedBox(height: 16),
+                Text('Supervised Plants', style: textTheme.titleMedium),
+                const SizedBox(height: 8),
+                _SupervisedPlantsCard(user: widget.user),
               ],
             ),
           ),
