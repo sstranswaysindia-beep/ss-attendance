@@ -31,17 +31,31 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
   }
 
   void _openInNewTab() async {
+    // The Average Calculator requires authentication, so we need to open it in a new tab
+    // where the user can login with their web credentials
     final url = Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php');
     try {
       if (await canLaunchUrl(url)) {
-        await launchUrl(url, mode: LaunchMode.externalApplication);
+        await launchUrl(url, mode: LaunchMode.platformDefault);
         // Close this screen after opening external link
         if (mounted) {
           Navigator.of(context).pop();
         }
+      } else {
+        // Fallback: show manual link option
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+          });
+        }
       }
     } catch (e) {
       print('Error opening Average Calculator: $e');
+      if (mounted) {
+        setState(() {
+          _hasError = true;
+        });
+      }
     }
   }
 
@@ -74,6 +88,14 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
             setState(() {
               _isLoading = false;
             });
+            
+            // Check if we were redirected to login page
+            if (url.contains('/login.php')) {
+              print('Average Calculator: Redirected to login page');
+              setState(() {
+                _hasError = true;
+              });
+            }
           },
           onWebResourceError: (WebResourceError error) {
             print('Average Calculator: WebView error: ${error.description}');
@@ -104,16 +126,49 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       return Scaffold(
         body: Stack(
           children: [
-            const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Opening Average Calculator...'),
-                ],
+            if (_hasError)
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Average Calculator Requires Login',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('The Average Calculator requires web login credentials.\nPlease click below to open in your browser and login.'),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        launchUrl(
+                          Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                          mode: LaunchMode.platformDefault,
+                        );
+                      },
+                      icon: const Icon(Icons.open_in_new),
+                      label: const Text('Open Average Calculator'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Go Back'),
+                    ),
+                  ],
+                ),
+              )
+            else
+              const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('Opening Average Calculator...'),
+                  ],
+                ),
               ),
-            ),
             // Overlay buttons positioned below status bar
             SafeArea(
               child: Positioned(
@@ -180,21 +235,36 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
                   const Icon(Icons.error_outline, size: 64, color: Colors.red),
                   const SizedBox(height: 16),
                   const Text(
-                    'Failed to load Average Calculator',
+                    'Average Calculator Requires Login',
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text('Please check your internet connection'),
+                  const Text('The Average Calculator requires web login credentials.\nPlease use the button below to open in your browser.'),
                   const SizedBox(height: 16),
-                  ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _hasError = false;
-                        _isLoading = true;
-                      });
-                      _initializeWebView();
-                    },
-                    child: const Text('Retry'),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          launchUrl(
+                            Uri.parse('https://sstranswaysindia.com/AverageCalculator/index.php'),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        icon: const Icon(Icons.open_in_browser),
+                        label: const Text('Open in Browser'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _hasError = false;
+                            _isLoading = true;
+                          });
+                          _initializeWebView();
+                        },
+                        child: const Text('Retry'),
+                      ),
+                    ],
                   ),
                 ],
               ),
