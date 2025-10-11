@@ -36,14 +36,14 @@ try {
                 ar.id,
                 ar.driver_id,
                 ar.amount,
-                ar.reason,
+                ar.purpose as reason,
                 ar.status,
-                ar.created_at,
-                ar.updated_at,
-                ar.approved_at,
-                ar.admin_comments,
+                ar.requested_at as created_at,
+                ar.requested_at as updated_at,
+                ar.approval_at as approved_at,
+                ar.remarks as admin_comments,
                 d.name as driver_name,
-                d.employee_id,
+                d.empid as employee_id,
                 d.phone,
                 d.address,
                 d.joining_date,
@@ -57,7 +57,7 @@ try {
               FROM advance_requests ar 
               LEFT JOIN drivers d ON ar.driver_id = d.id 
               LEFT JOIN users u ON d.user_id = u.id 
-              LEFT JOIN plants p ON ar.plant_id = p.id
+              LEFT JOIN plants p ON d.plant_id = p.id
               WHERE ar.id = ?";
     
     $stmt = $db->prepare($query);
@@ -81,11 +81,11 @@ try {
                        ar.id,
                        ar.amount,
                        ar.status,
-                       ar.created_at,
-                       ar.approved_at
+                       ar.requested_at as created_at,
+                       ar.approval_at as approved_at
                      FROM advance_requests ar 
                      WHERE ar.driver_id = ? AND ar.id != ?
-                     ORDER BY ar.created_at DESC 
+                     ORDER BY ar.requested_at DESC 
                      LIMIT 5";
     
     $stmt = $db->prepare($contextQuery);
@@ -108,9 +108,9 @@ try {
     // Get driver's total advance statistics
     $statsQuery = "SELECT 
                      COUNT(*) as total_requests,
-                     SUM(CASE WHEN status = 'approved' THEN amount ELSE 0 END) as total_approved,
-                     SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END) as total_pending,
-                     SUM(CASE WHEN status = 'rejected' THEN amount ELSE 0 END) as total_rejected
+                     SUM(CASE WHEN status = 'Approved' THEN amount ELSE 0 END) as total_approved,
+                     SUM(CASE WHEN status = 'Pending' THEN amount ELSE 0 END) as total_pending,
+                     SUM(CASE WHEN status = 'Rejected' THEN amount ELSE 0 END) as total_rejected
                    FROM advance_requests 
                    WHERE driver_id = ?";
     

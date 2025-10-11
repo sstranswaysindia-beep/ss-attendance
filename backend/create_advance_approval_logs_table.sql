@@ -1,7 +1,7 @@
 -- Create advance_approval_logs table for tracking approval actions
 CREATE TABLE IF NOT EXISTS advance_approval_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    request_id INT NOT NULL,
+    request_id BIGINT UNSIGNED NOT NULL,
     driver_id INT NOT NULL,
     action ENUM('approve', 'reject') NOT NULL,
     admin_id VARCHAR(100) NOT NULL,

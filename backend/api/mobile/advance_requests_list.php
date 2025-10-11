@@ -59,13 +59,13 @@ try {
                 ar.id,
                 ar.driver_id,
                 ar.amount,
-                ar.reason,
+                ar.purpose as reason,
                 ar.status,
-                ar.created_at,
-                ar.approved_at,
-                ar.admin_comments,
+                ar.requested_at as created_at,
+                ar.approval_at as approved_at,
+                ar.remarks as admin_comments,
                 d.name as driver_name,
-                d.employee_id,
+                d.empid as employee_id,
                 u.username,
                 u.full_name,
                 p.plant_name,
@@ -73,9 +73,9 @@ try {
               FROM advance_requests ar 
               LEFT JOIN drivers d ON ar.driver_id = d.id 
               LEFT JOIN users u ON d.user_id = u.id 
-              LEFT JOIN plants p ON ar.plant_id = p.id
+              LEFT JOIN plants p ON d.plant_id = p.id
               $statusFilter
-              ORDER BY ar.created_at DESC 
+              ORDER BY ar.requested_at DESC 
               LIMIT ? OFFSET ?";
     
     $params[] = $limit;
