@@ -552,10 +552,15 @@ class TripRepository {
 
     try {
       // For supervisors, filter vehicles from login response by selected plant
-      if (user.role == UserRole.supervisor && user.availableVehicles.isNotEmpty) {
-        print('TripRepository: Supervisor - filtering vehicles by selected plant');
+      if (user.role == UserRole.supervisor &&
+          user.availableVehicles.isNotEmpty) {
+        print(
+          'TripRepository: Supervisor - filtering vehicles by selected plant',
+        );
         print('TripRepository: Selected plantId: $plantId');
-        print('TripRepository: Available vehicles count: ${user.availableVehicles.length}');
+        print(
+          'TripRepository: Available vehicles count: ${user.availableVehicles.length}',
+        );
         print(
           'TripRepository: Supervised plant IDs: ${user.supervisedPlantIds}',
         );
@@ -575,19 +580,24 @@ class TripRepository {
           final plantVehicles = <TripVehicle>[];
           for (final driverVehicle in user.availableVehicles) {
             // If vehicle has plantId, filter by it; otherwise include all vehicles
-            if (driverVehicle.plantId == null || driverVehicle.plantId == selectedPlantIdInt) {
+            if (driverVehicle.plantId == null ||
+                driverVehicle.plantId == selectedPlantIdInt) {
               final vehicle = TripVehicle(
                 id: int.tryParse(driverVehicle.id) ?? 0,
                 number: driverVehicle.vehicleNumber,
               );
               if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
                 plantVehicles.add(vehicle);
-                print('TripRepository: Added vehicle for plant $selectedPlantIdInt: ${vehicle.number} (ID: ${vehicle.id})');
+                print(
+                  'TripRepository: Added vehicle for plant $selectedPlantIdInt: ${vehicle.number} (ID: ${vehicle.id})',
+                );
               }
             }
           }
-          
-          print('TripRepository: Total vehicles for plant $selectedPlantIdInt: ${plantVehicles.length}');
+
+          print(
+            'TripRepository: Total vehicles for plant $selectedPlantIdInt: ${plantVehicles.length}',
+          );
           if (plantVehicles.isNotEmpty) {
             return plantVehicles;
           }
