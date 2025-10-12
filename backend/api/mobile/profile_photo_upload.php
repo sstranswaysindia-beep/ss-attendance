@@ -26,6 +26,25 @@ if (empty($_FILES['photo']) || $_FILES['photo']['error'] !== UPLOAD_ERR_OK) {
 }
 
 try {
+    // Get current profile photo URL to delete old image
+    $stmt = $conn->prepare('SELECT profile_photo_url FROM drivers WHERE id = ?');
+    $stmt->bind_param('i', $driverId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $oldPhotoUrl = null;
+    if ($row = $result->fetch_assoc()) {
+        $oldPhotoUrl = $row['profile_photo_url'];
+    }
+    $stmt->close();
+
+    // Delete old profile photo if it exists
+    if ($oldPhotoUrl && !empty($oldPhotoUrl)) {
+        $oldPhotoPath = $_SERVER['DOCUMENT_ROOT'] . $oldPhotoUrl;
+        if (file_exists($oldPhotoPath)) {
+            unlink($oldPhotoPath);
+        }
+    }
+
     $photoUrl = apiSaveUploadedFile('photo', $driverId, 'profile');
     if (!$photoUrl) {
         throw new RuntimeException('Unable to store uploaded photo');

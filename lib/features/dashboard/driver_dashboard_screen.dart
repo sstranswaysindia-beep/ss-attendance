@@ -18,10 +18,13 @@ import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
+import '../finance/advance_salary_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
+import '../debug/debug_screen.dart';
+import '../attendance/attendance_log_screen.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({
@@ -511,6 +514,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         actions: [
           IconButton(
             onPressed: () {
+              _openScreen(DebugScreen(user: widget.user));
+            },
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Debug',
+          ),
+          IconButton(
+            onPressed: () {
               widget.onLogout();
               showAppToast(context, 'You have been logged out');
             },
@@ -556,6 +566,22 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 onTap: () {
                   Navigator.of(context).pop();
                   _openScreen(const NotificationSettingsScreen());
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.bug_report),
+                title: const Text('Profile & Attendance Debug'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _openScreen(DebugScreen(user: widget.user));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.assignment),
+                title: const Text('Attendance API Log'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _openScreen(AttendanceLogScreen(user: widget.user));
                 },
               ),
               ListTile(
@@ -723,6 +749,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                         title: const Text('Salary / Advance'),
                         onTap: () =>
                             _openScreen(SalaryAdvanceScreen(user: widget.user)),
+                      ),
+                      const Divider(height: 0),
+                      HoverListTile(
+                        leading: const Icon(Icons.account_balance_wallet),
+                        title: const Text('Khata Book'),
+                        onTap: () =>
+                            _openScreen(AdvanceSalaryScreen(user: widget.user)),
                       ),
                       const Divider(height: 0),
                       HoverListTile(

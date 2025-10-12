@@ -8,15 +8,13 @@ import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
 class AttendanceHistoryScreen extends StatefulWidget {
-  const AttendanceHistoryScreen({
-    required this.user,
-    super.key,
-  });
+  const AttendanceHistoryScreen({required this.user, super.key});
 
   final AppUser user;
 
   @override
-  State<AttendanceHistoryScreen> createState() => _AttendanceHistoryScreenState();
+  State<AttendanceHistoryScreen> createState() =>
+      _AttendanceHistoryScreenState();
 }
 
 class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
@@ -45,10 +43,11 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   }
 
   Future<void> _loadHistory() async {
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     if (driverId == null || driverId.isEmpty) {
       setState(() {
-        _errorMessage = 'Driver mapping missing. Contact admin.';
+        _errorMessage = 'User mapping missing. Contact admin.';
         _records = const [];
       });
       return;
@@ -92,22 +91,26 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   List<AttendanceRecord> get _filteredRecords {
     final query = _searchController.text.trim().toLowerCase();
-    return _records.where((record) {
-      if (_statusFilter != 'All' && record.status != null && record.status != _statusFilter) {
-        return false;
-      }
-      if (query.isEmpty) {
-        return true;
-      }
-      final haystack = [
-        record.plantName,
-        record.vehicleNumber,
-        record.inTime,
-        record.outTime,
-        record.notes,
-      ].whereType<String>().join(' ').toLowerCase();
-      return haystack.contains(query);
-    }).toList(growable: false);
+    return _records
+        .where((record) {
+          if (_statusFilter != 'All' &&
+              record.status != null &&
+              record.status != _statusFilter) {
+            return false;
+          }
+          if (query.isEmpty) {
+            return true;
+          }
+          final haystack = [
+            record.plantName,
+            record.vehicleNumber,
+            record.inTime,
+            record.outTime,
+            record.notes,
+          ].whereType<String>().join(' ').toLowerCase();
+          return haystack.contains(query);
+        })
+        .toList(growable: false);
   }
 
   String _formatMonth(DateTime month) => DateFormat('MMMM yyyy').format(month);
@@ -145,9 +148,14 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   }
 
   Future<void> _deleteRecord(AttendanceRecord record) async {
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     if (driverId == null || driverId.isEmpty) {
-      showAppToast(context, 'Driver mapping missing. Contact admin.', isError: true);
+      showAppToast(
+        context,
+        'User mapping missing. Contact admin.',
+        isError: true,
+      );
       return;
     }
 
@@ -155,10 +163,18 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Attendance'),
-        content: const Text('Are you sure you want to delete this attendance record?'),
+        content: const Text(
+          'Are you sure you want to delete this attendance record?',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.of(context).pop(true), child: const Text('Delete')),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -175,7 +191,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
       );
       if (!mounted) return;
       setState(() {
-        _records = List.of(_records)..removeWhere((item) => item.attendanceId == record.attendanceId);
+        _records = List.of(_records)
+          ..removeWhere((item) => item.attendanceId == record.attendanceId);
         _isDeleting = false;
       });
       showAppToast(context, 'Attendance deleted.');
@@ -232,11 +249,21 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                       decoration: const InputDecoration(labelText: 'Status'),
                       items: const [
                         DropdownMenuItem(value: 'All', child: Text('All')),
-                        DropdownMenuItem(value: 'Approved', child: Text('Approved')),
-                        DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                        DropdownMenuItem(value: 'Rejected', child: Text('Rejected')),
+                        DropdownMenuItem(
+                          value: 'Approved',
+                          child: Text('Approved'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Pending',
+                          child: Text('Pending'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'Rejected',
+                          child: Text('Rejected'),
+                        ),
                       ],
-                      onChanged: (value) => setState(() => _statusFilter = value ?? 'All'),
+                      onChanged: (value) =>
+                          setState(() => _statusFilter = value ?? 'All'),
                     ),
                   ),
                 ],
@@ -295,7 +322,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                         final statusColor = _statusColor(record.status);
                         final inTime = _formatTime(record.inTime);
                         final outTime = _formatTime(record.outTime);
-                        final parsedDate = record.inTime != null && record.inTime!.isNotEmpty
+                        final parsedDate =
+                            record.inTime != null && record.inTime!.isNotEmpty
                             ? DateTime.tryParse(record.inTime!)
                             : null;
                         final dayLabel = parsedDate != null
@@ -335,7 +363,11 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                               backgroundColor: statusColor.withOpacity(0.15),
                               child: Text(dayLabel),
                             ),
-                            title: Text(record.plantName ?? record.plantId ?? 'Unknown plant'),
+                            title: Text(
+                              record.plantName ??
+                                  record.plantId ??
+                                  'Unknown plant',
+                            ),
                             subtitle: Text(subtitleSegments.join('\n')),
                             trailing: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -343,7 +375,9 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                               children: [
                                 Chip(
                                   label: Text(record.status ?? 'Unknown'),
-                                  labelStyle: TextStyle(color: statusColor.withOpacity(0.9)),
+                                  labelStyle: TextStyle(
+                                    color: statusColor.withOpacity(0.9),
+                                  ),
                                   backgroundColor: statusColor.withOpacity(0.1),
                                 ),
                                 if (record.isAdjustRequest) ...[

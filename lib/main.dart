@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 import 'core/models/app_user.dart';
 import 'core/services/auth_storage_service.dart';
-// import 'core/services/notification_service.dart';
+import 'core/services/notification_service.dart';
+import 'firebase_options.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/driver_dashboard_screen.dart';
@@ -14,6 +16,10 @@ import 'features/dashboard/supervisor_dashboard_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Firebase
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
   await initializeDateFormatting('en_IN', null);
   Intl.defaultLocale = 'en_IN';
 
@@ -29,7 +35,7 @@ Future<void> main() async {
   );
 
   // Initialize notification service
-  // await NotificationService().initialize();
+  await NotificationService().initialize();
 
   runApp(const SSTranswaysApp());
 }
@@ -126,14 +132,10 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
           ),
         ),
         home: _isLoading
-            ? const Scaffold(
-                body: Center(
-                  child: CircularProgressIndicator(),
-                ),
-              )
+            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
             : _currentUser == null
-                ? LoginScreen(onLogin: _handleLogin)
-                : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
+            ? LoginScreen(onLogin: _handleLogin)
+            : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
       ),
     );
   }

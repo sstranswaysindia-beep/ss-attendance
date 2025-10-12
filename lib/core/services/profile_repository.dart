@@ -20,6 +20,8 @@ class ProfileRepository {
 
   static const String _defaultUploadEndpoint =
       'https://sstranswaysindia.com/api/mobile/profile_photo_upload.php';
+  static const String _userUploadEndpoint =
+      'https://sstranswaysindia.com/api/mobile/user_profile_photo_upload.php';
 
   final http.Client _client;
   final Uri _uploadEndpoint;
@@ -36,6 +38,53 @@ class ProfileRepository {
       ..files.add(
         await http.MultipartFile.fromPath('photo', compressedFile.path),
       );
+
+    final response = await http.Response.fromStream(await request.send());
+
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw ProfileFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode >= 300 || payload['status'] != 'ok') {
+      throw ProfileFailure(
+        payload['error']?.toString() ?? 'Unable to upload profile photo.',
+      );
+    }
+
+    final url = payload['photoUrl']?.toString();
+    if (url == null || url.isEmpty) {
+      throw ProfileFailure('Server did not return the uploaded photo URL.');
+    }
+
+    // Clean up the temporary compressed file
+    try {
+      await compressedFile.delete();
+    } catch (_) {
+      // Ignore cleanup errors
+    }
+
+    return url;
+  }
+
+  /// Upload profile photo for supervisors without driver_id (using user ID)
+  Future<String> uploadUserProfilePhoto({
+    required String userId,
+    required File file,
+  }) async {
+    // Compress the image before uploading
+    final compressedFile = await _compressImage(file);
+
+    final request =
+        http.MultipartRequest('POST', Uri.parse(_userUploadEndpoint))
+          ..fields['userId'] = userId
+          ..files.add(
+            await http.MultipartFile.fromPath('photo', compressedFile.path),
+          );
 
     final response = await http.Response.fromStream(await request.send());
 

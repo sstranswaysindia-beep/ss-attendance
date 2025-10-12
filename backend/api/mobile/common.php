@@ -37,6 +37,16 @@ function apiSanitizeInt($value): ?int {
     return null;
 }
 
+function apiSanitizeFloat($value): ?float {
+    if ($value === null) {
+        return null;
+    }
+    if (is_numeric($value)) {
+        return (float) $value;
+    }
+    return null;
+}
+
 function apiRequireJson(): array {
     $raw = file_get_contents('php://input');
     $data = json_decode($raw ?: '', true);

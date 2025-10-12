@@ -6,6 +6,8 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -14,7 +16,9 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
+  final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
   bool _isInitialized = false;
+  String? _fcmToken;
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -55,6 +59,9 @@ class NotificationService {
         throw Exception('Failed to initialize notifications');
       }
 
+      // Initialize Firebase Cloud Messaging
+      await _initializeFCM();
+
       _isInitialized = true;
     } catch (e) {
       if (kDebugMode) {
@@ -62,6 +69,119 @@ class NotificationService {
       }
       _isInitialized = true; // Mark as initialized to prevent retries
     }
+  }
+
+  Future<void> _initializeFCM() async {
+    // Skip web platform for now due to Firebase compatibility issues
+    if (kIsWeb) {
+      if (kDebugMode) {
+        print('FCM initialization skipped on web platform');
+      }
+      return;
+    }
+
+    try {
+      // Request permission for notifications
+      NotificationSettings settings = await _firebaseMessaging
+          .requestPermission(
+            alert: true,
+            announcement: false,
+            badge: true,
+            carPlay: false,
+            criticalAlert: false,
+            provisional: false,
+            sound: true,
+          );
+
+      if (kDebugMode) {
+        print('User granted permission: ${settings.authorizationStatus}');
+      }
+
+      // Get FCM token
+      _fcmToken = await _firebaseMessaging.getToken();
+      if (kDebugMode) {
+        print('FCM Token: $_fcmToken');
+      }
+
+      // Save token to local storage
+      if (_fcmToken != null) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('fcm_token', _fcmToken!);
+      }
+
+      // Listen for token refresh
+      _firebaseMessaging.onTokenRefresh.listen((newToken) {
+        _fcmToken = newToken;
+        if (kDebugMode) {
+          print('FCM Token refreshed: $newToken');
+        }
+        // Save new token
+        SharedPreferences.getInstance().then((prefs) {
+          prefs.setString('fcm_token', newToken);
+        });
+      });
+
+      // Handle background messages
+      FirebaseMessaging.onBackgroundMessage(
+        _firebaseMessagingBackgroundHandler,
+      );
+
+      // Handle foreground messages
+      FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+
+      // Handle notification taps when app is in background
+      FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+    } catch (e) {
+      if (kDebugMode) {
+        print('FCM initialization failed: $e');
+      }
+    }
+  }
+
+  // Handle background messages
+  static Future<void> _firebaseMessagingBackgroundHandler(
+    RemoteMessage message,
+  ) async {
+    if (kDebugMode) {
+      print('Handling a background message: ${message.messageId}');
+      print('Message data: ${message.data}');
+      print('Message notification: ${message.notification?.title}');
+    }
+  }
+
+  // Handle foreground messages
+  void _handleForegroundMessage(RemoteMessage message) {
+    if (kDebugMode) {
+      print('Handling a foreground message: ${message.messageId}');
+    }
+
+    // Show local notification for foreground messages
+    if (message.notification != null) {
+      showNotification(
+        id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        title: message.notification!.title ?? 'SS Transways',
+        body: message.notification!.body ?? '',
+        payload: message.data.toString(),
+      );
+    }
+  }
+
+  // Handle notification taps
+  void _handleNotificationTap(RemoteMessage message) {
+    if (kDebugMode) {
+      print('Notification tapped: ${message.messageId}');
+      print('Message data: ${message.data}');
+    }
+    // Handle navigation based on message data
+  }
+
+  // Get FCM token
+  String? get fcmToken => _fcmToken;
+
+  // Get stored FCM token
+  Future<String?> getStoredFCMToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('fcm_token');
   }
 
   Future<bool> requestPermissions() async {

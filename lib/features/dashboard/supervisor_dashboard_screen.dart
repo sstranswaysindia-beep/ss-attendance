@@ -20,10 +20,14 @@ import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
+import '../finance/advance_salary_screen.dart';
 import '../profile/driver_profile_screen.dart';
+import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
+import '../debug/debug_screen.dart';
+import '../attendance/attendance_log_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
 
@@ -310,6 +314,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         actions: [
           IconButton(
             onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
+              );
+            },
+            icon: const Icon(Icons.bug_report),
+            tooltip: 'Debug',
+          ),
+          IconButton(
+            onPressed: () {
               widget.onLogout();
               showAppToast(context, 'Logged out successfully');
             },
@@ -346,11 +359,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 title: const Text('Profile'),
                 onTap: () {
                   Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => DriverProfileScreen(user: user),
-                    ),
-                  );
+                  // Use different profile screen based on whether supervisor has driver_id
+                  final profileScreen =
+                      user.driverId != null && user.driverId!.isNotEmpty
+                      ? DriverProfileScreen(user: user)
+                      : SupervisorProfileScreen(user: user);
+
+                  Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => profileScreen));
                 },
               ),
               ListTile(
@@ -361,6 +378,28 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const NotificationSettingsScreen(),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.bug_report),
+                title: const Text('Profile & Attendance Debug'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.assignment),
+                title: const Text('Attendance API Log'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => AttendanceLogScreen(user: user),
                     ),
                   );
                 },
@@ -561,6 +600,19 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       ),
                       const Divider(height: 0),
                       HoverListTile(
+                        leading: const Icon(Icons.account_balance_wallet),
+                        title: const Text('Khata Book'),
+                        onTap: () => Navigator.of(context)
+                            .push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    AdvanceSalaryScreen(user: widget.user),
+                              ),
+                            )
+                            .then((_) => _loadNotifications()),
+                      ),
+                      const Divider(height: 0),
+                      HoverListTile(
                         leading: const Icon(Icons.edit_calendar),
                         title: const Text('Past Attendance Request'),
                         onTap: () => Navigator.of(context)
@@ -709,6 +761,36 @@ class _SupervisedPlantsCard extends StatelessWidget {
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 );
               }).toList(),
+            ),
+            // DEBUG CARD - Very visible
+            const SizedBox(height: 16),
+            Card(
+              color: Colors.red,
+              child: ListTile(
+                leading: const Icon(
+                  Icons.bug_report,
+                  color: Colors.white,
+                  size: 32,
+                ),
+                title: const Text(
+                  '🐛 DEBUG PROFILE & ATTENDANCE',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Tap to test all APIs and get debug data',
+                  style: TextStyle(color: Colors.white70),
+                ),
+                trailing: const Icon(Icons.arrow_forward, color: Colors.white),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
+                  );
+                },
+              ),
             ),
           ],
         ),

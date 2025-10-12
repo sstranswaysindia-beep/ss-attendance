@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/app_user.dart';
 import '../models/driver_vehicle.dart';
+import 'notification_service.dart';
 
 class AuthFailure implements Exception {
   AuthFailure(this.message);
@@ -67,6 +68,9 @@ class AuthRepository {
       // Debug: Print user data from API
       print('AuthRepository: User data from API: $userJson');
 
+      // Send FCM token to server after successful login
+      await _sendFCMTokenToServer(userJson['id']?.toString() ?? username);
+
       final role = _parseRole(userJson['role']?.toString());
 
       Map<String, dynamic>? driverJson =
@@ -126,15 +130,32 @@ class AuthRepository {
           'AuthRepository: Final vehicles count for supervisor: ${vehicles.length}',
         );
 
+        // Get plant information for supervisors without driver_id
+        final supervisedPlants =
+            (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
+                .cast<Map<String, dynamic>>();
+        final supervisedPlantIds =
+            supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [];
+
+        // Set default plant information from first supervised plant
+        String? defaultPlantId;
+        String? defaultPlantName;
+        if (supervisedPlantIds.isNotEmpty && supervisedPlants.isNotEmpty) {
+          defaultPlantId = supervisedPlantIds.first.toString();
+          defaultPlantName = supervisedPlants.first['plant_name']?.toString();
+        }
+
         return AppUser(
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
-          supervisedPlants:
-              (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
-                  .cast<Map<String, dynamic>>(),
-          supervisedPlantIds:
-              supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [],
+          // Set plant information for attendance and other features
+          plantId: defaultPlantId,
+          plantName: defaultPlantName,
+          defaultPlantId: defaultPlantId,
+          defaultPlantName: defaultPlantName,
+          supervisedPlants: supervisedPlants,
+          supervisedPlantIds: supervisedPlantIds,
           availableVehicles: vehicles,
         );
       }
@@ -259,6 +280,42 @@ class AuthRepository {
         return UserRole.driver;
       default:
         return UserRole.driver;
+    }
+  }
+
+  /// Send FCM token to server for push notifications
+  Future<void> _sendFCMTokenToServer(String userId) async {
+    try {
+      final notificationService = NotificationService();
+      final fcmToken = notificationService.fcmToken;
+
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        final response = await _client.post(
+          Uri.parse(
+            'https://sstranswaysindia.com/api/mobile/fcm_token_update.php',
+          ),
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'userId': userId,
+            'fcmToken': fcmToken,
+            'platform': 'mobile',
+          }),
+        );
+
+        if (response.statusCode == 200) {
+          final payload = jsonDecode(response.body) as Map<String, dynamic>;
+          if (payload['status'] == 'ok') {
+            print('FCM token sent to server successfully');
+          } else {
+            print('Failed to send FCM token to server: ${payload['error']}');
+          }
+        } else {
+          print('Failed to send FCM token to server: ${response.statusCode}');
+        }
+      }
+    } catch (e) {
+      print('Error sending FCM token to server: $e');
+      // Don't throw error as this shouldn't block login
     }
   }
 }

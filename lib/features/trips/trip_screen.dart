@@ -873,7 +873,7 @@ class _TripScreenState extends State<TripScreen> {
       setState(() {
         _vehicles = vehicles;
       });
-      
+
       print('TripScreen: Loaded ${vehicles.length} vehicles');
       for (final vehicle in vehicles) {
         print('TripScreen: Vehicle: ${vehicle.number} (ID: ${vehicle.id})');
@@ -931,9 +931,13 @@ class _TripScreenState extends State<TripScreen> {
       if (initialVehicle == null && vehicles.isNotEmpty) {
         initialVehicle = vehicles.first;
         if (widget.user.role == UserRole.supervisor) {
-          print('Supervisor: No assigned vehicle found, using first available: ${initialVehicle.number} (ID: ${initialVehicle.id})');
+          print(
+            'Supervisor: No assigned vehicle found, using first available: ${initialVehicle.number} (ID: ${initialVehicle.id})',
+          );
         } else {
-          print('Driver: No assigned vehicle found, using first available: ${initialVehicle.number}');
+          print(
+            'Driver: No assigned vehicle found, using first available: ${initialVehicle.number}',
+          );
         }
       }
 
@@ -1381,7 +1385,7 @@ class _TripScreenState extends State<TripScreen> {
                         hasOngoingTrip: _hasOngoingTrip,
                         user: widget.user,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       _DriverHelperCard(
                         drivers: _filteredDrivers,
                         selectedDrivers: _selectedDrivers,
@@ -1412,7 +1416,7 @@ class _TripScreenState extends State<TripScreen> {
                           return Future<void>.value();
                         },
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
                       _TripStartCard(
                         startDateController: _startDateController,
                         onPickStartDate: _pickStartDate,
@@ -1430,7 +1434,7 @@ class _TripScreenState extends State<TripScreen> {
                         selectedDrivers: _selectedDrivers,
                         hasOngoingTrip: _hasOngoingTrip,
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: 12),
 
                       if (_isLoading && overview == null)
                         const Center(child: CircularProgressIndicator())
@@ -1438,7 +1442,7 @@ class _TripScreenState extends State<TripScreen> {
                         _ErrorState(message: _error!, onRetry: _loadTrips)
                       else if (overview != null) ...[
                         _SummarySection(summary: overview.summary),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 12),
                         _TripsList(
                           trips: overview.trips,
                           onDeleteTrip: _handleDeleteTrip,
@@ -2014,7 +2018,7 @@ class _PlantVehicleCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2031,11 +2035,12 @@ class _PlantVehicleCard extends StatelessWidget {
                       padding: const EdgeInsets.all(8),
                       child: const Icon(Icons.factory, color: Colors.white),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Text(
                       'Plant & Vehicle',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
+                        fontSize: 15,
                       ),
                     ),
                   ],
@@ -2047,7 +2052,7 @@ class _PlantVehicleCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             // Side-by-side Plant and Vehicle dropdowns
             Row(
               children: [
@@ -2147,14 +2152,18 @@ class _PlantVehicleCard extends StatelessWidget {
                       print('vehicles.isEmpty: ${vehicles.isEmpty}');
                       print('hasOngoingTrip: $hasOngoingTrip');
                       print('user.role: ${user.role}');
-                      print('user.role == UserRole.driver: ${user.role == UserRole.driver}');
-                      
+                      print(
+                        'user.role == UserRole.driver: ${user.role == UserRole.driver}',
+                      );
+
                       if (isLoadingVehicles || vehicles.isEmpty) {
                         print('Vehicle dropdown disabled: loading or empty');
                         return null;
                       }
                       if (hasOngoingTrip && user.role == UserRole.driver) {
-                        print('Vehicle dropdown disabled: driver with ongoing trip');
+                        print(
+                          'Vehicle dropdown disabled: driver with ongoing trip',
+                        );
                         return null;
                       }
                       print('Vehicle dropdown enabled');
@@ -2265,7 +2274,7 @@ class _DriverHelperCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2282,11 +2291,12 @@ class _DriverHelperCard extends StatelessWidget {
                       padding: const EdgeInsets.all(8),
                       child: const Icon(Icons.groups, color: Colors.white),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 10),
                     Text(
                       'Drivers & Helpers',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
+                        fontSize: 15,
                       ),
                     ),
                   ],
@@ -2302,7 +2312,7 @@ class _DriverHelperCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             DropdownButtonFormField<int?>(
               key: driverFieldKey,
               focusNode: driverFocusNode,
@@ -2360,10 +2370,10 @@ class _DriverHelperCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
               children: selectedDrivers
                   .map((driver) {
                     final isCurrent =
@@ -2378,6 +2388,7 @@ class _DriverHelperCard extends StatelessWidget {
                       labelStyle: theme.textTheme.bodyMedium?.copyWith(
                         color: driverChipText,
                         fontWeight: FontWeight.w600,
+                        fontSize: 12,
                       ),
                       deleteIconColor: driverChipText,
                       label: Text(driverLabel(driver)),
@@ -2388,7 +2399,7 @@ class _DriverHelperCard extends StatelessWidget {
                   })
                   .toList(growable: false),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             DropdownButtonFormField<int?>(
               key: helperFieldKey,
               focusNode: helperFocusNode,
@@ -2446,10 +2457,10 @@ class _DriverHelperCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Wrap(
-              spacing: 8,
-              runSpacing: 8,
+              spacing: 6,
+              runSpacing: 6,
               children: selectedHelpers
                   .map((helper) {
                     return InputChip(
@@ -2462,6 +2473,7 @@ class _DriverHelperCard extends StatelessWidget {
                       labelStyle: theme.textTheme.bodyMedium?.copyWith(
                         color: helperChipText,
                         fontWeight: FontWeight.w600,
+                        fontSize: 12,
                       ),
                       deleteIconColor: helperChipText,
                       label: Text(helper.name),
@@ -2557,7 +2569,7 @@ class _TripStartCardState extends State<_TripStartCard> {
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2571,16 +2583,17 @@ class _TripStartCardState extends State<_TripStartCard> {
                   padding: const EdgeInsets.all(8),
                   child: const Icon(Icons.rocket_launch, color: Colors.white),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Text(
                   widget.hasOngoingTrip ? 'Update Trip' : 'Start Trip',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
+                    fontSize: 15,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Row(
               children: [
                 Expanded(
@@ -2597,7 +2610,7 @@ class _TripStartCardState extends State<_TripStartCard> {
                     onTap: widget.onPickStartDate,
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 Expanded(
                   child: TextField(
                     controller: widget.startKmController,
@@ -2607,7 +2620,7 @@ class _TripStartCardState extends State<_TripStartCard> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             TextField(
               controller: widget.customerController,
               decoration: buildFieldDecoration(
@@ -2623,18 +2636,19 @@ class _TripStartCardState extends State<_TripStartCard> {
                 setState(() {});
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             if (widget.selectedCustomers.isEmpty)
               Text(
                 'No customers added yet.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.secondary,
+                  fontSize: 13,
                 ),
               )
             else
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 6,
+                runSpacing: 6,
                 children: widget.selectedCustomers
                     .map(
                       (name) => InputChip(
@@ -2652,17 +2666,18 @@ class _TripStartCardState extends State<_TripStartCard> {
                     .toList(growable: false),
               ),
             if (widget.customerSuggestions.isNotEmpty) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Text(
                 'Suggestions',
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: theme.colorScheme.primary,
+                  fontSize: 13,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 6,
+                runSpacing: 6,
                 children:
                     _getFilteredSuggestions(
                           widget.customerController.text,
@@ -2689,13 +2704,13 @@ class _TripStartCardState extends State<_TripStartCard> {
                         .toList(growable: false),
               ),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             TextField(
               controller: widget.noteController,
               maxLines: 2,
               decoration: buildFieldDecoration('Note (optional)'),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
               child: FilledButton.icon(

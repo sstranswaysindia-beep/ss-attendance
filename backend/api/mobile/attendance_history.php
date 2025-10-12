@@ -15,7 +15,6 @@ require __DIR__ . '/common.php';
 
 $driverId = apiSanitizeInt($_GET['driverId'] ?? null);
 $month    = trim($_GET['month'] ?? date('Y-m'));
-$limit    = apiSanitizeInt($_GET['limit'] ?? null);
 
 if (!$driverId) {
     apiRespond(400, ['status' => 'error', 'error' => 'driverId is required']);
@@ -33,41 +32,33 @@ try {
     $end = clone $start;
     $end->modify('+1 month');
 
-    $sql = 'SELECT a.id,
-                   a.driver_id,
-                   a.plant_id,
-                   a.vehicle_id,
-                   a.assignment_id,
-                   a.in_time,
-                   a.out_time,
-                   a.in_photo_url,
-                   a.out_photo_url,
-                   a.approval_status,
-                   a.notes,
-                   a.pending_sync,
-                   a.source,
-                   p.plant_name,
-                   v.vehicle_no
-              FROM attendance a
-         LEFT JOIN plants p   ON p.id = a.plant_id
-         LEFT JOIN vehicles v ON v.id = a.vehicle_id
-             WHERE a.driver_id = ?
-               AND a.in_time >= ?
-               AND a.in_time < ?
-          ORDER BY a.in_time DESC';
-
-    if ($limit !== null && $limit > 0) {
-        $sql .= ' LIMIT ?';
-    }
-
-    $query = $conn->prepare($sql);
+    $query = $conn->prepare(
+        'SELECT a.id,
+                a.driver_id,
+                a.plant_id,
+                a.vehicle_id,
+                a.assignment_id,
+                a.in_time,
+                a.out_time,
+                a.in_photo_url,
+                a.out_photo_url,
+                a.approval_status,
+                a.notes,
+                a.pending_sync,
+                a.source,
+                p.plant_name,
+                v.vehicle_no
+           FROM attendance a
+      LEFT JOIN plants p   ON p.id = a.plant_id
+      LEFT JOIN vehicles v ON v.id = a.vehicle_id
+          WHERE a.driver_id = ?
+            AND a.in_time >= ?
+            AND a.in_time < ?
+       ORDER BY a.in_time DESC'
+    );
     $startStr = $start->format('Y-m-d 00:00:00');
     $endStr   = $end->format('Y-m-d 00:00:00');
-    if ($limit !== null && $limit > 0) {
-        $query->bind_param('issi', $driverId, $startStr, $endStr, $limit);
-    } else {
-        $query->bind_param('iss', $driverId, $startStr, $endStr);
-    }
+    $query->bind_param('iss', $driverId, $startStr, $endStr);
     $query->execute();
     $result = $query->get_result();
     $records = [];

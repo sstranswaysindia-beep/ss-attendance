@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -99,7 +101,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _loadActiveShift() async {
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     if (driverId == null || driverId.isEmpty) {
       setState(() {
         _isLoadingShift = false;
@@ -111,24 +114,22 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     setState(() => _isLoadingShift = true);
 
     try {
-      final now = DateTime.now();
-      final record = await _attendanceRepository.fetchLatestRecord(
-        driverId: driverId,
-        month: DateTime(now.year, now.month),
-      );
+      // Use our new get_current_attendance API for better supervisor support
+      final currentAttendance = await _fetchCurrentAttendance();
       if (!mounted) return;
 
       setState(() {
-        _activeShift = record;
+        _activeShift = currentAttendance;
         _isLoadingShift = false;
-        if (record != null) {
-          if (record.vehicleId != null && record.vehicleId!.isNotEmpty) {
-            _selectedVehicleId = record.vehicleId;
-            _selectedVehicleNumber = record.vehicleNumber;
+        if (currentAttendance != null) {
+          if (currentAttendance.vehicleId != null &&
+              currentAttendance.vehicleId!.isNotEmpty) {
+            _selectedVehicleId = currentAttendance.vehicleId;
+            _selectedVehicleNumber = currentAttendance.vehicleNumber;
           }
           _submissionSummary = _hasOpenShift
-              ? 'Checked in at ${_formatDateTime(record.inTime)}'
-              : 'Last check-out ${_formatDateTime(record.outTime)}';
+              ? 'Checked in at ${_formatDateTime(currentAttendance.inTime)}'
+              : 'Last check-out ${_formatDateTime(currentAttendance.outTime)}';
         }
       });
       _updateStatusAnimation();
@@ -148,6 +149,59 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       });
       _updateStatusAnimation();
       showAppToast(context, 'Unable to load attendance status.', isError: true);
+    }
+  }
+
+  Future<AttendanceRecord?> _fetchCurrentAttendance() async {
+    try {
+      final requestBody = {
+        'userId': widget.user.id,
+        'driverId': widget.user.driverId,
+      };
+
+      print(
+        'DEBUG: Fetching current attendance for user ${widget.user.id}, driverId: ${widget.user.driverId}',
+      );
+
+      final response = await http.post(
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/get_current_attendance.php',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      );
+
+      print('DEBUG: Response status: ${response.statusCode}');
+      print('DEBUG: Response body: ${response.body}');
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['status'] == 'ok' && data['current_attendance'] != null) {
+          final attendanceData =
+              data['current_attendance'] as Map<String, dynamic>;
+          print('DEBUG: Found current attendance: ${attendanceData['id']}');
+          return AttendanceRecord(
+            attendanceId: attendanceData['id']?.toString() ?? '',
+            driverId: attendanceData['driver_id']?.toString() ?? '',
+            plantId: attendanceData['plant_id']?.toString(),
+            plantName: '', // Will be filled from other sources
+            vehicleId: attendanceData['vehicle_id']?.toString(),
+            vehicleNumber: '', // Will be filled from other sources
+            assignmentId: attendanceData['assignment_id']?.toString(),
+            inTime: attendanceData['in_time']?.toString(),
+            outTime: attendanceData['out_time']?.toString(),
+            notes: attendanceData['notes']?.toString(),
+            status: attendanceData['approval_status']?.toString(),
+            source: attendanceData['source']?.toString(),
+          );
+        } else {
+          print('DEBUG: No current attendance found');
+        }
+      }
+      return null;
+    } catch (e) {
+      print('Error fetching current attendance: $e');
+      return null;
     }
   }
 
@@ -282,13 +336,14 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _persistVehicleSelection(DriverVehicle vehicle) async {
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     final plantId = _resolvePlantId();
 
     if (driverId == null || driverId.isEmpty) {
       showAppToast(
         context,
-        'Driver mapping missing. Contact admin.',
+        'User mapping missing. Contact admin.',
         isError: true,
       );
       return;
@@ -393,7 +448,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _submitAttendance() async {
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     final plantId = _resolvePlantId();
     final vehicleId = _selectedVehicleId;
     final assignmentId = _activeShift?.assignmentId ?? widget.user.assignmentId;
@@ -401,7 +457,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     if (driverId == null || driverId.isEmpty) {
       showAppToast(
         context,
-        'Driver mapping missing. Contact admin.',
+        'User mapping missing. Contact admin.',
         isError: true,
       );
       return;
@@ -455,6 +511,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       });
       _updateStatusAnimation();
 
+      // Force refresh the active shift after submission
+      await Future.delayed(
+        const Duration(milliseconds: 500),
+      ); // Small delay for server processing
       await _loadActiveShift();
       if (!mounted) return;
       showAppToast(context, '$actionLabel submitted successfully.');
@@ -538,7 +598,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Check-in / Check-out')),
+      appBar: AppBar(
+        title: const Text('Check-in / Check-out'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadActiveShift,
+            tooltip: 'Refresh attendance status',
+          ),
+        ],
+      ),
       body: AppGradientBackground(
         child: _isLoadingShift
             ? const Center(child: CircularProgressIndicator())

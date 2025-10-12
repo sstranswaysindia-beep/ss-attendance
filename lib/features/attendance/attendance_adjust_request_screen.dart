@@ -7,15 +7,13 @@ import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
 class AttendanceAdjustRequestScreen extends StatefulWidget {
-  const AttendanceAdjustRequestScreen({
-    required this.user,
-    super.key,
-  });
+  const AttendanceAdjustRequestScreen({required this.user, super.key});
 
   final AppUser user;
 
   @override
-  State<AttendanceAdjustRequestScreen> createState() => _AttendanceAdjustRequestScreenState();
+  State<AttendanceAdjustRequestScreen> createState() =>
+      _AttendanceAdjustRequestScreenState();
 }
 
 class _AttendanceAdjustRequestScreenState
@@ -57,10 +55,7 @@ class _AttendanceAdjustRequestScreenState
     final initial = isIn
         ? (_selectedInTime ?? fallback)
         : (_selectedOutTime ?? fallback);
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: initial,
-    );
+    final picked = await showTimePicker(context: context, initialTime: initial);
     if (picked != null) {
       setState(() {
         if (isIn) {
@@ -79,9 +74,14 @@ class _AttendanceAdjustRequestScreenState
       return;
     }
 
-    final driverId = widget.user.driverId;
+    // For supervisors without driver_id, use user ID instead
+    final driverId = widget.user.driverId ?? widget.user.id;
     if (driverId == null || driverId.isEmpty) {
-      showAppToast(context, 'Driver mapping missing. Contact admin.', isError: true);
+      showAppToast(
+        context,
+        'User mapping missing. Contact admin.',
+        isError: true,
+      );
       return;
     }
 
@@ -121,16 +121,24 @@ class _AttendanceAdjustRequestScreenState
     final vehicleId = widget.user.assignmentVehicleId?.isNotEmpty == true
         ? widget.user.assignmentVehicleId
         : (widget.user.availableVehicles.isNotEmpty
-            ? widget.user.availableVehicles.first.id
-            : null);
+              ? widget.user.availableVehicles.first.id
+              : null);
 
     if (plantId == null || plantId.isEmpty) {
-      showAppToast(context, 'Plant mapping missing. Contact admin.', isError: true);
+      showAppToast(
+        context,
+        'Plant mapping missing. Contact admin.',
+        isError: true,
+      );
       return;
     }
 
     if (vehicleId == null || vehicleId.isEmpty) {
-      showAppToast(context, 'Vehicle mapping missing. Contact admin.', isError: true);
+      showAppToast(
+        context,
+        'Vehicle mapping missing. Contact admin.',
+        isError: true,
+      );
       return;
     }
 
@@ -190,9 +198,8 @@ class _AttendanceAdjustRequestScreenState
                   readOnly: true,
                   decoration: const InputDecoration(labelText: 'In Time'),
                   onTap: () => _pickTime(isIn: true),
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Provide in time'
-                      : null,
+                  validator: (value) =>
+                      value == null || value.isEmpty ? 'Provide in time' : null,
                 ),
                 const SizedBox(height: 12),
                 TextFormField(

@@ -52,8 +52,12 @@ class ProfilePhotoWidget extends StatelessWidget {
 
   Widget _buildProfileImage(ThemeData theme) {
     final profilePhoto = user.profilePhoto;
+    print(
+      'ProfilePhotoWidget: Building image with profilePhoto: $profilePhoto',
+    );
 
     if (profilePhoto == null || profilePhoto.isEmpty) {
+      print('ProfilePhotoWidget: No profile photo, showing initials');
       return Text(
         _getInitials(),
         style: TextStyle(
@@ -109,14 +113,18 @@ class ProfilePhotoWidget extends StatelessWidget {
 
   String _buildImageUrl(String? path) {
     if (path == null || path.isEmpty) {
+      print('ProfilePhotoWidget: No path provided, using placeholder');
       return 'https://placehold.co/200x200';
     }
 
     if (path.startsWith('http')) {
+      print('ProfilePhotoWidget: Using full URL: $path');
       return path;
     }
 
-    return 'https://sstranswaysindia.com$path';
+    final fullUrl = 'https://sstranswaysindia.com$path';
+    print('ProfilePhotoWidget: Built full URL: $fullUrl');
+    return fullUrl;
   }
 }
 

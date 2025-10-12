@@ -7,9 +7,9 @@ apiEnsurePost();
 
 $data = apiRequireJson();
 
-$roleRaw   = strtolower(trim((string)($data['role'] ?? $data['userRole'] ?? 'driver')));
-$userId    = apiSanitizeInt($data['userId'] ?? $data['uid'] ?? null);
-$driverId  = apiSanitizeInt($data['driverId'] ?? $data['driver_id'] ?? null);
+$roleRaw   = strtolower(trim((string)($data['role'] ?? 'driver')));
+$userId    = apiSanitizeInt($data['userId'] ?? null);
+$driverId  = apiSanitizeInt($data['driverId'] ?? null);
 
 $plantIds = [];
 
@@ -19,20 +19,18 @@ try {
             apiRespond(400, ['status' => 'error', 'error' => 'driverId required for driver role']);
         }
 
-        $driverStmt = $conn->prepare(
-            'SELECT plant_id, supervisor_of_plant_id FROM drivers WHERE id = ? LIMIT 1'
-        );
+        $driverStmt = $conn->prepare('SELECT plant_id, default_plant_id, supervisor_of_plant_id FROM drivers WHERE id = ? LIMIT 1');
         $driverStmt->bind_param('i', $driverId);
         $driverStmt->execute();
-        if ($row = $driverStmt->get_result()->fetch_assoc()) {
-            if (!empty($row['plant_id'])) {
-                $plantIds[] = (int)$row['plant_id'];
-            }
-            if (!empty($row['supervisor_of_plant_id'])) {
-                $plantIds[] = (int)$row['supervisor_of_plant_id'];
+        $driverRow = $driverStmt->get_result()->fetch_assoc();
+        $driverStmt->close();
+        if ($driverRow) {
+            foreach (['plant_id', 'default_plant_id', 'supervisor_of_plant_id'] as $field) {
+                if (!empty($driverRow[$field])) {
+                    $plantIds[] = (int)$driverRow[$field];
+                }
             }
         }
-        $driverStmt->close();
 
         $assignStmt = $conn->prepare('SELECT DISTINCT plant_id FROM assignments WHERE driver_id = ? AND plant_id IS NOT NULL');
         $assignStmt->bind_param('i', $driverId);
