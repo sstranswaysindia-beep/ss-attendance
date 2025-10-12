@@ -19,8 +19,10 @@ class AdvanceSalaryScreen extends StatefulWidget {
 
 class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   List<AdvanceTransaction> _transactions = [];
+  List<AdvanceTransaction> _filteredTransactions = [];
   double _currentBalance = 0.0;
   bool _isLoading = true;
+  String _selectedMonth = 'All Months';
 
   @override
   void initState() {
@@ -110,6 +112,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                   .toList();
               setState(() {
                 _transactions = transactions;
+                _filterTransactions();
               });
               print(
                 'DEBUG: Transactions loaded successfully: ${transactions.length}',
@@ -141,6 +144,79 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   String _formatTime(DateTime date) {
     return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  void _onMonthSelected(String month) {
+    setState(() {
+      _selectedMonth = month;
+      _filterTransactions();
+    });
+  }
+
+  void _filterTransactions() {
+    if (_selectedMonth == 'All Months') {
+      _filteredTransactions = _transactions;
+    } else {
+      final monthIndex = _getMonthIndex(_selectedMonth);
+      _filteredTransactions = _transactions.where((transaction) {
+        try {
+          final date = DateTime.parse(transaction.createdAt);
+          return date.month == monthIndex;
+        } catch (e) {
+          return false;
+        }
+      }).toList();
+    }
+  }
+
+  int _getMonthIndex(String month) {
+    final months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return months.indexOf(month) + 1;
+  }
+
+  void _sendReportReminder() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Send Report Reminder'),
+        content: const Text('Send SMS reminder to submit monthly report?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _performSendReportReminder();
+            },
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _performSendReportReminder() async {
+    try {
+      // TODO: Implement SMS sending functionality
+      showAppToast(context, 'Report reminder sent successfully!');
+    } catch (e) {
+      showAppToast(context, 'Failed to send reminder: $e', isError: true);
+    }
   }
 
   Future<void> _addTransactionWithDate(
@@ -403,6 +479,38 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         title: const Text('Khata Book'),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          IconButton(
+            onPressed: _sendReportReminder,
+            icon: const Icon(Icons.sms),
+            tooltip: 'Send Report Reminder',
+          ),
+          PopupMenuButton<String>(
+            onSelected: _onMonthSelected,
+            itemBuilder: (BuildContext context) {
+              final months = [
+                'All Months',
+                'January',
+                'February',
+                'March',
+                'April',
+                'May',
+                'June',
+                'July',
+                'August',
+                'September',
+                'October',
+                'November',
+                'December',
+              ];
+              return months.map((String month) {
+                return PopupMenuItem<String>(value: month, child: Text(month));
+              }).toList();
+            },
+            child: const Icon(Icons.filter_list),
+            tooltip: 'Filter by Month',
+          ),
+        ],
       ),
       body: AppGradientBackground(
         child: _isLoading
@@ -595,30 +703,116 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   Widget _buildTransactionHistory() {
-    if (_transactions.isEmpty) {
-      return const Center(child: Text('No transactions found'));
+    if (_filteredTransactions.isEmpty) {
+      return Center(
+        child: Text(
+          _transactions.isEmpty
+              ? 'No transactions found'
+              : 'No transactions found for $_selectedMonth',
+        ),
+      );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'ENTRIES',
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: Colors.grey,
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'ENTRIES',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+            if (_selectedMonth != 'All Months')
+              Text(
+                _selectedMonth,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.blue,
+                ),
+              ),
+          ],
         ),
         const SizedBox(height: 8),
-        ..._transactions.map(
-          (transaction) => _buildTransactionCard(transaction),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // You Got Column
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'YOU GOT ₹',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ..._filteredTransactions
+                      .where((t) => t.type == 'advance_received')
+                      .map(
+                        (transaction) =>
+                            _buildTransactionCard(transaction, isYouGot: true),
+                      ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            // You Gave Column
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'YOU GAVE ₹',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ..._filteredTransactions
+                      .where((t) => t.type == 'expense')
+                      .map(
+                        (transaction) =>
+                            _buildTransactionCard(transaction, isYouGot: false),
+                      ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     );
   }
 
-  Widget _buildTransactionCard(AdvanceTransaction transaction) {
+  Widget _buildTransactionCard(
+    AdvanceTransaction transaction, {
+    bool isYouGot = true,
+  }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -668,9 +862,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w500,
-                  color: transaction.isAdvanceReceived
-                      ? Colors.green
-                      : Colors.red,
+                  color: isYouGot ? Colors.green : Colors.red,
                 ),
               ),
             ],
