@@ -22,15 +22,16 @@ class FinanceRepository {
     Uri? advanceSubmitEndpoint,
     Uri? salaryDeleteEndpoint,
     Uri? advanceDeleteEndpoint,
-  })  : _client = client ?? http.Client(),
-        _salaryEndpoint = salaryEndpoint ?? Uri.parse(_defaultSalaryEndpoint),
-        _advanceEndpoint = advanceEndpoint ?? Uri.parse(_defaultAdvanceEndpoint),
-        _advanceSubmitEndpoint =
-            advanceSubmitEndpoint ?? Uri.parse(_defaultAdvanceSubmitEndpoint),
-        _salaryDeleteEndpoint =
-            salaryDeleteEndpoint ?? Uri.parse(_defaultSalaryDeleteEndpoint),
-        _advanceDeleteEndpoint =
-            advanceDeleteEndpoint ?? Uri.parse(_defaultAdvanceDeleteEndpoint);
+  }) : _client = client ?? http.Client(),
+       _salaryEndpoint = salaryEndpoint ?? Uri.parse(_defaultSalaryEndpoint),
+       _advanceEndpoint = advanceEndpoint ?? Uri.parse(_defaultAdvanceEndpoint),
+       _advanceSubmitEndpoint =
+           advanceSubmitEndpoint ?? Uri.parse(_defaultAdvanceSubmitEndpoint),
+       _salaryDeleteEndpoint =
+           salaryDeleteEndpoint ?? Uri.parse(_defaultSalaryDeleteEndpoint),
+       _advanceDeleteEndpoint =
+           advanceDeleteEndpoint ?? Uri.parse(_defaultAdvanceDeleteEndpoint),
+       _fundTransferEndpoint = Uri.parse(_defaultFundTransferEndpoint);
 
   static const String _defaultSalaryEndpoint =
       'https://sstranswaysindia.com/api/mobile/salary_credits.php';
@@ -42,6 +43,8 @@ class FinanceRepository {
       'https://sstranswaysindia.com/api/mobile/salary_credit_delete.php';
   static const String _defaultAdvanceDeleteEndpoint =
       'https://sstranswaysindia.com/api/mobile/advance_request_delete.php';
+  static const String _defaultFundTransferEndpoint =
+      'https://sstranswaysindia.com/api/mobile/fund_transfer_submit.php';
 
   final http.Client _client;
   final Uri _salaryEndpoint;
@@ -49,11 +52,12 @@ class FinanceRepository {
   final Uri _advanceSubmitEndpoint;
   final Uri _salaryDeleteEndpoint;
   final Uri _advanceDeleteEndpoint;
+  final Uri _fundTransferEndpoint;
 
   Future<List<SalaryCredit>> fetchSalaryCredits(String driverId) async {
-    final uri = _salaryEndpoint.replace(queryParameters: <String, String>{
-      'driverId': driverId,
-    });
+    final uri = _salaryEndpoint.replace(
+      queryParameters: <String, String>{'driverId': driverId},
+    );
     final response = await _client.get(uri);
     final statusCode = response.statusCode;
 
@@ -61,11 +65,15 @@ class FinanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw FinanceFailure('Invalid response from server (status: $statusCode).');
+      throw FinanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
     }
 
     if (statusCode != 200 || payload['status'] != 'ok') {
-      throw FinanceFailure(payload['error']?.toString() ?? 'Unable to load salary credits.');
+      throw FinanceFailure(
+        payload['error']?.toString() ?? 'Unable to load salary credits.',
+      );
     }
 
     final entries = payload['salaryCredits'] as List<dynamic>? ?? const [];
@@ -74,7 +82,10 @@ class FinanceRepository {
         .toList(growable: false);
   }
 
-  Future<List<AdvanceRequest>> fetchAdvanceRequests(String driverId, {String? status}) async {
+  Future<List<AdvanceRequest>> fetchAdvanceRequests(
+    String driverId, {
+    String? status,
+  }) async {
     final params = <String, String>{'driverId': driverId};
     if (status != null && status.isNotEmpty) {
       params['status'] = status;
@@ -87,11 +98,15 @@ class FinanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw FinanceFailure('Invalid response from server (status: $statusCode).');
+      throw FinanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
     }
 
     if (statusCode != 200 || payload['status'] != 'ok') {
-      throw FinanceFailure(payload['error']?.toString() ?? 'Unable to load advance requests.');
+      throw FinanceFailure(
+        payload['error']?.toString() ?? 'Unable to load advance requests.',
+      );
     }
 
     final items = payload['advanceRequests'] as List<dynamic>? ?? const [];
@@ -121,15 +136,21 @@ class FinanceRepository {
     try {
       payload = jsonDecode(response.body) as Map<String, dynamic>;
     } catch (_) {
-      throw FinanceFailure('Invalid response from server (status: ${response.statusCode}).');
+      throw FinanceFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
     }
 
     if (response.statusCode >= 300 || payload['status'] != 'ok') {
-      throw FinanceFailure(payload['error']?.toString() ?? 'Unable to submit advance request.');
+      throw FinanceFailure(
+        payload['error']?.toString() ?? 'Unable to submit advance request.',
+      );
     }
 
-    final requestedAt = payload['requestedAt']?.toString() ?? DateTime.now().toIso8601String();
-    final amountValue = double.tryParse(payload['amount']?.toString() ?? '') ?? amount;
+    final requestedAt =
+        payload['requestedAt']?.toString() ?? DateTime.now().toIso8601String();
+    final amountValue =
+        double.tryParse(payload['amount']?.toString() ?? '') ?? amount;
     final remarks = payload['notes']?.toString();
     final statusLabel = payload['recordStatus']?.toString() ?? 'Pending';
 
@@ -190,5 +211,51 @@ class FinanceRepository {
       } catch (_) {}
       throw FinanceFailure(message);
     }
+  }
+
+  Future<Map<String, dynamic>> submitFundTransfer({
+    required String driverId,
+    required String senderId,
+    required double amount,
+    required String description,
+  }) async {
+    print(
+      'DEBUG: FinanceRepository.submitFundTransfer called - driverId: $driverId, senderId: $senderId, amount: $amount',
+    );
+    print('DEBUG: API endpoint: $_fundTransferEndpoint');
+
+    final requestBody = jsonEncode(<String, dynamic>{
+      'driverId': driverId,
+      'senderId': senderId,
+      'amount': amount,
+      'description': description,
+    });
+    print('DEBUG: Request body: $requestBody');
+
+    final response = await _client.post(
+      _fundTransferEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: requestBody,
+    );
+
+    print('DEBUG: API response status: ${response.statusCode}');
+    print('DEBUG: API response body: ${response.body}');
+
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw FinanceFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode >= 300 || payload['status'] != 'ok') {
+      throw FinanceFailure(
+        payload['error']?.toString() ?? 'Unable to submit fund transfer.',
+      );
+    }
+
+    return payload;
   }
 }

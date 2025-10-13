@@ -7,7 +7,6 @@ import '../../core/widgets/app_toast.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
-import '../debug/debug_screen.dart';
 import '../attendance/attendance_log_screen.dart';
 import '../finance/advance_salary_screen.dart';
 
@@ -31,15 +30,6 @@ class AdminDashboardScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Admin Dashboard'),
         actions: [
-          IconButton(
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
-              );
-            },
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Debug',
-          ),
           IconButton(
             onPressed: () {
               Navigator.of(context).push(

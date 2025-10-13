@@ -19,9 +19,6 @@ class _NotificationSettingsScreenState
   bool _attendanceNotifications = true;
   bool _salaryNotifications = true;
   bool _advanceNotifications = true;
-  bool _reminderNotifications = true;
-  bool _checkInReminders = true;
-  bool _checkOutReminders = true;
 
   bool _isLoading = false;
 
@@ -56,16 +53,6 @@ class _NotificationSettingsScreenState
       } catch (e) {
         print('Permission request failed: $e');
         // Continue anyway
-      }
-
-      // Schedule daily reminders if enabled (don't throw on failure)
-      if (_checkInReminders || _checkOutReminders) {
-        try {
-          await _notificationService.scheduleDailyReminders();
-        } catch (e) {
-          print('Schedule reminders failed: $e');
-          // Continue anyway
-        }
       }
     } catch (e) {
       if (mounted) {
@@ -163,52 +150,6 @@ class _NotificationSettingsScreenState
                     value: _advanceNotifications,
                     onChanged: (value) {
                       setState(() => _advanceNotifications = value);
-                    },
-                  ),
-
-                  // Reminder Notifications
-                  SwitchListTile(
-                    title: const Text('Reminder Notifications'),
-                    subtitle: const Text(
-                      'Get reminder notifications for important tasks',
-                    ),
-                    value: _reminderNotifications,
-                    onChanged: (value) {
-                      setState(() => _reminderNotifications = value);
-                    },
-                  ),
-
-                  // Check-In Reminders
-                  SwitchListTile(
-                    title: const Text('Check-In Reminders'),
-                    subtitle: const Text(
-                      'Get reminded at 9:00 AM if check-in is not done',
-                    ),
-                    value: _checkInReminders,
-                    onChanged: (value) {
-                      setState(() => _checkInReminders = value);
-                      if (value) {
-                        _notificationService.scheduleCheckInReminder();
-                      } else {
-                        _notificationService.cancelCheckInReminder();
-                      }
-                    },
-                  ),
-
-                  // Check-Out Reminders
-                  SwitchListTile(
-                    title: const Text('Check-Out Reminders'),
-                    subtitle: const Text(
-                      'Get reminded at 9:00 PM if check-out is not done',
-                    ),
-                    value: _checkOutReminders,
-                    onChanged: (value) {
-                      setState(() => _checkOutReminders = value);
-                      if (value) {
-                        _notificationService.scheduleCheckOutReminder();
-                      } else {
-                        _notificationService.cancelCheckOutReminder();
-                      }
                     },
                   ),
                 ],

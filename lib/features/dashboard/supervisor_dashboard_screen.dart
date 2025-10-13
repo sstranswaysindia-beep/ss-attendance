@@ -26,7 +26,6 @@ import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
-import '../debug/debug_screen.dart';
 import '../attendance/attendance_log_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
@@ -314,15 +313,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         actions: [
           IconButton(
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
-              );
-            },
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Debug',
-          ),
-          IconButton(
-            onPressed: () {
               widget.onLogout();
               showAppToast(context, 'Logged out successfully');
             },
@@ -379,16 +369,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     MaterialPageRoute(
                       builder: (_) => const NotificationSettingsScreen(),
                     ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.bug_report),
-                title: const Text('Profile & Attendance Debug'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
                   );
                 },
               ),
@@ -761,36 +741,6 @@ class _SupervisedPlantsCard extends StatelessWidget {
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 );
               }).toList(),
-            ),
-            // DEBUG CARD - Very visible
-            const SizedBox(height: 16),
-            Card(
-              color: Colors.red,
-              child: ListTile(
-                leading: const Icon(
-                  Icons.bug_report,
-                  color: Colors.white,
-                  size: 32,
-                ),
-                title: const Text(
-                  '🐛 DEBUG PROFILE & ATTENDANCE',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                subtitle: const Text(
-                  'Tap to test all APIs and get debug data',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                trailing: const Icon(Icons.arrow_forward, color: Colors.white),
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => DebugScreen(user: user)),
-                  );
-                },
-              ),
             ),
           ],
         ),

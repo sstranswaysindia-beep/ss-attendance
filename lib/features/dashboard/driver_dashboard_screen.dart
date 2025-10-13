@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +12,7 @@ import '../../core/services/finance_repository.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
+import '../../core/services/profile_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/profile_photo_widget.dart';
@@ -23,7 +25,6 @@ import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
-import '../debug/debug_screen.dart';
 import '../attendance/attendance_log_screen.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
@@ -52,10 +53,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   final FinanceRepository _financeRepository = FinanceRepository();
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
+  final ProfileRepository _profileRepository = ProfileRepository();
   GpsPingService? _gpsPingService;
 
   AttendanceRecord? _latestShift;
   bool _isLoadingShift = true;
+  bool _isUploadingPhoto = false;
   String? _shiftSummary;
 
   late final AnimationController _glowController;
@@ -362,6 +365,45 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     }
   }
 
+  Future<void> _handlePhotoSelected(File file) async {
+    setState(() => _isUploadingPhoto = true);
+    try {
+      String url;
+      final driverId = widget.user.driverId;
+
+      if (driverId != null && driverId.isNotEmpty) {
+        // Driver with driverId - use driver-specific upload
+        url = await _profileRepository.uploadProfilePhoto(
+          driverId: driverId,
+          file: file,
+        );
+      } else {
+        // Supervisor or user without driverId - use user-specific upload
+        url = await _profileRepository.uploadUserProfilePhoto(
+          userId: widget.user.id,
+          file: file,
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        widget.user.profilePhoto = url;
+      });
+      showAppToast(context, 'Profile photo updated.');
+    } on ProfileFailure catch (error) {
+      if (!mounted) return;
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      showAppToast(context, 'Unable to upload profile photo.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isUploadingPhoto = false);
+      }
+    }
+  }
+
   Future<void> _loadActiveShift() async {
     final driverId = widget.user.driverId;
     if (driverId == null || driverId.isEmpty) {
@@ -514,13 +556,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         actions: [
           IconButton(
             onPressed: () {
-              _openScreen(DebugScreen(user: widget.user));
-            },
-            icon: const Icon(Icons.bug_report),
-            tooltip: 'Debug',
-          ),
-          IconButton(
-            onPressed: () {
               widget.onLogout();
               showAppToast(context, 'You have been logged out');
             },
@@ -541,7 +576,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    ProfilePhotoWidget(user: widget.user, radius: 28),
+                    ProfilePhotoWithUpload(
+                      user: widget.user,
+                      radius: 28,
+                      onPhotoSelected: _handlePhotoSelected,
+                      isUploading: _isUploadingPhoto,
+                    ),
                     const SizedBox(height: 12),
                     Text(
                       widget.user.displayName,
@@ -566,14 +606,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 onTap: () {
                   Navigator.of(context).pop();
                   _openScreen(const NotificationSettingsScreen());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.bug_report),
-                title: const Text('Profile & Attendance Debug'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _openScreen(DebugScreen(user: widget.user));
                 },
               ),
               ListTile(
@@ -619,7 +651,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 // First line: Profile photo + Welcome, Name
                 Row(
                   children: [
-                    ProfilePhotoWidget(user: widget.user, radius: 24),
+                    ProfilePhotoWithUpload(
+                      user: widget.user,
+                      radius: 24,
+                      onPhotoSelected: _handlePhotoSelected,
+                      isUploading: _isUploadingPhoto,
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
