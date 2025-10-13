@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/models/advance_transaction.dart';
 import '../../core/models/app_user.dart';
@@ -29,6 +30,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   bool _isUploadingPhoto = false;
   String _selectedMonth = 'All Months';
   final ProfileRepository _profileRepository = ProfileRepository();
+  final FinanceRepository _financeRepository = FinanceRepository();
+  final ImagePicker _imagePicker = ImagePicker();
 
   // Fund transfer modal state
   String? _selectedDriverId;
@@ -153,23 +156,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 _transactions = transactions;
                 _filterTransactions();
               });
-              print(
-                'DEBUG: Transactions loaded successfully: ${transactions.length}',
-              );
-              for (var transaction in transactions) {
-                print(
-                  'DEBUG: Transaction: ${transaction.id} - ${transaction.type} - ${transaction.amount} - ${transaction.description}',
-                );
-              }
-            } else {
-              print('DEBUG: Transactions list is null');
             }
-          } else {
-            print('DEBUG: Transactions API returned error: ${data['error']}');
           }
         } catch (jsonError) {
-          print('DEBUG: Transactions JSON decode error: $jsonError');
-          print('DEBUG: Transactions response body: ${response.body}');
+          // Handle JSON decode error silently
         }
       }
     } catch (e) {
@@ -193,11 +183,28 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _filterTransactions() {
+    final currentDriverId = widget.user.driverId ?? widget.user.id;
+
+    // First filter by driver ID to ensure only current driver's transactions
+    final driverFilteredTransactions = _transactions.where((transaction) {
+      // Try multiple comparison methods to handle data type mismatches
+      final directMatch = transaction.driverId == currentDriverId;
+      final stringMatch =
+          transaction.driverId.toString() == currentDriverId.toString();
+      final intMatch =
+          int.tryParse(transaction.driverId.toString()) ==
+          int.tryParse(currentDriverId.toString());
+
+      final matches = directMatch || stringMatch || intMatch;
+      return matches;
+    }).toList();
+
+    // Use driver-filtered transactions
     if (_selectedMonth == 'All Months') {
-      _filteredTransactions = _transactions;
+      _filteredTransactions = driverFilteredTransactions;
     } else {
       final monthIndex = _getMonthIndex(_selectedMonth);
-      _filteredTransactions = _transactions.where((transaction) {
+      _filteredTransactions = driverFilteredTransactions.where((transaction) {
         try {
           final date = DateTime.parse(transaction.createdAt);
           return date.month == monthIndex;
@@ -206,6 +213,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         }
       }).toList();
     }
+    setState(() {});
   }
 
   int _getMonthIndex(String month) {
@@ -265,7 +273,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     }
   }
 
-  Future<void> _addTransactionWithDate(
+  Future<String?> _addTransactionWithDate(
     String type,
     double amount,
     String description,
@@ -281,13 +289,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         'timestamp': transactionDate.toIso8601String(),
       };
 
-      print('DEBUG: Adding transaction with date for driverId: $driverId');
-      print(
-        'DEBUG: Transaction type: $type, amount: $amount, description: $description',
-      );
-      print('DEBUG: Transaction date: $transactionDate');
-      print('DEBUG: Request body: ${jsonEncode(requestBody)}');
-
       final response = await http.post(
         Uri.parse(
           'https://sstranswaysindia.com/api/mobile/add_advance_transaction.php',
@@ -296,44 +297,36 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         body: jsonEncode(requestBody),
       );
 
-      print(
-        'DEBUG: Add transaction API response status: ${response.statusCode}',
-      );
-      print('DEBUG: Add transaction API response body: ${response.body}');
-
       if (response.statusCode == 200) {
         try {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           if (data['status'] == 'ok') {
             showAppToast(context, 'Transaction added successfully');
             await _loadData(); // Refresh data
+            return data['transactionId']?.toString();
           } else {
             showAppToast(
               context,
               data['error'] ?? 'Failed to add transaction',
               isError: true,
             );
+            return null;
           }
         } catch (jsonError) {
-          print('DEBUG: JSON decode error: $jsonError');
-          print('DEBUG: Response body that failed to parse: ${response.body}');
-          showAppToast(
-            context,
-            'Invalid response from server: ${response.body}',
-            isError: true,
-          );
+          showAppToast(context, 'Invalid response from server', isError: true);
+          return null;
         }
       } else {
-        print('DEBUG: HTTP error status: ${response.statusCode}');
         showAppToast(
           context,
-          'Server error (${response.statusCode}): ${response.body}',
+          'Server error (${response.statusCode})',
           isError: true,
         );
+        return null;
       }
     } catch (e) {
-      print('DEBUG: Error adding transaction: $e');
       showAppToast(context, 'Error adding transaction: $e', isError: true);
+      return null;
     }
   }
 
@@ -341,6 +334,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     final amountController = TextEditingController();
     final descriptionController = TextEditingController();
     DateTime selectedDate = DateTime.now();
+    String? selectedReceiptPath;
 
     showDialog(
       context: context,
@@ -401,6 +395,165 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                   }
                 },
               ),
+              // Receipt upload section for YOU GAVE (expense) transactions
+              if (!isAdvanceReceived) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Receipt (Optional)',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          if (selectedReceiptPath != null) ...[
+                            // Show selected receipt
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                    color: Colors.green.withOpacity(0.3),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.receipt,
+                                      size: 16,
+                                      color: Colors.green,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    const Text(
+                                      'Receipt Selected',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.green,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+                          // Upload/Change receipt button
+                          GestureDetector(
+                            onTap: _isUploadingPhoto
+                                ? null
+                                : () async {
+                                    try {
+                                      final XFile? image = await _imagePicker
+                                          .pickImage(
+                                            source: ImageSource.gallery,
+                                            maxWidth: 1920,
+                                            maxHeight: 1080,
+                                            imageQuality: 85,
+                                          );
+
+                                      if (image != null) {
+                                        setState(() {
+                                          _isUploadingPhoto = true;
+                                        });
+
+                                        // For now, just store the local path
+                                        // The actual upload will happen after transaction creation
+                                        setState(() {
+                                          selectedReceiptPath = image.path;
+                                          _isUploadingPhoto = false;
+                                        });
+                                      }
+                                    } catch (e) {
+                                      setState(() {
+                                        _isUploadingPhoto = false;
+                                      });
+                                      showAppToast(
+                                        context,
+                                        'Error selecting image: $e',
+                                        isError: true,
+                                      );
+                                    }
+                                  },
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _isUploadingPhoto
+                                    ? Colors.grey.withOpacity(0.3)
+                                    : Colors.blue.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: _isUploadingPhoto
+                                      ? Colors.grey.withOpacity(0.3)
+                                      : Colors.blue.withOpacity(0.3),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (_isUploadingPhoto)
+                                    const SizedBox(
+                                      width: 12,
+                                      height: 12,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  else
+                                    Icon(
+                                      selectedReceiptPath != null
+                                          ? Icons.edit
+                                          : Icons.attach_file,
+                                      size: 16,
+                                      color: _isUploadingPhoto
+                                          ? Colors.grey
+                                          : Colors.blue,
+                                    ),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _isUploadingPhoto
+                                        ? 'Selecting...'
+                                        : (selectedReceiptPath != null
+                                              ? 'Change'
+                                              : 'Attach Receipt'),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: _isUploadingPhoto
+                                          ? Colors.grey
+                                          : Colors.blue,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
           actions: [
@@ -434,12 +587,81 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 Navigator.pop(context);
 
                 final type = isAdvanceReceived ? 'advance_received' : 'expense';
-                await _addTransactionWithDate(
+                print('🔵 CREATING TRANSACTION');
+                print('🔵 Type: $type');
+                print('🔵 Amount: $amount');
+                print('🔵 Description: $description');
+                print('🔵 Selected Receipt Path: $selectedReceiptPath');
+
+                final transactionId = await _addTransactionWithDate(
                   type,
                   amount,
                   description,
                   selectedDate,
                 );
+
+                print('🔵 Transaction ID returned: $transactionId');
+
+                // Upload receipt if provided for expense transactions
+                if (!isAdvanceReceived &&
+                    selectedReceiptPath != null &&
+                    transactionId != null) {
+                  try {
+                    print('🔵 RECEIPT UPLOAD START');
+                    print('🔵 Transaction ID: $transactionId');
+                    print(
+                      '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
+                    );
+                    print('🔵 File path: $selectedReceiptPath');
+
+                    // Check if file exists
+                    final file = File(selectedReceiptPath!);
+                    final fileExists = await file.exists();
+                    print('🔵 File exists: $fileExists');
+                    if (fileExists) {
+                      final fileSize = await file.length();
+                      print('🔵 File size: $fileSize bytes');
+                    }
+
+                    final response = await _financeRepository.uploadReceipt(
+                      transactionId: transactionId,
+                      driverId: widget.user.driverId ?? widget.user.id,
+                      filePath: selectedReceiptPath!,
+                    );
+
+                    print('🟢 Upload response: $response');
+
+                    if (response['status'] == 'ok') {
+                      showAppToast(context, 'Receipt uploaded successfully');
+                      print('🟢 Receipt upload SUCCESS');
+                      // Reload data to show the receipt
+                      if (mounted) {
+                        await _loadData();
+                      }
+                    } else {
+                      print('🔴 Receipt upload FAILED: ${response['error']}');
+                      showAppToast(
+                        context,
+                        'Receipt upload failed: ${response['error'] ?? 'Unknown error'}',
+                        isError: true,
+                      );
+                    }
+                  } catch (e) {
+                    print('🔴 Upload exception: $e');
+                    print('🔴 Exception type: ${e.runtimeType}');
+                    showAppToast(
+                      context,
+                      'Error uploading receipt: $e',
+                      isError: true,
+                    );
+                  }
+                  print('🔵 Receipt upload process completed');
+                } else {
+                  print('🔵 Receipt upload SKIPPED');
+                  print('🔵 isAdvanceReceived: $isAdvanceReceived');
+                  print('🔵 selectedReceiptPath: $selectedReceiptPath');
+                  print('🔵 transactionId: $transactionId');
+                }
               },
               child: const Text('Add'),
             ),
@@ -840,6 +1062,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   // ENTRIES Column Card (Left) - Date, Time, Balance, Description
   Widget _buildEntryCard(AdvanceTransaction transaction) {
+    // Get current user's driver ID - use driverId if available, otherwise use user ID
+    final currentDriverId = widget.user.driverId ?? widget.user.id;
+    final canDelete = _canDeleteTransaction(transaction, currentDriverId);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
@@ -857,10 +1083,35 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Date - Time
-          Text(
-            _formatDateTime(transaction.createdAt),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          // Header row with date-time and delete button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  _formatDateTime(transaction.createdAt),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              if (canDelete)
+                IconButton(
+                  onPressed: () => _confirmDeleteTransaction(transaction),
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.red,
+                    size: 20,
+                  ),
+                  tooltip: _getDeleteTooltip(transaction),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 32,
+                    minHeight: 32,
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 4),
           // Balance
@@ -875,9 +1126,35 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
             ),
           const SizedBox(height: 4),
           // Description (full text with smaller font)
-          Text(
-            transaction.description,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  transaction.description,
+                  style: const TextStyle(fontSize: 13, color: Colors.black87),
+                ),
+              ),
+              // Show receipt attachment icon if receipt exists
+              if (transaction.receiptPath != null &&
+                  transaction.receiptPath!.isNotEmpty)
+                GestureDetector(
+                  onTap: () => _viewReceipt(transaction.receiptPath!),
+                  child: Container(
+                    margin: const EdgeInsets.only(left: 8),
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+                    ),
+                    child: const Icon(
+                      Icons.receipt,
+                      size: 16,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
       ),
@@ -1286,6 +1563,191 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     _filteredDriversList = List.from(_driversList);
   }
 
+  // Check if current user can delete this transaction
+  bool _canDeleteTransaction(
+    AdvanceTransaction transaction,
+    String currentDriverId,
+  ) {
+    print(
+      'DEBUG: _canDeleteTransaction called - CurrentDriverId: $currentDriverId, TransactionDriverId: ${transaction.driverId}, TransactionType: ${transaction.type}',
+    );
+
+    // Can't delete if no driver ID
+    if (currentDriverId.isEmpty) {
+      print('DEBUG: Cannot delete - no current driver ID');
+      return false;
+    }
+
+    // Check if this is a fund transfer transaction (very specific patterns)
+    final description = transaction.description.toLowerCase();
+    final isFundTransfer =
+        description.contains('fund transfer to') ||
+        description.contains('fund transfer from sender');
+
+    if (isFundTransfer) {
+      // For fund transfers, only the sender can delete
+      // Sender has 'expense' type, receiver has 'advance_received' type
+      if (transaction.type == 'expense') {
+        // This is the sender's record - they can delete it
+        return true;
+      } else if (transaction.type == 'advance_received') {
+        // This is the receiver's record - they cannot delete it
+        return false;
+      }
+    }
+
+    // For non-fund-transfer transactions, user can delete their own records
+    final directMatch = transaction.driverId == currentDriverId;
+    final stringMatch =
+        transaction.driverId.toString() == currentDriverId.toString();
+    final intMatch =
+        int.tryParse(transaction.driverId.toString()) ==
+        int.tryParse(currentDriverId.toString());
+    final canDelete = directMatch || stringMatch || intMatch;
+
+    return canDelete;
+  }
+
+  // Get appropriate tooltip for delete button
+  String _getDeleteTooltip(AdvanceTransaction transaction) {
+    final description = transaction.description.toLowerCase();
+    final isFundTransfer =
+        description.contains('fund transfer to') ||
+        description.contains('fund transfer from sender');
+
+    if (isFundTransfer) {
+      return transaction.type == 'expense'
+          ? 'Delete fund transfer (sender)'
+          : 'Delete fund transfer (receiver)';
+    }
+
+    return 'Delete transaction';
+  }
+
+  // Confirm and delete transaction
+  Future<void> _confirmDeleteTransaction(AdvanceTransaction transaction) async {
+    // Determine if this is a fund transfer
+    final description = transaction.description.toLowerCase();
+    final isFundTransfer =
+        description.contains('fund transfer to') ||
+        description.contains('fund transfer from sender');
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          isFundTransfer ? 'Delete Fund Transfer' : 'Delete Transaction',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              isFundTransfer
+                  ? 'Are you sure you want to delete this fund transfer?'
+                  : 'Are you sure you want to delete this transaction?',
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Amount: ${transaction.formattedAmount}'),
+                  Text('Type: ${transaction.type}'),
+                  Text('Description: ${transaction.description}'),
+                  if (isFundTransfer) ...[
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: Text(
+                        transaction.type == 'expense'
+                            ? '⚠️ This will remove the fund transfer record'
+                            : '⚠️ This is a received fund transfer',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.orange.shade800,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'This action cannot be undone.',
+              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    await _deleteTransaction(transaction);
+  }
+
+  // Delete transaction via API
+  Future<void> _deleteTransaction(AdvanceTransaction transaction) async {
+    try {
+      // Show loading
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // Call delete API
+      await _financeRepository.deleteTransaction(transaction.id);
+
+      // Close loading dialog
+      if (mounted) Navigator.of(context).pop();
+
+      // Reload data to refresh the list and balance
+      await _loadData();
+
+      // Show success message
+      if (mounted) {
+        showAppToast(context, 'Transaction deleted successfully');
+      }
+    } catch (error) {
+      // Close loading dialog
+      if (mounted) Navigator.of(context).pop();
+
+      // Show error message
+      if (mounted) {
+        showAppToast(
+          context,
+          'Failed to delete transaction: ${error.toString()}',
+          isError: true,
+        );
+      }
+    }
+  }
+
   Future<void> _processFundTransfer() async {
     if (_selectedDriverId == null ||
         _transferAmountController.text.isEmpty ||
@@ -1430,7 +1892,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _setFallbackDrivers() {
-    print('DEBUG: Using fallback drivers');
     setState(() {
       _driversList = [
         {'id': 1, 'name': 'Test Driver 1'},
@@ -1438,8 +1899,26 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         {'id': 3, 'name': 'Test Driver 3'},
       ];
     });
-    for (var driver in _driversList) {
-      print('DEBUG: - ${driver['name']} (ID: ${driver['id']})');
-    }
+  }
+
+  void _viewReceipt(String receiptPath) {
+    // Show receipt in a dialog
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Receipt'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('Receipt Path: $receiptPath'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

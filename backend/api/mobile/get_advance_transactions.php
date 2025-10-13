@@ -23,9 +23,11 @@ try {
     $transactionsStmt = $conn->prepare("
         SELECT 
             id,
+            driver_id,
             type,
             amount,
             description,
+            receipt_path,
             created_at,
             (
                 SELECT COALESCE(SUM(

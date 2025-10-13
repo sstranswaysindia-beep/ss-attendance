@@ -1,9 +1,81 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
 import '../models/advance_request.dart';
 import '../models/salary_credit.dart';
+import '../../features/attendance/attendance_log_screen.dart';
+
+// Mobile-side API logging
+class ApiLogger {
+  static void logApiCall(
+    String method,
+    String url,
+    Map<String, dynamic>? requestData,
+  ) {
+    final timestamp = DateTime.now().toIso8601String();
+    print('🔵 API CALL [$timestamp]');
+    print('   Method: $method');
+    print('   URL: $url');
+    if (requestData != null) {
+      print('   Request Data: ${jsonEncode(requestData)}');
+    }
+  }
+
+  static void logApiResponse(
+    String method,
+    String url,
+    int statusCode,
+    String responseBody, {
+    Duration? duration,
+  }) {
+    final timestamp = DateTime.now().toIso8601String();
+    print('🟢 API RESPONSE [$timestamp]');
+    print('   Method: $method');
+    print('   URL: $url');
+    print('   Status: $statusCode');
+    print('   Duration: ${duration?.inMilliseconds}ms');
+    print('   Response: $responseBody');
+
+    // Add to global log manager
+    final log = AttendanceLogEntry(
+      name: 'API Response - $method $url',
+      timestamp: DateTime.now(),
+      method: method,
+      url: url,
+      statusCode: statusCode,
+      responseBody: responseBody,
+      success: statusCode >= 200 && statusCode < 300,
+    );
+    GlobalApiLogManager.addLog(log);
+  }
+
+  static void logApiError(
+    String method,
+    String url,
+    dynamic error, {
+    Duration? duration,
+  }) {
+    final timestamp = DateTime.now().toIso8601String();
+    print('🔴 API ERROR [$timestamp]');
+    print('   Method: $method');
+    print('   URL: $url');
+    print('   Duration: ${duration?.inMilliseconds}ms');
+    print('   Error: $error');
+
+    // Add to global log manager
+    final log = AttendanceLogEntry(
+      name: 'API Error - $method $url',
+      timestamp: DateTime.now(),
+      method: method,
+      url: url,
+      error: error.toString(),
+      success: false,
+    );
+    GlobalApiLogManager.addLog(log);
+  }
+}
 
 class FinanceFailure implements Exception {
   FinanceFailure(this.message);
@@ -55,31 +127,56 @@ class FinanceRepository {
   final Uri _fundTransferEndpoint;
 
   Future<List<SalaryCredit>> fetchSalaryCredits(String driverId) async {
+    final stopwatch = Stopwatch()..start();
     final uri = _salaryEndpoint.replace(
       queryParameters: <String, String>{'driverId': driverId},
     );
-    final response = await _client.get(uri);
-    final statusCode = response.statusCode;
 
-    Map<String, dynamic> payload;
     try {
-      payload = jsonDecode(response.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw FinanceFailure(
-        'Invalid response from server (status: $statusCode).',
-      );
-    }
+      final requestData = {'driverId': driverId};
+      ApiLogger.logApiCall('GET', uri.toString(), requestData);
 
-    if (statusCode != 200 || payload['status'] != 'ok') {
-      throw FinanceFailure(
-        payload['error']?.toString() ?? 'Unable to load salary credits.',
-      );
-    }
+      final response = await _client.get(uri);
+      final statusCode = response.statusCode;
 
-    final entries = payload['salaryCredits'] as List<dynamic>? ?? const [];
-    return entries
-        .map((item) => SalaryCredit.fromJson(item as Map<String, dynamic>))
-        .toList(growable: false);
+      stopwatch.stop();
+      ApiLogger.logApiResponse(
+        'GET',
+        uri.toString(),
+        statusCode,
+        response.body,
+        duration: stopwatch.elapsed,
+      );
+
+      Map<String, dynamic> payload;
+      try {
+        payload = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (_) {
+        throw FinanceFailure(
+          'Invalid response from server (status: $statusCode).',
+        );
+      }
+
+      if (statusCode != 200 || payload['status'] != 'ok') {
+        throw FinanceFailure(
+          payload['error']?.toString() ?? 'Unable to load salary credits.',
+        );
+      }
+
+      final entries = payload['salaryCredits'] as List<dynamic>? ?? const [];
+      return entries
+          .map((item) => SalaryCredit.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false);
+    } catch (e) {
+      stopwatch.stop();
+      ApiLogger.logApiError(
+        'GET',
+        uri.toString(),
+        e,
+        duration: stopwatch.elapsed,
+      );
+      rethrow;
+    }
   }
 
   Future<List<AdvanceRequest>> fetchAdvanceRequests(
@@ -257,5 +354,125 @@ class FinanceRepository {
     }
 
     return payload;
+  }
+
+  Future<Map<String, dynamic>> deleteTransaction(String transactionId) async {
+    final deleteEndpoint = Uri.parse(
+      'https://sstranswaysindia.com/api/mobile/delete_transaction.php',
+    );
+
+    final requestBody = jsonEncode(<String, dynamic>{
+      'transactionId': transactionId,
+    });
+
+    final response = await _client.post(
+      deleteEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: requestBody,
+    );
+
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw FinanceFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode >= 300 || payload['status'] != 'ok') {
+      throw FinanceFailure(
+        payload['error']?.toString() ?? 'Unable to delete transaction.',
+      );
+    }
+
+    return payload;
+  }
+
+  Future<Map<String, dynamic>> uploadReceipt({
+    required String transactionId,
+    required String driverId,
+    required String filePath,
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final uri = Uri.parse(
+      'https://sstranswaysindia.com/api/mobile/upload_receipt.php',
+    );
+
+    try {
+      // Check if file exists
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw FinanceFailure('File does not exist: $filePath');
+      }
+
+      final requestData = {
+        'transactionId': transactionId,
+        'driverId': driverId,
+        'filePath': filePath,
+        'fileSize': await file.length(),
+      };
+
+      ApiLogger.logApiCall('POST', uri.toString(), requestData);
+
+      // Create multipart request
+      final request = http.MultipartRequest('POST', uri);
+
+      // Add fields
+      request.fields['transactionId'] = transactionId;
+      request.fields['driverId'] = driverId;
+
+      // Add file
+      final bytes = await file.readAsBytes();
+      final multipartFile = http.MultipartFile.fromBytes(
+        'receipt',
+        bytes,
+        filename: filePath.split('/').last,
+      );
+      request.files.add(multipartFile);
+
+      // Send request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      stopwatch.stop();
+      ApiLogger.logApiResponse(
+        'POST',
+        uri.toString(),
+        response.statusCode,
+        response.body,
+        duration: stopwatch.elapsed,
+      );
+
+      Map<String, dynamic> payload;
+      try {
+        payload = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (e) {
+        throw FinanceFailure(
+          'Invalid response from server (status: ${response.statusCode}). Response: ${response.body}',
+        );
+      }
+
+      if (response.statusCode >= 300 || payload['status'] != 'ok') {
+        throw FinanceFailure(
+          payload['error']?.toString() ??
+              'Unable to upload receipt. Status: ${response.statusCode}',
+        );
+      }
+
+      return payload;
+    } catch (e) {
+      stopwatch.stop();
+      ApiLogger.logApiError(
+        'POST',
+        uri.toString(),
+        e,
+        duration: stopwatch.elapsed,
+      );
+      if (e is FinanceFailure) {
+        rethrow;
+      }
+      throw FinanceFailure('Upload failed: $e');
+    }
   }
 }

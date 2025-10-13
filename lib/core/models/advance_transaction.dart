@@ -7,6 +7,7 @@ class AdvanceTransaction {
     required this.description,
     required this.createdAt,
     this.runningBalance,
+    this.receiptPath,
   });
 
   factory AdvanceTransaction.fromJson(Map<String, dynamic> json) {
@@ -20,6 +21,7 @@ class AdvanceTransaction {
       createdAt: json['created_at']?.toString() ?? '',
       runningBalance:
           double.tryParse(json['running_balance']?.toString() ?? '0') ?? 0.0,
+      receiptPath: json['receipt_path']?.toString(),
     );
   }
 
@@ -30,6 +32,7 @@ class AdvanceTransaction {
   final String description;
   final String createdAt;
   final double? runningBalance;
+  final String? receiptPath;
 
   bool get isAdvanceReceived => type == 'advance_received';
   bool get isExpense => type == 'expense';

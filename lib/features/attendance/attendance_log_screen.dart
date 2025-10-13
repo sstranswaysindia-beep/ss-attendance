@@ -7,6 +7,40 @@ import 'package:http/http.dart' as http;
 
 import '../../core/models/app_user.dart';
 
+// Global API log manager
+class GlobalApiLogManager {
+  static final List<AttendanceLogEntry> _logs = [];
+  static final List<VoidCallback> _listeners = [];
+
+  static List<AttendanceLogEntry> get logs => List.unmodifiable(_logs);
+
+  static void addLog(AttendanceLogEntry log) {
+    _logs.insert(0, log); // Add to beginning for newest first
+    if (_logs.length > 100) {
+      _logs.removeRange(100, _logs.length); // Keep only last 100 logs
+    }
+    // Notify listeners
+    for (final listener in _listeners) {
+      listener();
+    }
+  }
+
+  static void addListener(VoidCallback listener) {
+    _listeners.add(listener);
+  }
+
+  static void removeListener(VoidCallback listener) {
+    _listeners.remove(listener);
+  }
+
+  static void clearLogs() {
+    _logs.clear();
+    for (final listener in _listeners) {
+      listener();
+    }
+  }
+}
+
 class AttendanceLogScreen extends StatefulWidget {
   const AttendanceLogScreen({required this.user, super.key});
 
@@ -17,14 +51,28 @@ class AttendanceLogScreen extends StatefulWidget {
 }
 
 class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
-  final List<AttendanceLogEntry> _logs = [];
+  final List<AttendanceLogEntry> _testLogs = [];
   bool _isLoading = false;
   String? _error;
+  bool _showRealTimeLogs = false;
 
   @override
   void initState() {
     super.initState();
     _loadAttendanceLogs();
+    GlobalApiLogManager.addListener(_onLogUpdate);
+  }
+
+  @override
+  void dispose() {
+    GlobalApiLogManager.removeListener(_onLogUpdate);
+    super.dispose();
+  }
+
+  void _onLogUpdate() {
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   Future<void> _loadAttendanceLogs() async {
@@ -166,9 +214,108 @@ class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
         ),
       );
 
+      // 9. Test Receipt Upload API (simulation with multipart)
+      try {
+        logs.add(
+          await _testReceiptUploadApi(
+            'Test Receipt Upload API (Simulation)',
+            '999',
+            widget.user.driverId ?? widget.user.id,
+          ),
+        );
+        print('Added Receipt Upload API test');
+      } catch (e) {
+        print('Error adding Receipt Upload API test: $e');
+        logs.add(AttendanceLogEntry(
+          name: 'Test Receipt Upload API (Simulation)',
+          timestamp: DateTime.now(),
+          method: 'POST',
+          url: 'https://sstranswaysindia.com/api/mobile/upload_receipt.php',
+          requestBody: 'Multipart form data with receipt file',
+          success: false,
+          error: 'Failed to add test: $e',
+        ));
+      }
+
+      // 10. Test Fund Transfer API (simulation)
+      try {
+        logs.add(
+          await _testApi(
+            'Test Fund Transfer API (Simulation)',
+            'POST',
+            'https://sstranswaysindia.com/api/mobile/fund_transfer_submit.php',
+            jsonEncode({
+              'fromDriverId': widget.user.driverId ?? widget.user.id,
+              'toDriverId': '999', // Non-existent driver for testing
+              'amount': 50.00,
+              'description': 'Debug test fund transfer from API log',
+            }),
+          ),
+        );
+        print('Added Fund Transfer API test');
+      } catch (e) {
+        print('Error adding Fund Transfer API test: $e');
+        logs.add(AttendanceLogEntry(
+          name: 'Test Fund Transfer API (Simulation)',
+          timestamp: DateTime.now(),
+          method: 'POST',
+          url: 'https://sstranswaysindia.com/api/mobile/fund_transfer_submit.php',
+          success: false,
+          error: 'Failed to add test: $e',
+        ));
+      }
+
+      // 11. Test Get Drivers API (for fund transfer dropdown)
+      try {
+        logs.add(
+          await _testApi(
+            'Test Get Drivers API',
+            'POST',
+            'https://sstranswaysindia.com/api/mobile/get_drivers.php',
+            jsonEncode({'driverId': widget.user.driverId ?? widget.user.id}),
+          ),
+        );
+        print('Added Get Drivers API test');
+      } catch (e) {
+        print('Error adding Get Drivers API test: $e');
+        logs.add(AttendanceLogEntry(
+          name: 'Test Get Drivers API',
+          timestamp: DateTime.now(),
+          method: 'POST',
+          url: 'https://sstranswaysindia.com/api/mobile/get_drivers.php',
+          success: false,
+          error: 'Failed to add test: $e',
+        ));
+      }
+
+      // 12. Test Delete Transaction API (simulation)
+      try {
+        logs.add(
+          await _testApi(
+            'Test Delete Transaction API (Simulation)',
+            'POST',
+            'https://sstranswaysindia.com/api/mobile/delete_transaction.php',
+            jsonEncode({
+              'transactionId': '999', // Non-existent transaction for testing
+            }),
+          ),
+        );
+        print('Added Delete Transaction API test');
+      } catch (e) {
+        print('Error adding Delete Transaction API test: $e');
+        logs.add(AttendanceLogEntry(
+          name: 'Test Delete Transaction API (Simulation)',
+          timestamp: DateTime.now(),
+          method: 'POST',
+          url: 'https://sstranswaysindia.com/api/mobile/delete_transaction.php',
+          success: false,
+          error: 'Failed to add test: $e',
+        ));
+      }
+
       setState(() {
-        _logs.clear();
-        _logs.addAll(logs);
+        _testLogs.clear();
+        _testLogs.addAll(logs);
         _isLoading = false;
       });
     } catch (e) {
@@ -189,9 +336,14 @@ class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
     final headers = <String, String>{'Content-Type': 'application/json'};
 
     try {
+      print('Testing API: $name - $url');
       final response = method.toUpperCase() == 'POST'
           ? await http.post(Uri.parse(url), headers: headers, body: body)
           : await http.get(Uri.parse(url), headers: headers);
+
+      print(
+        'API Response for $name: ${response.statusCode} - ${response.body}',
+      );
 
       return AttendanceLogEntry(
         name: name,
@@ -206,6 +358,7 @@ class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
         error: null,
       );
     } catch (e) {
+      print('API Error for $name: $e');
       return AttendanceLogEntry(
         name: name,
         timestamp: timestamp,
@@ -221,12 +374,80 @@ class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
     }
   }
 
+  Future<AttendanceLogEntry> _testReceiptUploadApi(
+    String name,
+    String transactionId,
+    String driverId,
+  ) async {
+    final timestamp = DateTime.now();
+    final url = 'https://sstranswaysindia.com/api/mobile/upload_receipt.php';
+
+    try {
+      // Create a multipart request
+      final request = http.MultipartRequest('POST', Uri.parse(url));
+
+      // Add fields
+      request.fields['transactionId'] = transactionId;
+      request.fields['driverId'] = driverId;
+
+      // Create a dummy file content for testing
+      final dummyImageData = List.generate(1000, (index) => index % 256);
+      final multipartFile = http.MultipartFile.fromBytes(
+        'receipt',
+        dummyImageData,
+        filename: 'test_receipt.jpg',
+      );
+      request.files.add(multipartFile);
+
+      // Send the request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      return AttendanceLogEntry(
+        name: name,
+        timestamp: timestamp,
+        method: 'POST',
+        url: url,
+        requestBody: 'Multipart form data with receipt file',
+        statusCode: response.statusCode,
+        responseHeaders: response.headers,
+        responseBody: response.body,
+        success: response.statusCode >= 200 && response.statusCode < 300,
+        error: null,
+      );
+    } catch (e) {
+      return AttendanceLogEntry(
+        name: name,
+        timestamp: timestamp,
+        method: 'POST',
+        url: url,
+        requestBody: 'Multipart form data with receipt file',
+        statusCode: null,
+        responseHeaders: null,
+        responseBody: null,
+        success: false,
+        error: e.toString(),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Attendance API Log'),
+        title: const Text('API Log'),
         actions: [
+          IconButton(
+            icon: Icon(_showRealTimeLogs ? Icons.stop : Icons.play_arrow),
+            onPressed: () {
+              setState(() {
+                _showRealTimeLogs = !_showRealTimeLogs;
+              });
+            },
+            tooltip: _showRealTimeLogs
+                ? 'Stop Real-time Logging'
+                : 'Start Real-time Logging',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loadAttendanceLogs,
@@ -264,13 +485,46 @@ class _AttendanceLogScreenState extends State<AttendanceLogScreen> {
                 ],
               ),
             )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _logs.length,
-              itemBuilder: (context, index) {
-                final log = _logs[index];
-                return _buildLogCard(log);
-              },
+          : Column(
+              children: [
+                if (_showRealTimeLogs)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    color: Colors.blue.shade50,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.radio_button_checked,
+                          color: Colors.green,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Real-time API logging is active. Try using the app features to see live API calls.',
+                          style: TextStyle(
+                            color: Colors.blue.shade700,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _showRealTimeLogs
+                        ? GlobalApiLogManager.logs.length
+                        : _testLogs.length,
+                    itemBuilder: (context, index) {
+                      final log = _showRealTimeLogs
+                          ? GlobalApiLogManager.logs[index]
+                          : _testLogs[index];
+                      return _buildLogCard(log);
+                    },
+                  ),
+                ),
+              ],
             ),
     );
   }
