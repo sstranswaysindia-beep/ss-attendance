@@ -42,42 +42,91 @@ if (empty($description)) {
 }
 
 try {
-    // Debug: Log input parameters
-    $debugMsg = "DEBUG: Fund transfer request - driverId: $driverId, senderId: $senderId, amount: $amount, description: $description\n";
+    // Helper function to detect name column
+    function getDriverNameColumn($conn) {
+        $columns = ['name', 'driver_name', 'full_name', 'first_name'];
+        foreach ($columns as $col) {
+            $result = $conn->query("SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'drivers' AND COLUMN_NAME = '$col' LIMIT 1");
+            if ($result && $result->num_rows > 0) {
+                return $col;
+            }
+        }
+        return 'name'; // fallback
+    }
+
+    $nameColumn = getDriverNameColumn($conn);
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] NAME_COLUMN_DETECTED: Using column '$nameColumn'\n";
     error_log($debugMsg);
-    file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+
+    // Debug: Log input parameters
+    $debugMsg = "\n=== NEW FUND TRANSFER ===\n";
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+    
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] FUND_TRANSFER_START: driverId=$driverId, senderId=$senderId, amount=$amount, description='$description'\n";
+    error_log($debugMsg);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+    
+    // Also log to error log for debugging
+    error_log("DEBUG: Fund transfer API called - driverId: $driverId, senderId: $senderId, amount: $amount, description: $description");
 
     // Verify receiver driver exists
-    $driverStmt = $conn->prepare('SELECT id, name FROM drivers WHERE id = ? LIMIT 1');
+    $driverStmt = $conn->prepare("SELECT id, `$nameColumn` as name FROM drivers WHERE id = ? LIMIT 1");
     $driverStmt->bind_param('i', $driverId);
     $driverStmt->execute();
     $driverResult = $driverStmt->get_result();
     $driverData = $driverResult->fetch_assoc();
     $driverStmt->close();
 
-    $debugMsg = "DEBUG: Receiver driver lookup result: " . json_encode($driverData) . "\n";
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] RECEIVER_LOOKUP: " . json_encode($driverData) . "\n";
     error_log($debugMsg);
-    file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
 
     if (!$driverData) {
         apiRespond(404, ['status' => 'error', 'error' => 'Receiver driver not found']);
     }
 
-    // Verify sender driver exists and get name
-    $senderStmt = $conn->prepare('SELECT id, name FROM drivers WHERE id = ? LIMIT 1');
+    // Verify sender driver exists and get name - try multiple columns
+    $senderStmt = $conn->prepare("SELECT id, `$nameColumn` as name, driver_name, full_name FROM drivers WHERE id = ? LIMIT 1");
     $senderStmt->bind_param('i', $senderId);
     $senderStmt->execute();
     $senderResult = $senderStmt->get_result();
     $senderData = $senderResult->fetch_assoc();
     $senderStmt->close();
 
-    $debugMsg = "DEBUG: Sender driver lookup result: " . json_encode($senderData) . "\n";
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_LOOKUP: " . json_encode($senderData) . "\n";
     error_log($debugMsg);
-    file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+    
+    // Additional debug: Check what columns were actually returned
+    if ($senderData) {
+        $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_COLUMNS: name='" . ($senderData['name'] ?? 'NULL') . "', driver_name='" . ($senderData['driver_name'] ?? 'NULL') . "', full_name='" . ($senderData['full_name'] ?? 'NULL') . "'\n";
+        error_log($debugMsg);
+        file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+    }
 
     if (!$senderData) {
         apiRespond(404, ['status' => 'error', 'error' => 'Sender driver not found']);
     }
+
+    // Debug: Check if sender name exists and provide fallback
+    $senderName = $senderData['name'] ?? $senderData['driver_name'] ?? $senderData['full_name'] ?? "Driver ID $senderId";
+    
+    // Clean up the name
+    $senderName = trim($senderName);
+    if (empty($senderName) || $senderName === 'null') {
+        $senderName = "Driver ID $senderId";
+    }
+    
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_NAME_EXTRACTED: '$senderName'\n";
+    error_log($debugMsg);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+
+    // Debug: Log the final description that will be used
+    $finalReceiverDesc = "Fund transfer from {$senderName} - $description";
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] RECEIVER_DESCRIPTION: '$finalReceiverDesc'\n";
+    error_log($debugMsg);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
 
     // Get current balance for sender (to verify they have enough funds)
     $senderBalanceStmt = $conn->prepare(
@@ -110,7 +159,7 @@ try {
     try {
         // 1. Insert transaction for RECEIVER (driver) - they receive money
         $receiverType = 'advance_received';
-        $receiverDesc = "Fund transfer from {$senderData['name']} - $description";
+        $receiverDesc = $finalReceiverDesc;
         
         error_log("DEBUG: Receiver transaction params - driverId: " . gettype($driverId) . " = $driverId, amount: " . gettype($amount) . " = $amount");
         
@@ -132,9 +181,21 @@ try {
         $receiverTransactionId = $receiverStmt->insert_id;
         $receiverStmt->close();
         
-        $debugMsg = "DEBUG: Receiver transaction inserted with ID: $receiverTransactionId\n";
+        $debugMsg = "[" . date('Y-m-d H:i:s') . "] RECEIVER_TRANSACTION_INSERTED: ID=$receiverTransactionId, Description='$receiverDesc'\n";
         error_log($debugMsg);
-        file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
+        file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+        
+        // Additional debug: Verify what was actually inserted
+        $verifyStmt = $conn->prepare("SELECT description FROM advance_transactions WHERE id = ?");
+        $verifyStmt->bind_param('i', $receiverTransactionId);
+        $verifyStmt->execute();
+        $verifyResult = $verifyStmt->get_result();
+        $verifyData = $verifyResult->fetch_assoc();
+        $verifyStmt->close();
+        
+        $debugMsg = "[" . date('Y-m-d H:i:s') . "] VERIFIED_IN_DB: '" . ($verifyData['description'] ?? 'NOT_FOUND') . "'\n";
+        error_log($debugMsg);
+        file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
 
         // 2. Insert transaction for SENDER - they spend money
         $senderType = 'expense';
