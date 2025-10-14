@@ -47,7 +47,7 @@ try {
     error_log($debugMsg);
     file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
 
-    // Verify driver exists
+    // Verify receiver driver exists
     $driverStmt = $conn->prepare('SELECT id, name FROM drivers WHERE id = ? LIMIT 1');
     $driverStmt->bind_param('i', $driverId);
     $driverStmt->execute();
@@ -55,12 +55,28 @@ try {
     $driverData = $driverResult->fetch_assoc();
     $driverStmt->close();
 
-    $debugMsg = "DEBUG: Driver lookup result: " . json_encode($driverData) . "\n";
+    $debugMsg = "DEBUG: Receiver driver lookup result: " . json_encode($driverData) . "\n";
     error_log($debugMsg);
     file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
 
     if (!$driverData) {
-        apiRespond(404, ['status' => 'error', 'error' => 'Driver not found']);
+        apiRespond(404, ['status' => 'error', 'error' => 'Receiver driver not found']);
+    }
+
+    // Verify sender driver exists and get name
+    $senderStmt = $conn->prepare('SELECT id, name FROM drivers WHERE id = ? LIMIT 1');
+    $senderStmt->bind_param('i', $senderId);
+    $senderStmt->execute();
+    $senderResult = $senderStmt->get_result();
+    $senderData = $senderResult->fetch_assoc();
+    $senderStmt->close();
+
+    $debugMsg = "DEBUG: Sender driver lookup result: " . json_encode($senderData) . "\n";
+    error_log($debugMsg);
+    file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
+
+    if (!$senderData) {
+        apiRespond(404, ['status' => 'error', 'error' => 'Sender driver not found']);
     }
 
     // Get current balance for sender (to verify they have enough funds)
@@ -94,7 +110,7 @@ try {
     try {
         // 1. Insert transaction for RECEIVER (driver) - they receive money
         $receiverType = 'advance_received';
-        $receiverDesc = "Fund transfer from sender - $description";
+        $receiverDesc = "Fund transfer from {$senderData['name']} - $description";
         
         error_log("DEBUG: Receiver transaction params - driverId: " . gettype($driverId) . " = $driverId, amount: " . gettype($amount) . " = $amount");
         
@@ -158,6 +174,7 @@ try {
             'driverId' => $driverId,
             'driverName' => $driverData['name'],
             'senderId' => $senderId,
+            'senderName' => $senderData['name'],
             'amount' => $amount,
             'description' => $description,
             'createdAt' => $createdAt,
