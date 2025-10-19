@@ -254,6 +254,7 @@ class AuthRepository {
         fatherName: driverJson['fatherName']?.toString(),
         address: driverJson['address']?.toString(),
         vehicleNumber: vehicleNumber,
+        driverRole: driverJson['role']?.toString(),
         availableVehicles: vehicles,
         joiningDate: joiningDate,
         supervisorName: supervisorName,

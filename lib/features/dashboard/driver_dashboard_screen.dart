@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/driver_vehicle.dart';
@@ -60,6 +61,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   bool _isLoadingShift = true;
   bool _isUploadingPhoto = false;
   String? _shiftSummary;
+  bool _isAttendanceLockedToday = false;
 
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
@@ -67,6 +69,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   List<_NotificationItem> _notifications = const [
     _NotificationItem(message: 'Loading...', type: NotificationType.info),
   ];
+  String? _appVersion;
 
   @override
   void initState() {
@@ -107,6 +110,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
 
     _loadActiveShift();
     _loadNotifications();
+    _loadAppVersion();
 
     _gpsPingService =
         GpsPingService(user: widget.user, repository: _gpsPingRepository)
@@ -240,6 +244,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   Future<void> _loadNotifications() async {
+    setState(() {
+      _notifications = const [
+        _NotificationItem(message: 'Loading...', type: NotificationType.info),
+      ];
+    });
+
     final driverId = widget.user.driverId;
     if (driverId == null || driverId.isEmpty) {
       return;
@@ -365,6 +375,21 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     }
   }
 
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = '${info.version}+${info.buildNumber}';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _appVersion = 'Unavailable';
+      });
+    }
+  }
+
   Future<void> _handlePhotoSelected(File file) async {
     setState(() => _isUploadingPhoto = true);
     try {
@@ -417,32 +442,37 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
 
     setState(() => _isLoadingShift = true);
     try {
-      final now = DateTime.now();
+      final today = DateTime.now();
       final record = await _attendanceRepository.fetchLatestRecord(
         driverId: driverId,
-        month: DateTime(now.year, now.month),
+        month: DateTime(today.year, today.month),
       );
       if (!mounted) return;
+
+      final now = DateTime.now();
+      bool attendanceLocked = false;
+      String? summary;
+      if (record != null) {
+        final inTime = _parseDate(record.inTime);
+        final outTime = _parseDate(record.outTime);
+        if (inTime != null &&
+            (record.outTime == null || record.outTime!.isEmpty)) {
+          summary =
+              'Checked in at ${DateFormat('dd MMM • HH:mm').format(inTime)}';
+        } else if (outTime != null) {
+          summary =
+              'Last check-out ${DateFormat('dd MMM • HH:mm').format(outTime)}';
+        }
+        if (inTime != null && _isSameDay(inTime, now)) {
+          attendanceLocked = outTime != null;
+        }
+      }
 
       setState(() {
         _latestShift = record;
         _isLoadingShift = false;
-        if (record != null) {
-          final inTime = _parseDate(record.inTime);
-          final outTime = _parseDate(record.outTime);
-          if (inTime != null &&
-              (record.outTime == null || record.outTime!.isEmpty)) {
-            _shiftSummary =
-                'Checked in at ${DateFormat('dd MMM • HH:mm').format(inTime)}';
-          } else if (outTime != null) {
-            _shiftSummary =
-                'Last check-out ${DateFormat('dd MMM • HH:mm').format(outTime)}';
-          } else {
-            _shiftSummary = null;
-          }
-        } else {
-          _shiftSummary = null;
-        }
+        _shiftSummary = summary;
+        _isAttendanceLockedToday = attendanceLocked;
       });
     } catch (_) {
       if (!mounted) return;
@@ -450,6 +480,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         _isLoadingShift = false;
         _latestShift = null;
         _shiftSummary = null;
+        _isAttendanceLockedToday = false;
       });
     }
   }
@@ -481,7 +512,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     if (_isLoadingShift) {
       return 'Mark Attendance';
     }
-    return _hasOpenShift ? 'Check-out Pending' : 'Mark Attendance';
+    if (_hasOpenShift) {
+      return 'Check-out Pending';
+    }
+    if (_isAttendanceLockedToday) {
+      return 'Attendance Completed';
+    }
+    return 'Mark Attendance';
   }
 
   void _openScreen(Widget screen) {
@@ -531,6 +568,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     final timeFormatter = DateFormat('HH:mm:ss');
 
     final textTheme = Theme.of(context).textTheme;
+    final isHelper = (widget.user.driverRole?.toLowerCase().trim() == 'helper');
     final plantLabel =
         (widget.user.plantName != null && widget.user.plantName!.isNotEmpty)
         ? widget.user.plantName!
@@ -547,7 +585,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Driver Dashboard',
+          isHelper ? 'Helper Dashboard' : 'Driver Dashboard',
           style: textTheme.titleLarge?.copyWith(
             fontSize: 24,
             fontWeight: FontWeight.w600,
@@ -629,7 +667,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Version 1.0.8',
+                  'Version ${_appVersion ?? '...'}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.blue[600],
                     fontSize: 14,
@@ -722,14 +760,24 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 const SizedBox(height: 16),
                 GlowingAttendanceButton(
                   animation: _glowAnimation,
-                  onTap: () => _openScreen(
-                    CheckInOutScreen(
-                      user: widget.user,
-                      availableVehicles: widget.user.availableVehicles,
-                      selectedVehicleId: _selectedVehicleId,
-                      onVehicleAssigned: _handleVehicleUpdated,
-                    ),
-                  ),
+                  onTap: () {
+                    if (_isAttendanceLockedToday && !_hasOpenShift) {
+                      showAppToast(
+                        context,
+                        'Attendance already marked for today.',
+                        isError: false,
+                      );
+                      return;
+                    }
+                    _openScreen(
+                      CheckInOutScreen(
+                        user: widget.user,
+                        availableVehicles: widget.user.availableVehicles,
+                        selectedVehicleId: _selectedVehicleId,
+                        onVehicleAssigned: _handleVehicleUpdated,
+                      ),
+                    );
+                  },
                   label: _attendanceButtonLabel,
                   gradient: _hasOpenShift
                       ? const LinearGradient(
@@ -737,13 +785,27 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         )
+                      : _isAttendanceLockedToday
+                      ? const LinearGradient(
+                          colors: [Color(0xFFB0BEC5), Color(0xFFECEFF1)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
                       : null,
-                  icon: _hasOpenShift ? Icons.access_time : Icons.check_circle,
+                  icon: _hasOpenShift
+                      ? Icons.access_time
+                      : _isAttendanceLockedToday
+                      ? Icons.verified
+                      : Icons.check_circle,
                   iconColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
+                      : _isAttendanceLockedToday
+                      ? const Color(0xFF37474F)
                       : Colors.white,
                   textColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
+                      : _isAttendanceLockedToday
+                      ? const Color(0xFF37474F)
                       : const Color(0xFF003300),
                 ),
                 if (_shiftSummary != null) ...[
@@ -802,12 +864,15 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                           AttendanceAdjustRequestScreen(user: widget.user),
                         ),
                       ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.local_shipping),
-                        title: const Text('Trips'),
-                        onTap: () => _openScreen(TripScreen(user: widget.user)),
-                      ),
+                      if (!isHelper) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.local_shipping),
+                          title: const Text('Trips'),
+                          onTap: () =>
+                              _openScreen(TripScreen(user: widget.user)),
+                        ),
+                      ],
                     ],
                   ),
                 ),

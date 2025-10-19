@@ -73,6 +73,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final plantLabel = _user.plantName ?? _user.plantId ?? 'Not mapped';
+    final isHelper = (_user.driverRole?.toLowerCase().trim() ?? '') == 'helper';
 
     final keyInfoFields = [
       _ProfileField(
@@ -125,7 +126,9 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Driver Profile')),
+      appBar: AppBar(
+        title: Text(isHelper ? 'Helper Profile' : 'Driver Profile'),
+      ),
       body: AppGradientBackground(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),

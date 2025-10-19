@@ -214,6 +214,30 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     return outTime == null || outTime.isEmpty;
   }
 
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  bool get _hasCompletedAttendanceToday {
+    final record = _activeShift;
+    if (record == null) {
+      return false;
+    }
+    final inTimeRaw = record.inTime;
+    if (inTimeRaw == null || inTimeRaw.isEmpty) {
+      return false;
+    }
+    final inTime = DateTime.tryParse(inTimeRaw);
+    if (inTime == null || !_isSameDay(inTime, DateTime.now())) {
+      return false;
+    }
+    final outTimeRaw = record.outTime;
+    if (outTimeRaw == null || outTimeRaw.isEmpty) {
+      return false;
+    }
+    final outTime = DateTime.tryParse(outTimeRaw);
+    return outTime != null;
+  }
+
   CheckFlowAction get _currentAction =>
       _hasOpenShift ? CheckFlowAction.checkOut : CheckFlowAction.checkIn;
 
@@ -386,6 +410,15 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _handleCheckInOut() async {
+    if (_currentAction == CheckFlowAction.checkIn &&
+        _hasCompletedAttendanceToday) {
+      showAppToast(
+        context,
+        'Attendance already marked for today.',
+        isError: false,
+      );
+      return;
+    }
     // First capture photo, then submit attendance
     await _capturePhoto();
 
@@ -434,13 +467,9 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       if (!mounted) return;
       setState(() => _capturedPhoto = savedFile);
 
-      // Show file size information
-      final fileSize = await savedFile.length();
-      final sizeKB = (fileSize / 1024).toStringAsFixed(1);
-      showAppToast(
-        context,
-        'Photo captured and saved to $dateFolder folder. Size: ${sizeKB}KB',
-      );
+      // Optionally keep file size info for debugging without user toast
+      // final fileSize = await savedFile.length();
+      // final sizeKB = (fileSize / 1024).toStringAsFixed(1);
     } catch (_) {
       if (!mounted) return;
       showAppToast(context, 'Unable to capture photo.', isError: true);
@@ -448,6 +477,11 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _submitAttendance() async {
+    final performedAction = _currentAction;
+    final actionLabel = performedAction == CheckFlowAction.checkIn
+        ? 'Check-in'
+        : 'Check-out';
+
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
     final plantId = _resolvePlantId();
@@ -478,6 +512,15 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       );
       return;
     }
+    if (_currentAction == CheckFlowAction.checkIn &&
+        _hasCompletedAttendanceToday) {
+      showAppToast(
+        context,
+        'Attendance already marked for today.',
+        isError: false,
+      );
+      return;
+    }
 
     setState(() {
       _isSubmitting = true;
@@ -492,7 +535,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         plantId: plantId,
         vehicleId: vehicleId,
         assignmentId: assignmentId,
-        action: _currentAction == CheckFlowAction.checkIn
+        action: performedAction == CheckFlowAction.checkIn
             ? AttendanceAction.checkIn
             : AttendanceAction.checkOut,
         photoFile: _capturedPhoto,
@@ -501,7 +544,6 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
       if (!mounted) return;
 
-      final actionLabel = _currentActionLabel;
       final displayTimestamp = _formatDateTime(result.timestamp);
 
       setState(() {
@@ -518,6 +560,15 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       await _loadActiveShift();
       if (!mounted) return;
       showAppToast(context, '$actionLabel submitted successfully.');
+      if (performedAction == CheckFlowAction.checkOut) {
+        Future.delayed(const Duration(milliseconds: 600), () {
+          if (!mounted) return;
+          final navigator = Navigator.of(context);
+          if (navigator.canPop()) {
+            navigator.pop();
+          }
+        });
+      }
     } on AttendanceFailure catch (error) {
       if (!mounted) return;
       setState(() => _isSyncPending = false);

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../calculator/average_calculator_screen.dart';
 
 import '../../core/models/app_user.dart';
@@ -64,6 +65,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   AttendanceRecord? _latestShift;
   bool _isLoadingShift = true;
   String? _shiftSummary;
+  String? _appVersion;
 
   @override
   void initState() {
@@ -83,6 +85,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
     _loadActiveShift();
     _loadNotifications();
+    _loadAppVersion();
 
     _gpsPingService =
         GpsPingService(user: widget.user, repository: _gpsPingRepository)
@@ -180,6 +183,21 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
           ],
         );
       }
+    }
+  }
+
+  Future<void> _loadAppVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = '${info.version}+${info.buildNumber}';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _appVersion = 'Unavailable';
+      });
     }
   }
 
@@ -397,7 +415,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
-                  'Version 1.0.8',
+                  'Version ${_appVersion ?? '...'}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Colors.blue[600],
                     fontSize: 14,

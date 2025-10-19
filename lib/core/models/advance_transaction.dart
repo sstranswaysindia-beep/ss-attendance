@@ -19,8 +19,7 @@ class AdvanceTransaction {
       amount: double.tryParse(json['amount']?.toString() ?? '0') ?? 0.0,
       description: json['description']?.toString() ?? '',
       createdAt: json['created_at']?.toString() ?? '',
-      runningBalance:
-          double.tryParse(json['running_balance']?.toString() ?? '0') ?? 0.0,
+      runningBalance: _parseNullableDouble(json['running_balance']),
       receiptPath: json['receipt_path']?.toString(),
     );
   }
@@ -93,5 +92,13 @@ class AdvanceTransaction {
     } catch (e) {
       return '';
     }
+  }
+
+  static double? _parseNullableDouble(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    final parsed = double.tryParse(value.toString());
+    return parsed;
   }
 }

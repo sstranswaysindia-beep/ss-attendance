@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 
+import '../models/admin_attendance_overview.dart';
 import '../models/attendance_record.dart';
 import '../models/daily_attendance_summary.dart';
 import '../models/monthly_stat.dart';
@@ -51,13 +52,16 @@ class AttendanceRepository {
     Uri? statsEndpoint,
     Uri? deleteEndpoint,
     Uri? adjustRequestEndpoint,
+    Uri? adminOverviewEndpoint,
   }) : _client = client ?? http.Client(),
        _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
        _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
        _statsEndpoint = statsEndpoint ?? Uri.parse(_defaultStatsEndpoint),
        _deleteEndpoint = deleteEndpoint ?? Uri.parse(_defaultDeleteEndpoint),
        _adjustRequestEndpoint =
-           adjustRequestEndpoint ?? Uri.parse(_defaultAdjustRequestEndpoint);
+           adjustRequestEndpoint ?? Uri.parse(_defaultAdjustRequestEndpoint),
+       _adminOverviewEndpoint =
+           adminOverviewEndpoint ?? Uri.parse(_defaultAdminOverviewEndpoint);
 
   static const String _defaultSubmitEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_submit.php';
@@ -69,6 +73,8 @@ class AttendanceRepository {
       'https://sstranswaysindia.com/api/mobile/attendance_delete.php';
   static const String _defaultAdjustRequestEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_adjust_request_submit.php';
+  static const String _defaultAdminOverviewEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_admin_overview.php';
 
   final http.Client _client;
   final Uri _submitEndpoint;
@@ -76,6 +82,7 @@ class AttendanceRepository {
   final Uri _statsEndpoint;
   final Uri _deleteEndpoint;
   final Uri _adjustRequestEndpoint;
+  final Uri _adminOverviewEndpoint;
 
   Future<AttendanceSubmissionResult> submit({
     required String driverId,
@@ -302,6 +309,39 @@ class AttendanceRepository {
     return stats
         .map((item) => MonthlyStat.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
+  }
+
+  Future<AdminAttendanceOverview> fetchAdminOverview({
+    required DateTime month,
+    String? searchTerm,
+  }) async {
+    final formattedMonth =
+        '${month.year.toString().padLeft(4, '0')}-${month.month.toString().padLeft(2, '0')}';
+    final queryParameters = <String, String>{'month': formattedMonth};
+    final trimmedSearch = searchTerm?.trim();
+    if (trimmedSearch != null && trimmedSearch.isNotEmpty) {
+      queryParameters['search'] = trimmedSearch;
+    }
+    final uri = _adminOverviewEndpoint.replace(queryParameters: queryParameters);
+
+    final response = await _client.get(uri);
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
+    }
+
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load attendance overview.',
+      );
+    }
+
+    return AdminAttendanceOverview.fromJson(payload);
   }
 
   Future<List<DailyAttendanceSummary>> fetchDailySummary({

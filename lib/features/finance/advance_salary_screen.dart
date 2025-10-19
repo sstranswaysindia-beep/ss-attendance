@@ -32,6 +32,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   final ProfileRepository _profileRepository = ProfileRepository();
   final FinanceRepository _financeRepository = FinanceRepository();
   final ImagePicker _imagePicker = ImagePicker();
+  List<String> _descriptionOptions = [];
+  bool _isDescriptionLoading = false;
+  String? _descriptionLoadError;
 
   // Fund transfer modal state
   String? _selectedDriverId;
@@ -45,6 +48,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   List<Map<String, dynamic>> _driversList = [];
   List<Map<String, dynamic>> _filteredDriversList = [];
   bool _showDriverList = false;
+  String? _driverLoadErrorMessage;
+  final Map<String, String> _driverNameCache = {};
 
   @override
   void initState() {
@@ -73,6 +78,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       _loadBalance(),
       _loadTransactions(),
       _loadDriversList(),
+      _loadTransactionDescriptions(),
     ]);
     setState(() {
       _isLoading = false;
@@ -332,120 +338,247 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   void _showAddTransactionDialog(bool isAdvanceReceived) {
     final amountController = TextEditingController();
-    final descriptionController = TextEditingController();
+    final extraNotesController = TextEditingController();
     DateTime selectedDate = DateTime.now();
     String? selectedReceiptPath;
+    String? selectedDescription = _descriptionOptions.isNotEmpty
+        ? _descriptionOptions.first
+        : null;
 
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           title: Text(isAdvanceReceived ? 'You Got ₹' : 'You Gave ₹'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: amountController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Amount',
-                  prefixText: '₹',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: descriptionController,
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ListTile(
-                leading: const Icon(Icons.calendar_today),
-                title: Text('Date: ${_formatDate(selectedDate)}'),
-                subtitle: Text(_formatTime(selectedDate)),
-                trailing: const Icon(Icons.edit),
-                onTap: () async {
-                  final date = await showDatePicker(
-                    context: context,
-                    initialDate: selectedDate,
-                    firstDate: DateTime.now().subtract(
-                      const Duration(days: 365),
-                    ),
-                    lastDate: DateTime.now(),
-                  );
-                  if (date != null) {
-                    final time = await showTimePicker(
-                      context: context,
-                      initialTime: TimeOfDay.fromDateTime(selectedDate),
-                    );
-                    if (time != null) {
-                      setState(() {
-                        selectedDate = DateTime(
-                          date.year,
-                          date.month,
-                          date.day,
-                          time.hour,
-                          time.minute,
-                        );
-                      });
-                    }
-                  }
-                },
-              ),
-              // Receipt upload section for YOU GAVE (expense) transactions
-              if (!isAdvanceReceived) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                    borderRadius: BorderRadius.circular(8),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Amount',
+                    prefixText: '₹',
+                    border: OutlineInputBorder(),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Receipt (Optional)',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: selectedDescription,
+                  decoration: InputDecoration(
+                    labelText: _isDescriptionLoading
+                        ? 'Loading descriptions...'
+                        : 'Description',
+                    border: const OutlineInputBorder(),
+                    errorText: _descriptionLoadError,
+                  ),
+                  items: _descriptionOptions
+                      .map(
+                        (label) => DropdownMenuItem<String>(
+                          value: label,
+                          child: Text(label),
                         ),
+                      )
+                      .toList(),
+                  onChanged: _isDescriptionLoading
+                      ? null
+                      : (value) {
+                          setState(() {
+                            selectedDescription = value;
+                          });
+                        },
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: extraNotesController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Additional description (optional)',
+                    hintText: 'Add more details for this entry',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const Icon(Icons.calendar_today),
+                  title: Text('Date: ${_formatDate(selectedDate)}'),
+                  subtitle: Text(_formatTime(selectedDate)),
+                  trailing: const Icon(Icons.edit),
+                  onTap: () async {
+                    final date = await showDatePicker(
+                      context: context,
+                      initialDate: selectedDate,
+                      firstDate: DateTime.now().subtract(
+                        const Duration(days: 365),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          if (selectedReceiptPath != null) ...[
-                            // Show selected receipt
-                            Expanded(
+                      lastDate: DateTime.now(),
+                    );
+                    if (date != null) {
+                      final time = await showTimePicker(
+                        context: context,
+                        initialTime: TimeOfDay.fromDateTime(selectedDate),
+                      );
+                      if (time != null) {
+                        setState(() {
+                          selectedDate = DateTime(
+                            date.year,
+                            date.month,
+                            date.day,
+                            time.hour,
+                            time.minute,
+                          );
+                        });
+                      }
+                    }
+                  },
+                ),
+                // Receipt upload section for YOU GAVE (expense) transactions
+                if (!isAdvanceReceived) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Receipt (Optional)',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            if (selectedReceiptPath != null) ...[
+                              // Show selected receipt
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withOpacity(0.1),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(
+                                      color: Colors.green.withOpacity(0.3),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(
+                                        Icons.receipt,
+                                        size: 16,
+                                        color: Colors.green,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      const Text(
+                                        'Receipt Selected',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            // Upload/Change receipt button
+                            GestureDetector(
+                              onTap: _isUploadingPhoto
+                                  ? null
+                                  : () async {
+                                      try {
+                                        final XFile? image = await _imagePicker
+                                            .pickImage(
+                                              source: ImageSource.gallery,
+                                              maxWidth: 1920,
+                                              maxHeight: 1080,
+                                              imageQuality: 85,
+                                            );
+
+                                        if (image != null) {
+                                          setState(() {
+                                            _isUploadingPhoto = true;
+                                          });
+
+                                          // For now, just store the local path
+                                          // The actual upload will happen after transaction creation
+                                          setState(() {
+                                            selectedReceiptPath = image.path;
+                                            _isUploadingPhoto = false;
+                                          });
+                                        }
+                                      } catch (e) {
+                                        setState(() {
+                                          _isUploadingPhoto = false;
+                                        });
+                                        showAppToast(
+                                          context,
+                                          'Error selecting image: $e',
+                                          isError: true,
+                                        );
+                                      }
+                                    },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
                                   vertical: 4,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.withOpacity(0.1),
+                                  color: _isUploadingPhoto
+                                      ? Colors.grey.withOpacity(0.3)
+                                      : Colors.blue.withOpacity(0.1),
                                   borderRadius: BorderRadius.circular(4),
                                   border: Border.all(
-                                    color: Colors.green.withOpacity(0.3),
+                                    color: _isUploadingPhoto
+                                        ? Colors.grey.withOpacity(0.3)
+                                        : Colors.blue.withOpacity(0.3),
                                   ),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(
-                                      Icons.receipt,
-                                      size: 16,
-                                      color: Colors.green,
-                                    ),
+                                    if (_isUploadingPhoto)
+                                      const SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    else
+                                      Icon(
+                                        selectedReceiptPath != null
+                                            ? Icons.edit
+                                            : Icons.attach_file,
+                                        size: 16,
+                                        color: _isUploadingPhoto
+                                            ? Colors.grey
+                                            : Colors.blue,
+                                      ),
                                     const SizedBox(width: 4),
-                                    const Text(
-                                      'Receipt Selected',
+                                    Text(
+                                      _isUploadingPhoto
+                                          ? 'Selecting...'
+                                          : (selectedReceiptPath != null
+                                                ? 'Change'
+                                                : 'Attach Receipt'),
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: Colors.green,
+                                        color: _isUploadingPhoto
+                                            ? Colors.grey
+                                            : Colors.blue,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -453,108 +586,14 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
                           ],
-                          // Upload/Change receipt button
-                          GestureDetector(
-                            onTap: _isUploadingPhoto
-                                ? null
-                                : () async {
-                                    try {
-                                      final XFile? image = await _imagePicker
-                                          .pickImage(
-                                            source: ImageSource.gallery,
-                                            maxWidth: 1920,
-                                            maxHeight: 1080,
-                                            imageQuality: 85,
-                                          );
-
-                                      if (image != null) {
-                                        setState(() {
-                                          _isUploadingPhoto = true;
-                                        });
-
-                                        // For now, just store the local path
-                                        // The actual upload will happen after transaction creation
-                                        setState(() {
-                                          selectedReceiptPath = image.path;
-                                          _isUploadingPhoto = false;
-                                        });
-                                      }
-                                    } catch (e) {
-                                      setState(() {
-                                        _isUploadingPhoto = false;
-                                      });
-                                      showAppToast(
-                                        context,
-                                        'Error selecting image: $e',
-                                        isError: true,
-                                      );
-                                    }
-                                  },
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: _isUploadingPhoto
-                                    ? Colors.grey.withOpacity(0.3)
-                                    : Colors.blue.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(
-                                  color: _isUploadingPhoto
-                                      ? Colors.grey.withOpacity(0.3)
-                                      : Colors.blue.withOpacity(0.3),
-                                ),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_isUploadingPhoto)
-                                    const SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  else
-                                    Icon(
-                                      selectedReceiptPath != null
-                                          ? Icons.edit
-                                          : Icons.attach_file,
-                                      size: 16,
-                                      color: _isUploadingPhoto
-                                          ? Colors.grey
-                                          : Colors.blue,
-                                    ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    _isUploadingPhoto
-                                        ? 'Selecting...'
-                                        : (selectedReceiptPath != null
-                                              ? 'Change'
-                                              : 'Attach Receipt'),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: _isUploadingPhoto
-                                          ? Colors.grey
-                                          : Colors.blue,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
           actions: [
             TextButton(
@@ -564,7 +603,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
             ElevatedButton(
               onPressed: () async {
                 final amount = double.tryParse(amountController.text);
-                final description = descriptionController.text.trim();
 
                 if (amount == null || amount <= 0) {
                   showAppToast(
@@ -575,10 +613,25 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                   return;
                 }
 
-                if (description.isEmpty) {
+                final baseDescription = selectedDescription?.trim() ?? '';
+                final extraNotes = extraNotesController.text.trim();
+                final combinedDescription = () {
+                  if (baseDescription.isEmpty && extraNotes.isEmpty) {
+                    return '';
+                  }
+                  if (baseDescription.isEmpty) {
+                    return extraNotes;
+                  }
+                  if (extraNotes.isEmpty) {
+                    return baseDescription;
+                  }
+                  return '$baseDescription — $extraNotes';
+                }();
+
+                if (combinedDescription.isEmpty) {
                   showAppToast(
                     context,
-                    'Please enter a description',
+                    'Please provide a description',
                     isError: true,
                   );
                   return;
@@ -590,13 +643,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 print('🔵 CREATING TRANSACTION');
                 print('🔵 Type: $type');
                 print('🔵 Amount: $amount');
-                print('🔵 Description: $description');
+                print('🔵 Description: $combinedDescription');
                 print('🔵 Selected Receipt Path: $selectedReceiptPath');
 
                 final transactionId = await _addTransactionWithDate(
                   type,
                   amount,
-                  description,
+                  combinedDescription,
                   selectedDate,
                 );
 
@@ -811,16 +864,11 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 'You will get',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
-              GestureDetector(
-                onTap: () => _showFundTransferDialog(),
-                child: const Text(
-                  'Fund Transfer',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.blue,
-                    decoration: TextDecoration.underline,
-                  ),
-                ),
+              TextButton.icon(
+                onPressed: _showFundTransferDialog,
+                style: TextButton.styleFrom(foregroundColor: Colors.blue),
+                icon: const Icon(Icons.sync_alt, size: 18),
+                label: const Text('Fund Transfer'),
               ),
             ],
           ),
@@ -1125,12 +1173,17 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               ),
             ),
           const SizedBox(height: 4),
+          if (_isFundTransferTransaction(transaction))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _buildFundTransferLabel(transaction),
+            ),
           // Description (full text with smaller font)
           Row(
             children: [
               Expanded(
                 child: Text(
-                  transaction.description,
+                  _formatTransactionDescription(transaction),
                   style: const TextStyle(fontSize: 13, color: Colors.black87),
                 ),
               ),
@@ -1168,7 +1221,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      alignment: Alignment.center,
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(8),
@@ -1180,15 +1234,209 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           ),
         ],
       ),
-      child: Center(
+      child: SizedBox(
+        width: double.infinity,
         child: Text(
-          transaction.formattedAmount,
+          transaction.formattedAmount.trim(),
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: isYouGot ? Colors.green : Colors.red,
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFundTransferLabel(AdvanceTransaction transaction) {
+    final isReceived = transaction.type == 'advance_received';
+    final counterpartyName = _extractFundTransferCounterpartyName(transaction);
+    final actionColor = isReceived
+        ? Colors.green.shade700
+        : Colors.red.shade700;
+    final highlightColor = (isReceived ? Colors.green : Colors.red).withOpacity(
+      0.12,
+    ); // subtle background
+
+    final buttons = <Widget>[
+      TextButton.icon(
+        onPressed: () => _showFundTransferDetails(transaction),
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          backgroundColor: highlightColor,
+          foregroundColor: actionColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
+        icon: Icon(
+          isReceived ? Icons.call_received : Icons.call_made,
+          size: 16,
+        ),
+        label: Text(
+          isReceived ? 'Fund Transfer · Received' : 'Fund Transfer · Sent',
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+      ),
+    ];
+
+    if (counterpartyName != null && counterpartyName.isNotEmpty) {
+      buttons.add(
+        OutlinedButton(
+          onPressed: () => _showFundTransferDetails(transaction),
+          style: OutlinedButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            foregroundColor: Colors.blue.shade700,
+            side: BorderSide(color: Colors.blue.shade200),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+          ),
+          child: Text(
+            isReceived ? 'From $counterpartyName' : 'To $counterpartyName',
+            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+          ),
+        ),
+      );
+    }
+
+    return Wrap(spacing: 8, runSpacing: 4, children: buttons);
+  }
+
+  bool _isFundTransferTransaction(AdvanceTransaction transaction) {
+    final description = transaction.description.toLowerCase();
+    return description.contains('fund transfer to') ||
+        description.contains('fund transfer from');
+  }
+
+  String _formatTransactionDescription(AdvanceTransaction transaction) {
+    var description = transaction.description.trim();
+    description = _replaceDriverIdPlaceholders(description);
+    return description;
+  }
+
+  String _replaceDriverIdPlaceholders(String description) {
+    final idPattern = RegExp(r'Driver ID (\d+)', caseSensitive: false);
+    return description.replaceAllMapped(idPattern, (match) {
+      final driverId = match.group(1);
+      final resolvedName = _lookupDriverName(driverId);
+      if (resolvedName != null) {
+        return resolvedName;
+      }
+      return match.group(0)!;
+    });
+  }
+
+  String? _extractFundTransferCounterpartyName(AdvanceTransaction transaction) {
+    if (!_isFundTransferTransaction(transaction)) {
+      return null;
+    }
+
+    final description = transaction.description;
+    final lower = description.toLowerCase();
+    final marker = transaction.type == 'advance_received'
+        ? 'fund transfer from '
+        : 'fund transfer to ';
+    final markerIndex = lower.indexOf(marker);
+    if (markerIndex == -1) {
+      return null;
+    }
+
+    final startIndex = markerIndex + marker.length;
+    final endIndex = lower.indexOf(' - ', startIndex);
+    final rawName =
+        (endIndex == -1
+                ? description.substring(startIndex)
+                : description.substring(startIndex, endIndex))
+            .trim();
+    if (rawName.isEmpty) {
+      return null;
+    }
+
+    final resolvedByName = _lookupDriverNameByName(rawName);
+    if (resolvedByName != null) {
+      return resolvedByName;
+    }
+
+    final sanitized = rawName.toLowerCase();
+    if (sanitized == 'sender' || sanitized == 'receiver') {
+      return null;
+    }
+
+    return rawName;
+  }
+
+  String? _lookupDriverName(String? driverId) {
+    if (driverId == null) {
+      return null;
+    }
+    final name = _driverNameCache[driverId];
+    if (name != null && name.trim().isNotEmpty) {
+      return name.trim();
+    }
+    return null;
+  }
+
+  String? _lookupDriverNameByName(String rawName) {
+    final search = rawName.trim().toLowerCase();
+    if (search.isEmpty) {
+      return null;
+    }
+    for (final entry in _driverNameCache.entries) {
+      if (entry.value.toLowerCase() == search) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
+
+  void _ensureCurrentUserCached() {
+    final driverKey = widget.user.driverId ?? widget.user.id;
+    final displayName = widget.user.displayName.trim();
+    if (driverKey == null || driverKey.toString().isEmpty) {
+      return;
+    }
+    if (displayName.isEmpty) {
+      return;
+    }
+    print(
+      'DEBUG: Caching current user name - key: $driverKey, name: "$displayName"',
+    );
+    _driverNameCache[driverKey.toString()] = displayName;
+  }
+
+  void _showFundTransferDetails(AdvanceTransaction transaction) {
+    final counterparty = _extractFundTransferCounterpartyName(transaction);
+    final isReceived = transaction.type == 'advance_received';
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          isReceived ? 'Fund Transfer Received' : 'Fund Transfer Sent',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Amount: ${transaction.formattedAmount}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Text('Counterparty: ${counterparty ?? 'Unknown'}'),
+            const SizedBox(height: 8),
+            Text('Description:\n${transaction.description}'),
+            const SizedBox(height: 12),
+            Text('Created at: ${_formatDateTime(transaction.createdAt)}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
@@ -1296,13 +1544,19 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                     TextField(
                       controller: _driverSearchController,
                       focusNode: _searchFocusNode,
-                      enabled: _driversList.isNotEmpty,
+                      enabled:
+                          _driversList.isNotEmpty &&
+                          _driverLoadErrorMessage == null,
                       decoration: InputDecoration(
-                        hintText: _driversList.isEmpty
-                            ? 'Loading drivers...'
-                            : 'Type driver name to search...',
+                        hintText:
+                            _driverLoadErrorMessage ??
+                            (_driversList.isEmpty
+                                ? 'Loading drivers...'
+                                : 'Type driver name to search...'),
                         border: const OutlineInputBorder(),
-                        prefixIcon: _driversList.isEmpty
+                        prefixIcon: _driverLoadErrorMessage != null
+                            ? const Icon(Icons.error_outline, color: Colors.red)
+                            : _driversList.isEmpty
                             ? const Padding(
                                 padding: EdgeInsets.all(12),
                                 child: SizedBox(
@@ -1343,6 +1597,19 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                       textInputAction: TextInputAction.none,
                       keyboardType: TextInputType.text,
                     ),
+
+                    if (_driverLoadErrorMessage != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          _driverLoadErrorMessage!,
+                          style: TextStyle(
+                            color: Colors.red.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
 
                     // Search Results List
                     if (_showDriverList && _filteredDriversList.isNotEmpty)
@@ -1391,7 +1658,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                       size: 20,
                                     )
                                   : null,
-                              onTap: () => _selectDriver(driver),
+                              onTap: () => _selectDriver(
+                                driver,
+                                dialogSetState: setDialogState,
+                              ),
                             );
                           },
                         ),
@@ -1474,7 +1744,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
                     // Transfer Summary
                     if (_selectedDriverId != null &&
-                        _transferAmountController.text.isNotEmpty)
+                        (double.tryParse(_transferAmountController.text) ?? 0) >
+                            0)
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
@@ -1525,10 +1796,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                   ),
                 ),
                 ElevatedButton(
-                  onPressed:
-                      _selectedDriverId != null &&
-                          _transferAmountController.text.isNotEmpty &&
-                          _transferDescriptionController.text.isNotEmpty
+                  onPressed: _isTransferFormValid()
                       ? () async {
                           await _processFundTransfer();
                           if (mounted) {
@@ -1551,6 +1819,15 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         );
       },
     );
+  }
+
+  bool _isTransferFormValid() {
+    final amount = double.tryParse(_transferAmountController.text);
+    return _driverLoadErrorMessage == null &&
+        _selectedDriverId != null &&
+        amount != null &&
+        amount > 0 &&
+        _transferDescriptionController.text.trim().isNotEmpty;
   }
 
   void _clearTransferForm() {
@@ -1749,12 +2026,34 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   Future<void> _processFundTransfer() async {
+    final amount = double.tryParse(_transferAmountController.text);
+    final description = _transferDescriptionController.text.trim();
+
     if (_selectedDriverId == null ||
-        _transferAmountController.text.isEmpty ||
-        _transferDescriptionController.text.isEmpty) {
+        amount == null ||
+        amount <= 0 ||
+        description.isEmpty) {
       print(
         'DEBUG: Fund transfer validation failed - driverId: $_selectedDriverId, amount: ${_transferAmountController.text}, description: ${_transferDescriptionController.text}',
       );
+      if (mounted) {
+        showAppToast(
+          context,
+          'Enter a valid amount and description for the transfer.',
+          isError: true,
+        );
+      }
+      return;
+    }
+
+    if (_driverLoadErrorMessage != null) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'Driver list is unavailable. Please refresh and try again.',
+          isError: true,
+        );
+      }
       return;
     }
 
@@ -1764,22 +2063,22 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         _isLoading = true;
       });
 
-      final amount = double.tryParse(_transferAmountController.text) ?? 0.0;
-      final description = _transferDescriptionController
-          .text; // Just use the user's description
       final senderId = widget.user.driverId ?? widget.user.id;
 
       print(
         'DEBUG: Starting fund transfer - driverId: $_selectedDriverId, senderId: $senderId, amount: $amount, description: $description',
       );
+      print(
+        'DEBUG: Sender display name: "${widget.user.displayName}" (driverKey: ${widget.user.driverId ?? widget.user.id})',
+      );
 
       // Call API to save fund transfer
-      final financeRepository = FinanceRepository();
-      await financeRepository.submitFundTransfer(
+      await _financeRepository.submitFundTransfer(
         driverId: _selectedDriverId!,
         senderId: senderId,
         amount: amount,
         description: description,
+        senderName: widget.user.displayName,
       );
 
       // Clear form
@@ -1840,25 +2139,99 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           for (var driver in driversData) {
             print('DEBUG: - ${driver['name']} (ID: ${driver['id']})');
           }
+          if (!mounted) return;
           setState(() {
+            _driverLoadErrorMessage = null;
             _driversList = driversData.cast<Map<String, dynamic>>();
+            _filteredDriversList = List.from(_driversList);
+            _driverNameCache
+              ..clear()
+              ..addEntries(
+                _driversList.map(
+                  (driver) => MapEntry(
+                    driver['id'].toString(),
+                    driver['name'].toString(),
+                  ),
+                ),
+              );
+            _ensureCurrentUserCached();
           });
         } else {
           print('DEBUG: API returned error: ${data['error']}');
-          _setFallbackDrivers();
+          _handleDriverLoadFailure(data['error']?.toString());
         }
       } else {
         print('API request failed with status: ${response.statusCode}');
-        _setFallbackDrivers();
+        _handleDriverLoadFailure(
+          'Request failed with status ${response.statusCode}',
+        );
       }
     } catch (e) {
       print('Error loading drivers: $e');
-      _setFallbackDrivers();
+      _handleDriverLoadFailure(e.toString());
     }
 
-    // Initialize filtered list
-    _filteredDriversList = List.from(_driversList);
     print('DEBUG: Drivers loaded at page start, total: ${_driversList.length}');
+  }
+
+  Future<void> _loadTransactionDescriptions() async {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _isDescriptionLoading = true;
+      _descriptionLoadError = null;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/get_transaction_descriptions.php',
+        ),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['status'] == 'ok') {
+          final descriptions = (data['descriptions'] as List<dynamic>? ?? [])
+              .map((item) => item.toString())
+              .where((item) => item.trim().isNotEmpty)
+              .toList(growable: false);
+          if (!mounted) return;
+          setState(() {
+            _descriptionOptions = descriptions;
+          });
+        } else {
+          final errorMessage =
+              data['error']?.toString() ?? 'Unable to load descriptions';
+          if (!mounted) return;
+          setState(() {
+            _descriptionLoadError = errorMessage;
+            _descriptionOptions = const <String>[];
+          });
+        }
+      } else {
+        if (!mounted) return;
+        setState(() {
+          _descriptionLoadError =
+              'Request failed with status ${response.statusCode}';
+          _descriptionOptions = const <String>[];
+        });
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _descriptionLoadError = 'Failed to load descriptions: $error';
+        _descriptionOptions = const <String>[];
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDescriptionLoading = false;
+        });
+      }
+    }
   }
 
   void _filterDrivers(String searchText) {
@@ -1879,25 +2252,37 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     }
 
     // Immediate setState for real-time results
+    if (!mounted) return;
     setState(() {});
   }
 
-  void _selectDriver(Map<String, dynamic> driver) {
+  void _selectDriver(
+    Map<String, dynamic> driver, {
+    StateSetter? dialogSetState,
+  }) {
     print('DEBUG: Driver selected: ${driver['name']}');
     _selectedDriverId = driver['id'].toString();
     _selectedDriverName = driver['name'];
     _driverSearchController.text = driver['name'];
     _showDriverList = false;
+    dialogSetState?.call(() {});
+    if (!mounted) return;
     setState(() {});
   }
 
-  void _setFallbackDrivers() {
+  void _handleDriverLoadFailure([String? message]) {
+    if (!mounted) {
+      return;
+    }
+    final errorMessage = (message != null && message.trim().isNotEmpty)
+        ? message.trim()
+        : 'Unable to load drivers. Please try again later.';
     setState(() {
-      _driversList = [
-        {'id': 1, 'name': 'Test Driver 1'},
-        {'id': 2, 'name': 'Test Driver 2'},
-        {'id': 3, 'name': 'Test Driver 3'},
-      ];
+      _driverLoadErrorMessage = errorMessage;
+      _driversList = [];
+      _filteredDriversList = [];
+      _driverNameCache.clear();
+      _ensureCurrentUserCached();
     });
   }
 

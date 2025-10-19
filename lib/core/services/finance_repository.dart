@@ -315,18 +315,24 @@ class FinanceRepository {
     required String senderId,
     required double amount,
     required String description,
+    String? senderName,
   }) async {
     print(
-      'DEBUG: FinanceRepository.submitFundTransfer called - driverId: $driverId, senderId: $senderId, amount: $amount',
+      'DEBUG: FinanceRepository.submitFundTransfer called - driverId: $driverId, senderId: $senderId, amount: $amount, senderName: $senderName',
     );
     print('DEBUG: API endpoint: $_fundTransferEndpoint');
 
-    final requestBody = jsonEncode(<String, dynamic>{
+    final trimmedSenderName = senderName?.trim();
+    final requestPayload = <String, dynamic>{
       'driverId': driverId,
       'senderId': senderId,
       'amount': amount,
       'description': description,
-    });
+    };
+    if (trimmedSenderName != null && trimmedSenderName.isNotEmpty) {
+      requestPayload['senderName'] = trimmedSenderName;
+    }
+    final requestBody = jsonEncode(requestPayload);
     print('DEBUG: Request body: $requestBody');
 
     final response = await _client.post(

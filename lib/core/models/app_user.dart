@@ -30,6 +30,7 @@ class AppUser {
     this.fatherName,
     this.address,
     this.vehicleNumber,
+    this.driverRole,
     this.availableVehicles = const <DriverVehicle>[],
     this.joiningDate,
     this.supervisorName,
@@ -63,6 +64,7 @@ class AppUser {
   final String? fatherName;
   final String? address;
   final String? vehicleNumber;
+  final String? driverRole;
   final List<DriverVehicle> availableVehicles;
   final DateTime? joiningDate;
   final String? supervisorName;
@@ -97,6 +99,7 @@ class AppUser {
       'fatherName': fatherName,
       'address': address,
       'vehicleNumber': vehicleNumber,
+      'driverRole': driverRole,
       'availableVehicles': availableVehicles.map((v) => v.toJson()).toList(),
       'joiningDate': joiningDate?.toIso8601String(),
       'supervisorName': supervisorName,
@@ -133,6 +136,7 @@ class AppUser {
       fatherName: json['fatherName'] as String?,
       address: json['address'] as String?,
       vehicleNumber: json['vehicleNumber'] as String?,
+      driverRole: json['driverRole'] as String?,
       availableVehicles: (json['availableVehicles'] as List<dynamic>?)
           ?.map((v) => DriverVehicle.fromJson(v as Map<String, dynamic>))
           .toList() ?? [],

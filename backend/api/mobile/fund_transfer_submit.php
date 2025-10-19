@@ -24,6 +24,14 @@ $driverId = apiSanitizeInt($data['driverId'] ?? null);
 $amount = (float)($data['amount'] ?? 0);
 $description = trim($data['description'] ?? '');
 $senderId = apiSanitizeInt($data['senderId'] ?? null); // Who is sending the money
+$requestSenderName = '';
+if (isset($data['senderName'])) {
+    $requestSenderName = trim((string) $data['senderName']);
+    $requestSenderName = strip_tags($requestSenderName);
+    if ($requestSenderName !== '') {
+        $requestSenderName = preg_replace('/\s+/', ' ', $requestSenderName);
+    }
+}
 
 if (!$driverId) {
     apiRespond(400, ['status' => 'error', 'error' => 'driverId is required']);
@@ -71,7 +79,7 @@ try {
     error_log("DEBUG: Fund transfer API called - driverId: $driverId, senderId: $senderId, amount: $amount, description: $description");
 
     // Verify receiver driver exists
-    $driverStmt = $conn->prepare("SELECT id, `$nameColumn` as name FROM drivers WHERE id = ? LIMIT 1");
+    $driverStmt = $conn->prepare("SELECT * FROM drivers WHERE id = ? LIMIT 1");
     $driverStmt->bind_param('i', $driverId);
     $driverStmt->execute();
     $driverResult = $driverStmt->get_result();
@@ -87,7 +95,7 @@ try {
     }
 
     // Verify sender driver exists and get name - try multiple columns
-    $senderStmt = $conn->prepare("SELECT id, `$nameColumn` as name, driver_name, full_name FROM drivers WHERE id = ? LIMIT 1");
+    $senderStmt = $conn->prepare("SELECT * FROM drivers WHERE id = ? LIMIT 1");
     $senderStmt->bind_param('i', $senderId);
     $senderStmt->execute();
     $senderResult = $senderStmt->get_result();
@@ -100,7 +108,7 @@ try {
     
     // Additional debug: Check what columns were actually returned
     if ($senderData) {
-        $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_COLUMNS: name='" . ($senderData['name'] ?? 'NULL') . "', driver_name='" . ($senderData['driver_name'] ?? 'NULL') . "', full_name='" . ($senderData['full_name'] ?? 'NULL') . "'\n";
+        $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_COLUMNS: name='" . ($senderData['name'] ?? 'NULL') . "', driver_name='" . ($senderData['driver_name'] ?? 'NULL') . "', full_name='" . ($senderData['full_name'] ?? 'NULL') . "', first_name='" . ($senderData['first_name'] ?? 'NULL') . "', last_name='" . ($senderData['last_name'] ?? 'NULL') . "'\n";
         error_log($debugMsg);
         file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
     }
@@ -110,19 +118,63 @@ try {
     }
 
     // Debug: Check if sender name exists and provide fallback
-    $senderName = $senderData['name'] ?? $senderData['driver_name'] ?? $senderData['full_name'] ?? "Driver ID $senderId";
-    
-    // Clean up the name
-    $senderName = trim($senderName);
-    if (empty($senderName) || $senderName === 'null') {
+    $senderName = null;
+    $senderNameCandidates = [
+        $senderData[$nameColumn] ?? null,
+        $senderData['name'] ?? null,
+        $senderData['driver_name'] ?? null,
+        $senderData['full_name'] ?? null,
+        isset($senderData['first_name']) || isset($senderData['last_name'])
+            ? trim(
+                ($senderData['first_name'] ?? '') .
+                ' ' .
+                ($senderData['last_name'] ?? ''),
+            )
+            : null,
+        $requestSenderName !== '' ? $requestSenderName : null,
+        "Driver ID $senderId"
+    ];
+    $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_NAME_CANDIDATES: " . json_encode($senderNameCandidates) . "\n";
+    error_log($debugMsg);
+    file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+    foreach ($senderNameCandidates as $candidate) {
+        if ($candidate === null) {
+            continue;
+        }
+        $candidate = trim((string) $candidate);
+        if ($candidate === '') {
+            continue;
+        }
+        $normalized = strtolower($candidate);
+        if (
+            $normalized === 'null' ||
+            $normalized === 'sender' ||
+            $normalized === 'receiver' ||
+            $normalized === 'na' ||
+            $normalized === 'n/a' ||
+            $normalized === 'driver'
+        ) {
+            $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_NAME_SKIPPED_PLACEHOLDER: '$candidate'\n";
+            error_log($debugMsg);
+            file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
+            continue;
+        }
+        $senderName = $candidate;
+        break;
+    }
+    if ($senderName === null) {
         $senderName = "Driver ID $senderId";
     }
-    
+
     $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_NAME_EXTRACTED: '$senderName'\n";
     error_log($debugMsg);
     file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
 
     // Debug: Log the final description that will be used
+    $receiverName = trim((string)($driverData[$nameColumn] ?? $driverData['name'] ?? "Driver ID $driverId"));
+    if ($receiverName === '') {
+        $receiverName = "Driver ID $driverId";
+    }
     $finalReceiverDesc = "Fund transfer from {$senderName} - $description";
     $debugMsg = "[" . date('Y-m-d H:i:s') . "] RECEIVER_DESCRIPTION: '$finalReceiverDesc'\n";
     error_log($debugMsg);
@@ -199,7 +251,7 @@ try {
 
         // 2. Insert transaction for SENDER - they spend money
         $senderType = 'expense';
-        $senderDesc = "Fund transfer to {$driverData['name']} - $description";
+        $senderDesc = "Fund transfer to {$receiverName} - $description";
         
         error_log("DEBUG: Sender transaction params - senderId: " . gettype($senderId) . " = $senderId, amount: " . gettype($amount) . " = $amount");
         
@@ -233,9 +285,9 @@ try {
             'receiverTransactionId' => (int)$receiverTransactionId,
             'senderTransactionId' => (int)$senderTransactionId,
             'driverId' => $driverId,
-            'driverName' => $driverData['name'],
+            'driverName' => $receiverName,
             'senderId' => $senderId,
-            'senderName' => $senderData['name'],
+            'senderName' => $senderName,
             'amount' => $amount,
             'description' => $description,
             'createdAt' => $createdAt,

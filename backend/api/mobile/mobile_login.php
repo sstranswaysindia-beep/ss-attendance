@@ -13,6 +13,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require __DIR__ . '/common.php';
 
+$loginLogDir = __DIR__ . '/logs';
+if (!is_dir($loginLogDir)) {
+    @mkdir($loginLogDir, 0775, true);
+}
+$loginLogFile = is_dir($loginLogDir) ? $loginLogDir . '/mobile_login.log' : null;
+
+function mobileLoginLog(string $message): void {
+    global $loginLogFile;
+    if (!$loginLogFile) {
+        return;
+    }
+    $line = sprintf("[%s] %s\n", gmdate('c'), $message);
+    @error_log($line, 3, $loginLogFile);
+}
+
 $raw = file_get_contents('php://input');
 $data = json_decode($raw ?: '', true);
 if (!is_array($data)) {
@@ -23,6 +38,7 @@ $username = trim($data['username'] ?? '');
 $password = $data['password'] ?? '';
 
 if ($username === '' || $password === '') {
+    mobileLoginLog('FAIL missing_credentials ' . json_encode(['username' => $username], JSON_UNESCAPED_SLASHES));
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
@@ -33,6 +49,7 @@ $userRow = $stmt->get_result()->fetch_assoc();
 $stmt->close();
 
 if (!$userRow) {
+    mobileLoginLog('FAIL invalid_credentials ' . json_encode(['username' => $username], JSON_UNESCAPED_SLASHES));
     apiRespond(401, ['status' => 'error', 'error' => 'invalid_credentials']);
 }
 
@@ -40,8 +57,11 @@ $isValid = password_verify($password, $userRow['password'])
     || hash('sha256', $password) === $userRow['password'];
 
 if (!$isValid) {
+    mobileLoginLog('FAIL invalid_credentials ' . json_encode(['username' => $username], JSON_UNESCAPED_SLASHES));
     apiRespond(401, ['status' => 'error', 'error' => 'invalid_credentials']);
 }
+
+$role = strtolower(trim((string)($userRow['role'] ?? '')));
 
 if (hash('sha256', $password) === $userRow['password']) {
     $newHash = password_hash($password, PASSWORD_DEFAULT);
@@ -51,12 +71,48 @@ if (hash('sha256', $password) === $userRow['password']) {
     $upgrade->close();
 }
 
+$driverStatus = null;
+if (!empty($userRow['driver_id'])) {
+    $statusStmt = $conn->prepare('SELECT status FROM drivers WHERE id = ? LIMIT 1');
+    if ($statusStmt) {
+        $statusStmt->bind_param('i', $userRow['driver_id']);
+        $statusStmt->execute();
+        $driverStatus = $statusStmt->get_result()->fetch_column();
+        $statusStmt->close();
+    }
+}
+
+$attemptContext = [
+    'username' => $userRow['username'],
+    'role' => $role,
+    'driver_id' => $userRow['driver_id'] ?? null,
+    'driver_status' => $driverStatus,
+];
+mobileLoginLog('ATTEMPT ' . json_encode($attemptContext, JSON_UNESCAPED_SLASHES));
+
+if ($role === 'driver') {
+    if ($driverStatus === null) {
+        mobileLoginLog('FAIL driver_not_found ' . json_encode($attemptContext, JSON_UNESCAPED_SLASHES));
+        apiRespond(403, ['status' => 'error', 'error' => 'driver_not_found']);
+    }
+    $normalizedStatus = strtolower(trim((string) $driverStatus));
+    if ($normalizedStatus !== 'active') {
+        $attemptContext['normalized_status'] = $normalizedStatus;
+        mobileLoginLog('FAIL driver_inactive ' . json_encode($attemptContext, JSON_UNESCAPED_SLASHES));
+        apiRespond(403, [
+            'status' => 'error',
+            'error' => 'driver_inactive',
+            'message' => 'You are not authorised to login, Contact admin',
+        ]);
+    }
+}
+
 $driverInfo = null;
 $vehicles = [];
 $supervisorInfo = null;
 
 // Handle supervisors - fetch supervised plants and create driver record if needed
-if (strcasecmp($userRow['role'], 'supervisor') === 0) {
+if ($role === 'supervisor') {
     $supervisedPlants = [];
     $supervisedPlantIds = [];
     
@@ -247,7 +303,7 @@ if (!empty($userRow['driver_id'])) {
 
         // For supervisors, keep vehicles from all supervised plants
         // For drivers, fetch vehicles from assigned plant only
-        if ($effectivePlantId && $userRow['role'] !== 'supervisor') {
+        if ($effectivePlantId && $role !== 'supervisor') {
             $vehicleStmt = $conn->prepare(
                 'SELECT id, vehicle_no FROM vehicles WHERE plant_id = ? ORDER BY vehicle_no'
             );
@@ -336,6 +392,14 @@ if (!empty($userRow['driver_id'])) {
         ];
     }
 }
+
+$successContext = [
+    'username' => $userRow['username'],
+    'role' => $role,
+    'driver_id' => $driverInfo['driverId'] ?? ($userRow['driver_id'] ?? null),
+    'driver_status' => $driverInfo['status'] ?? $driverStatus,
+];
+mobileLoginLog('SUCCESS ' . json_encode($successContext, JSON_UNESCAPED_SLASHES));
 
 apiRespond(200, [
     'status' => 'ok',

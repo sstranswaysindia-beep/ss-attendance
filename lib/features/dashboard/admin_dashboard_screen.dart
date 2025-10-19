@@ -6,7 +6,7 @@ import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_history_screen.dart';
-import '../statistics/monthly_statistics_screen.dart';
+import '../statistics/admin_attendance_overview_screen.dart';
 import '../attendance/attendance_log_screen.dart';
 import '../finance/advance_salary_screen.dart';
 
@@ -84,7 +84,8 @@ class AdminDashboardScreen extends StatelessWidget {
                     icon: Icons.insights,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => MonthlyStatisticsScreen(user: user),
+                        builder: (_) =>
+                            AdminAttendanceOverviewScreen(user: user),
                       ),
                     ),
                   ),
