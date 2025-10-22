@@ -42,7 +42,7 @@ if ($username === '' || $password === '') {
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
-$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name FROM users WHERE username = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document FROM users WHERE username = ? LIMIT 1');
 $stmt->bind_param('s', $username);
 $stmt->execute();
 $userRow = $stmt->get_result()->fetch_assoc();
@@ -408,6 +408,7 @@ apiRespond(200, [
         'username' => $userRow['username'],
         'role'     => $userRow['role'],
         'full_name' => $userRow['full_name'],
+        'view_document' => $userRow['view_document'] ?? null,
     ],
     'driver' => $driverInfo,
     'supervisor' => $supervisorInfo,

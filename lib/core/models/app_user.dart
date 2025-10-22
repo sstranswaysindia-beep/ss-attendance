@@ -36,6 +36,7 @@ class AppUser {
     this.supervisorName,
     this.supervisedPlants = const <Map<String, dynamic>>[],
     this.supervisedPlantIds = const <dynamic>[],
+    this.canViewDocuments = false,
   });
 
   final String id;
@@ -70,6 +71,7 @@ class AppUser {
   final String? supervisorName;
   final List<Map<String, dynamic>> supervisedPlants;
   final List<dynamic> supervisedPlantIds;
+  final bool canViewDocuments;
 
   Map<String, dynamic> toJson() {
     return {
@@ -105,6 +107,7 @@ class AppUser {
       'supervisorName': supervisorName,
       'supervisedPlants': supervisedPlants,
       'supervisedPlantIds': supervisedPlantIds,
+      'canViewDocuments': canViewDocuments,
     };
   }
 
@@ -147,6 +150,7 @@ class AppUser {
       supervisedPlants: (json['supervisedPlants'] as List<dynamic>?)
           ?.cast<Map<String, dynamic>>() ?? [],
       supervisedPlantIds: json['supervisedPlantIds'] as List<dynamic>? ?? [],
+      canViewDocuments: json['canViewDocuments'] == true,
     );
   }
 }

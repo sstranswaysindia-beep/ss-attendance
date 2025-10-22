@@ -14,9 +14,12 @@ import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/profile_repository.dart';
+import '../../core/services/app_update_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/profile_photo_widget.dart';
+import '../meter/meter_reading_sheet.dart';
+import '../../core/widgets/update_available_sheet.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
@@ -55,6 +58,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
   final ProfileRepository _profileRepository = ProfileRepository();
+  final AppUpdateService _appUpdateService = AppUpdateService();
   GpsPingService? _gpsPingService;
 
   AttendanceRecord? _latestShift;
@@ -70,6 +74,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     _NotificationItem(message: 'Loading...', type: NotificationType.info),
   ];
   String? _appVersion;
+  bool _hasPromptedForUpdate = false;
 
   @override
   void initState() {
@@ -111,6 +116,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     _loadActiveShift();
     _loadNotifications();
     _loadAppVersion();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForAppUpdate();
+    });
 
     _gpsPingService =
         GpsPingService(user: widget.user, repository: _gpsPingRepository)
@@ -136,6 +144,43 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       _selectedVehicleId = vehicle.id;
       _selectedVehicleNumber = vehicle.vehicleNumber;
     });
+  }
+
+  Future<void> _openMeterReadingSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => MeterReadingSheet(user: widget.user),
+    );
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    if (_hasPromptedForUpdate) {
+      return;
+    }
+
+    final status = await _appUpdateService.checkForUpdate();
+    if (!mounted || !status.isUpdateAvailable) {
+      return;
+    }
+
+    _hasPromptedForUpdate = true;
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: false,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => UpdateAvailableSheet(
+        packageName: AppUpdateService.androidPackageName,
+        availableVersionCode: status.availableVersionCode,
+        onDismissed: () {},
+      ),
+    );
   }
 
   Future<void> _openVehiclePicker() async {
@@ -592,6 +637,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
           ),
         ),
         actions: [
+          IconButton(
+            tooltip: 'Meter reading',
+            onPressed: _openMeterReadingSheet,
+            icon: const Icon(Icons.speed),
+          ),
           IconButton(
             onPressed: () {
               widget.onLogout();

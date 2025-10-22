@@ -72,6 +72,8 @@ class AuthRepository {
       await _sendFCMTokenToServer(userJson['id']?.toString() ?? username);
 
       final role = _parseRole(userJson['role']?.toString());
+      final bool canViewDocuments =
+          _parseFlag(userJson['view_document'] ?? userJson['viewDocument']);
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
@@ -94,6 +96,7 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
+          canViewDocuments: canViewDocuments,
         );
       }
 
@@ -157,6 +160,7 @@ class AuthRepository {
           supervisedPlants: supervisedPlants,
           supervisedPlantIds: supervisedPlantIds,
           availableVehicles: vehicles,
+          canViewDocuments: canViewDocuments,
         );
       }
 
@@ -263,6 +267,7 @@ class AuthRepository {
                 .cast<Map<String, dynamic>>(),
         supervisedPlantIds:
             supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
+        canViewDocuments: canViewDocuments,
       );
     } on AuthFailure {
       rethrow;
@@ -282,6 +287,20 @@ class AuthRepository {
       default:
         return UserRole.driver;
     }
+  }
+
+  bool _parseFlag(dynamic raw) {
+    if (raw == null) {
+      return false;
+    }
+    if (raw is bool) {
+      return raw;
+    }
+    final normalized = raw.toString().trim().toLowerCase();
+    return normalized == 'y' ||
+        normalized == 'yes' ||
+        normalized == '1' ||
+        normalized == 'true';
   }
 
   /// Send FCM token to server for push notifications

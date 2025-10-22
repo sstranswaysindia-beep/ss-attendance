@@ -9,6 +9,7 @@ import '../../core/models/app_user.dart';
 import '../../core/models/advance_request.dart';
 import '../../core/models/attendance_record.dart';
 import '../../core/services/approvals_repository.dart';
+import '../../core/services/app_update_service.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
@@ -16,18 +17,23 @@ import '../../core/services/gps_ping_service.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/profile_photo_widget.dart';
+import '../../core/models/document_models.dart';
+import '../../core/services/documents_repository.dart';
+import '../../core/widgets/update_available_sheet.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
+import '../meter/meter_reading_sheet.dart';
 import '../profile/driver_profile_screen.dart';
 import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
 import '../attendance/attendance_log_screen.dart';
+import '../documents/documents_hub_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
 
@@ -52,6 +58,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   final ApprovalsRepository _approvalsRepository = ApprovalsRepository();
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
+  final DocumentsRepository _documentsRepository = DocumentsRepository();
+  final AppUpdateService _appUpdateService = AppUpdateService();
   GpsPingService? _gpsPingService;
 
   late DateTime _now;
@@ -66,6 +74,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   bool _isLoadingShift = true;
   String? _shiftSummary;
   String? _appVersion;
+  DocumentOverviewData? _documentsOverview;
+  bool _isLoadingDocumentsOverview = false;
+  String? _documentsOverviewError;
+  bool _hasPromptedForUpdate = false;
 
   @override
   void initState() {
@@ -86,6 +98,12 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     _loadActiveShift();
     _loadNotifications();
     _loadAppVersion();
+    if (widget.user.canViewDocuments) {
+      _loadDocumentsOverview();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForAppUpdate();
+    });
 
     _gpsPingService =
         GpsPingService(user: widget.user, repository: _gpsPingRepository)
@@ -200,6 +218,131 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       });
     }
   }
+
+  Future<void> _openMeterReadingSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (context) => MeterReadingSheet(user: widget.user),
+    );
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    if (_hasPromptedForUpdate) {
+      return;
+    }
+
+    final status = await _appUpdateService.checkForUpdate();
+    if (!mounted || !status.isUpdateAvailable) {
+      return;
+    }
+
+    _hasPromptedForUpdate = true;
+    if (!mounted) {
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: false,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => UpdateAvailableSheet(
+        packageName: AppUpdateService.androidPackageName,
+        availableVersionCode: status.availableVersionCode,
+        onDismissed: () {},
+      ),
+    );
+  }
+
+  Future<void> _loadDocumentsOverview({bool silent = false}) async {
+    if (!widget.user.canViewDocuments) {
+      return;
+    }
+    setState(() {
+      _isLoadingDocumentsOverview = true;
+      if (!silent) {
+        _documentsOverviewError = null;
+      }
+    });
+    try {
+      final overview = await _documentsRepository.fetchOverview(
+        userId: widget.user.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _documentsOverview = overview;
+        _documentsOverviewError = null;
+      });
+    } on DocumentFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _documentsOverviewError = error.message;
+      });
+      if (!silent) {
+        showAppToast(context, error.message, isError: true);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      const fallback = 'Unable to load documents summary.';
+      setState(() {
+        _documentsOverviewError = fallback;
+      });
+      if (!silent) {
+        showAppToast(context, fallback, isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingDocumentsOverview = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openDocumentsHub() async {
+    if (!widget.user.canViewDocuments) {
+      return;
+    }
+    final result = await Navigator.of(context).push<DocumentOverviewData>(
+      MaterialPageRoute(
+        builder: (_) => DocumentsHubScreen(
+          user: widget.user,
+          initialData: _documentsOverview,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (result != null) {
+      setState(() {
+        _documentsOverview = result;
+        _documentsOverviewError = null;
+      });
+    }
+    _loadDocumentsOverview(silent: true);
+  }
+
+  String get _documentsTileSubtitle {
+    if (_isLoadingDocumentsOverview && _documentsOverview == null) {
+      return 'Loading summary…';
+    }
+    if (_documentsOverview != null) {
+      final counts = _documentsOverview!.totalCounts;
+      final base =
+          'Due Soon: ${_twoDigits(counts.dueSoon)}   Expired: ${_twoDigits(counts.expired)}';
+      if (_documentsOverviewError != null) {
+        return '$base • Refresh needed';
+      }
+      return base;
+    }
+    if (_documentsOverviewError != null) {
+      return 'Tap to refresh • ${_documentsOverviewError!}';
+    }
+    return 'Tap to open documents hub';
+  }
+
+  String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
   void _openAverageCalculator() {
     Navigator.of(context).push(
@@ -329,6 +472,11 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       appBar: AppBar(
         title: const Text('Supervisor Dashboard'),
         actions: [
+          IconButton(
+            tooltip: 'Meter reading',
+            onPressed: _openMeterReadingSheet,
+            icon: const Icon(Icons.speed),
+          ),
           IconButton(
             onPressed: () {
               widget.onLogout();
@@ -583,6 +731,25 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                             )
                             .then((_) => _loadNotifications()),
                       ),
+                      if (widget.user.canViewDocuments) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.description_outlined),
+                          title: const Text('Documents'),
+                          subtitle: Text(
+                            _documentsTileSubtitle,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          onTap: () {
+                            if (_isLoadingDocumentsOverview &&
+                                _documentsOverview == null) {
+                              _loadDocumentsOverview();
+                              return;
+                            }
+                            _openDocumentsHub();
+                          },
+                        ),
+                      ],
                       const Divider(height: 0),
                       HoverListTile(
                         leading: const Icon(Icons.payments),
