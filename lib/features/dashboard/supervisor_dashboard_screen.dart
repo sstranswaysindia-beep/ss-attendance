@@ -15,10 +15,12 @@ import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/finance_repository.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/models/document_models.dart';
 import '../../core/services/documents_repository.dart';
+import '../../core/widgets/in_app_notification_banner.dart';
 import '../../core/widgets/update_available_sheet.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
@@ -32,7 +34,6 @@ import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
-import '../attendance/attendance_log_screen.dart';
 import '../documents/documents_hub_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
@@ -67,12 +68,17 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
 
-  List<_SupervisorNotification> _notifications = const [
+  List<_SupervisorNotification> _systemNotifications = const [
     _SupervisorNotification(message: 'Loading...', type: NotificationType.info),
   ];
+  final List<_SupervisorNotification> _pushNotifications = [];
+  StreamSubscription<InAppNotificationData>? _pushNotificationSubscription;
+  StreamSubscription<List<InAppNotificationData>>?
+  _pushNotificationListSubscription;
   AttendanceRecord? _latestShift;
   bool _isLoadingShift = true;
   String? _shiftSummary;
+  bool _isAttendanceLockedToday = false;
   String? _appVersion;
   DocumentOverviewData? _documentsOverview;
   bool _isLoadingDocumentsOverview = false;
@@ -83,6 +89,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   void initState() {
     super.initState();
     _now = DateTime.now();
+    _initializePushNotifications();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       setState(() => _now = DateTime.now());
     });
@@ -121,10 +128,104 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     _ticker?.cancel();
     _glowController.dispose();
     _gpsPingService?.stop();
+    _pushNotificationSubscription?.cancel();
+    _pushNotificationListSubscription?.cancel();
     super.dispose();
   }
 
+  void _initializePushNotifications() {
+    final notificationService = NotificationService();
+    final recent = notificationService.recentInAppNotifications;
+    if (recent.isNotEmpty) {
+      _pushNotifications
+        ..clear()
+        ..addAll(recent.map(_mapPushNotification));
+    }
+
+    _pushNotificationSubscription = notificationService.inAppNotifications
+        .listen((notification) {
+          if (!mounted) return;
+          setState(() {
+            _pushNotifications.insert(0, _mapPushNotification(notification));
+            _systemNotifications = _systemNotifications
+                .where((item) => !item.isPlaceholder)
+                .toList(growable: false);
+          });
+        });
+    _pushNotificationListSubscription = notificationService
+        .inAppNotificationList
+        .listen((notifications) {
+          if (!mounted) return;
+          setState(() {
+            _pushNotifications
+              ..clear()
+              ..addAll(notifications.map(_mapPushNotification));
+            _systemNotifications = _systemNotifications
+                .where((item) => !item.isPlaceholder)
+                .toList(growable: false);
+          });
+        });
+  }
+
+  _SupervisorNotification _mapPushNotification(
+    InAppNotificationData notification,
+  ) {
+    final fallbackMessage = notification.body.isNotEmpty
+        ? notification.body
+        : (notification.data['body']?.toString() ??
+              notification.data['message']?.toString() ??
+              'Notification received.');
+    return _SupervisorNotification(
+      title: notification.title,
+      message: fallbackMessage,
+      type: NotificationType.alert,
+      timestamp: notification.receivedAt,
+      metadata: notification.data,
+      isPush: true,
+    );
+  }
+
+  Future<void> _showNotificationDetails(_SupervisorNotification item) {
+    if (item.isPlaceholder) {
+      return Future.value();
+    }
+    final detailMessage = _resolveNotificationMessage(item);
+    return showNotificationDetailDialog(
+      context,
+      title: item.title,
+      message: detailMessage,
+      timestamp: item.timestamp,
+    );
+  }
+
+  String _resolveNotificationMessage(_SupervisorNotification item) {
+    if (item.message.trim().isNotEmpty) {
+      return item.message;
+    }
+    final metadata = item.metadata;
+    if (metadata == null || metadata.isEmpty) {
+      return 'Notification received.';
+    }
+    return metadata['body']?.toString() ??
+        metadata['message']?.toString() ??
+        metadata.values.map((value) => value?.toString() ?? '').join('\n');
+  }
+
+  String? _formatNotificationTime(DateTime? timestamp) {
+    if (timestamp == null) return null;
+    return DateFormat('hh:mm a').format(timestamp);
+  }
+
   Future<void> _loadNotifications() async {
+    setState(() {
+      _systemNotifications = const [
+        _SupervisorNotification(
+          message: 'Loading...',
+          type: NotificationType.info,
+        ),
+      ];
+    });
+
     try {
       final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final driverId = widget.user.driverId;
@@ -179,21 +280,22 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
           ),
         );
       }
-      if (items.isEmpty) {
+      if (items.isEmpty && _pushNotifications.isEmpty) {
         items.add(
           const _SupervisorNotification(
             message: 'No pending driver notifications.',
             type: NotificationType.info,
+            isPlaceholder: true,
           ),
         );
       }
       if (mounted) {
-        setState(() => _notifications = items);
+        setState(() => _systemNotifications = items);
       }
     } catch (_) {
-      if (mounted && _notifications.isEmpty) {
+      if (mounted && _systemNotifications.isEmpty) {
         setState(
-          () => _notifications = const [
+          () => _systemNotifications = const [
             _SupervisorNotification(
               message: 'Unable to fetch latest notifications.',
               type: NotificationType.info,
@@ -389,6 +491,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         _isLoadingShift = false;
         _latestShift = null;
         _shiftSummary = null;
+        _isAttendanceLockedToday = false;
       });
       return;
     }
@@ -402,25 +505,29 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       );
       if (!mounted) return;
 
+      bool attendanceLocked = false;
+      String? summary;
+      if (record != null) {
+        final inTime = _parseDate(record.inTime);
+        final outTime = _parseDate(record.outTime);
+        if (inTime != null &&
+            (record.outTime == null || record.outTime!.isEmpty)) {
+          summary =
+              'Checked in at ${DateFormat('dd MMM • HH:mm').format(inTime)}';
+        } else if (outTime != null) {
+          summary =
+              'Last check-out ${DateFormat('dd MMM • HH:mm').format(outTime)}';
+        }
+        if (inTime != null && _isSameDay(inTime, now)) {
+          attendanceLocked = outTime != null;
+        }
+      }
+
       setState(() {
         _latestShift = record;
         _isLoadingShift = false;
-        if (record != null) {
-          final inTime = _parseDate(record.inTime);
-          final outTime = _parseDate(record.outTime);
-          if (inTime != null &&
-              (record.outTime == null || record.outTime!.isEmpty)) {
-            _shiftSummary =
-                'Checked in at ${DateFormat('dd MMM • HH:mm').format(inTime)}';
-          } else if (outTime != null) {
-            _shiftSummary =
-                'Last check-out ${DateFormat('dd MMM • HH:mm').format(outTime)}';
-          } else {
-            _shiftSummary = null;
-          }
-        } else {
-          _shiftSummary = null;
-        }
+        _shiftSummary = summary;
+        _isAttendanceLockedToday = attendanceLocked;
       });
     } catch (_) {
       if (!mounted) return;
@@ -428,6 +535,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         _isLoadingShift = false;
         _latestShift = null;
         _shiftSummary = null;
+        _isAttendanceLockedToday = false;
       });
     }
   }
@@ -453,12 +561,23 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     return outTimeRaw == null || outTimeRaw.isEmpty;
   }
 
-  String get _attendanceButtonLabel =>
-      _hasOpenShift ? 'Check-out Pending' : 'Mark Attendance';
+  String get _attendanceButtonLabel {
+    if (_isLoadingShift) {
+      return 'Mark Attendance';
+    }
+    if (_hasOpenShift) {
+      return 'Check-out Pending';
+    }
+    if (_isAttendanceLockedToday) {
+      return 'Attendance Completed';
+    }
+    return 'Mark Attendance';
+  }
 
   @override
   Widget build(BuildContext context) {
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
     final dateFormatter = DateFormat('dd-MM-yyyy');
     final timeFormatter = DateFormat('HH:mm:ss');
     final user = widget.user;
@@ -467,6 +586,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     final tenureSubtitle = tenureText != null
         ? 'Working for $tenureText'
         : null;
+    final notifications = [..._pushNotifications, ..._systemNotifications];
 
     return Scaffold(
       appBar: AppBar(
@@ -534,18 +654,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => const NotificationSettingsScreen(),
-                    ),
-                  );
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.assignment),
-                title: const Text('Attendance API Log'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AttendanceLogScreen(user: user),
                     ),
                   );
                 },
@@ -651,19 +759,29 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 const SizedBox(height: 16),
                 GlowingAttendanceButton(
                   animation: _glowAnimation,
-                  onTap: () => Navigator.of(context)
-                      .push(
-                        MaterialPageRoute(
-                          builder: (_) => CheckInOutScreen(
-                            user: widget.user,
-                            availableVehicles: widget.user.availableVehicles,
+                  onTap: () {
+                    if (_isAttendanceLockedToday && !_hasOpenShift) {
+                      showAppToast(
+                        context,
+                        'Attendance already marked for today.',
+                        isError: false,
+                      );
+                      return;
+                    }
+                    Navigator.of(context)
+                        .push(
+                          MaterialPageRoute(
+                            builder: (_) => CheckInOutScreen(
+                              user: widget.user,
+                              availableVehicles: widget.user.availableVehicles,
+                            ),
                           ),
-                        ),
-                      )
-                      .then((_) {
-                        _loadActiveShift();
-                        _loadNotifications();
-                      }),
+                        )
+                        .then((_) {
+                          _loadActiveShift();
+                          _loadNotifications();
+                        });
+                  },
                   label: _attendanceButtonLabel,
                   gradient: _hasOpenShift
                       ? const LinearGradient(
@@ -671,13 +789,27 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         )
+                      : _isAttendanceLockedToday
+                      ? const LinearGradient(
+                          colors: [Color(0xFFB0BEC5), Color(0xFFECEFF1)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        )
                       : null,
-                  icon: _hasOpenShift ? Icons.access_time : Icons.check_circle,
+                  icon: _hasOpenShift
+                      ? Icons.access_time
+                      : _isAttendanceLockedToday
+                      ? Icons.verified
+                      : Icons.check_circle,
                   iconColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
+                      : _isAttendanceLockedToday
+                      ? const Color(0xFF37474F)
                       : Colors.white,
                   textColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
+                      : _isAttendanceLockedToday
+                      ? const Color(0xFF37474F)
                       : const Color(0xFF003300),
                 ),
                 if (_shiftSummary != null) ...[
@@ -688,6 +820,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 Text('Quick Links', style: textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Card(
+                  color: Colors.white,
+                  elevation: 2,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -815,17 +949,32 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 const SizedBox(height: 16),
                 Text('Notifications', style: textTheme.titleMedium),
                 const SizedBox(height: 8),
-                ..._notifications.map(
-                  (item) => Card(
+                ...notifications.map((item) {
+                  final hasTitle =
+                      item.title != null && item.title!.trim().isNotEmpty;
+                  final timeLabel = _formatNotificationTime(item.timestamp);
+                  return Card(
                     child: ListTile(
                       leading: Icon(
                         _notificationIcon(item.type),
                         color: _notificationColor(item.type),
                       ),
-                      title: Text(item.message),
+                      title: Text(hasTitle ? item.title!.trim() : item.message),
+                      subtitle: hasTitle ? Text(item.message) : null,
+                      trailing: timeLabel != null
+                          ? Text(
+                              timeLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.outline,
+                              ),
+                            )
+                          : null,
+                      onTap: item.isPlaceholder
+                          ? null
+                          : () => _showNotificationDetails(item),
                     ),
-                  ),
-                ),
+                  );
+                }),
                 // All supervisors show supervised plants (no vehicles)
                 const SizedBox(height: 16),
                 Text('Supervised Plants', style: textTheme.titleMedium),
@@ -841,10 +990,23 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 }
 
 class _SupervisorNotification {
-  const _SupervisorNotification({required this.message, required this.type});
+  const _SupervisorNotification({
+    required this.message,
+    required this.type,
+    this.title,
+    this.timestamp,
+    this.metadata,
+    this.isPush = false,
+    this.isPlaceholder = false,
+  });
 
+  final String? title;
   final String message;
+  final DateTime? timestamp;
+  final Map<String, dynamic>? metadata;
   final NotificationType type;
+  final bool isPush;
+  final bool isPlaceholder;
 }
 
 class _SupervisedPlantsCard extends StatelessWidget {
@@ -858,6 +1020,12 @@ class _SupervisedPlantsCard extends StatelessWidget {
 
     if (user.supervisedPlants.isEmpty) {
       return Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -889,6 +1057,12 @@ class _SupervisedPlantsCard extends StatelessWidget {
     }
 
     return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -942,6 +1116,8 @@ IconData _notificationIcon(NotificationType type) {
       return Icons.info;
     case NotificationType.warning:
       return Icons.warning;
+    case NotificationType.alert:
+      return Icons.notification_important;
   }
 }
 
@@ -953,5 +1129,7 @@ Color _notificationColor(NotificationType type) {
       return Colors.blueGrey;
     case NotificationType.warning:
       return Colors.orange;
+    case NotificationType.alert:
+      return Colors.redAccent;
   }
 }

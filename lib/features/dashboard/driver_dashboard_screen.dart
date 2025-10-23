@@ -15,10 +15,12 @@ import '../../core/services/gps_ping_repository.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/profile_repository.dart';
 import '../../core/services/app_update_service.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../meter/meter_reading_sheet.dart';
+import '../../core/widgets/in_app_notification_banner.dart';
 import '../../core/widgets/update_available_sheet.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
@@ -29,7 +31,6 @@ import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
-import '../attendance/attendance_log_screen.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({
@@ -70,9 +71,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
 
-  List<_NotificationItem> _notifications = const [
-    _NotificationItem(message: 'Loading...', type: NotificationType.info),
+  List<_NotificationItem> _systemNotifications = [
+    const _NotificationItem(message: 'Loading...', type: NotificationType.info),
   ];
+  final List<_NotificationItem> _pushNotifications = [];
+  StreamSubscription<InAppNotificationData>? _pushNotificationSubscription;
+  StreamSubscription<List<InAppNotificationData>>?
+  _pushNotificationListSubscription;
   String? _appVersion;
   bool _hasPromptedForUpdate = false;
 
@@ -80,6 +85,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   void initState() {
     super.initState();
     _now = DateTime.now();
+    _initializePushNotifications();
     _selectedVehicleNumber = widget.user.vehicleNumber;
     final vehicles = widget.user.availableVehicles;
     if (vehicles.isNotEmpty) {
@@ -136,7 +142,91 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     _ticker?.cancel();
     _glowController.dispose();
     _gpsPingService?.stop();
+    _pushNotificationSubscription?.cancel();
+    _pushNotificationListSubscription?.cancel();
     super.dispose();
+  }
+
+  void _initializePushNotifications() {
+    final notificationService = NotificationService();
+    final recent = notificationService.recentInAppNotifications;
+    if (recent.isNotEmpty) {
+      _pushNotifications
+        ..clear()
+        ..addAll(recent.map(_mapPushNotification));
+    }
+
+    _pushNotificationSubscription = notificationService.inAppNotifications
+        .listen((notification) {
+          if (!mounted) return;
+          setState(() {
+            _pushNotifications.insert(0, _mapPushNotification(notification));
+            _systemNotifications = _systemNotifications
+                .where((item) => !item.isPlaceholder)
+                .toList(growable: false);
+          });
+        });
+    _pushNotificationListSubscription = notificationService
+        .inAppNotificationList
+        .listen((notifications) {
+          if (!mounted) return;
+          setState(() {
+            _pushNotifications
+              ..clear()
+              ..addAll(notifications.map(_mapPushNotification));
+            _systemNotifications = _systemNotifications
+                .where((item) => !item.isPlaceholder)
+                .toList(growable: false);
+          });
+        });
+  }
+
+  _NotificationItem _mapPushNotification(InAppNotificationData notification) {
+    final fallbackMessage = notification.body.isNotEmpty
+        ? notification.body
+        : (notification.data['body']?.toString() ??
+              notification.data['message']?.toString() ??
+              'Notification received.');
+    return _NotificationItem(
+      title: notification.title,
+      message: fallbackMessage,
+      type: NotificationType.alert,
+      timestamp: notification.receivedAt,
+      metadata: notification.data,
+      isPush: true,
+    );
+  }
+
+  Future<void> _showNotificationDetails(_NotificationItem item) {
+    if (item.isPlaceholder) {
+      return Future.value();
+    }
+
+    final detailMessage = _resolveNotificationMessage(item);
+    return showNotificationDetailDialog(
+      context,
+      title: item.title,
+      message: detailMessage,
+      timestamp: item.timestamp,
+    );
+  }
+
+  String _resolveNotificationMessage(_NotificationItem item) {
+    if (item.message.trim().isNotEmpty) {
+      return item.message;
+    }
+    final metadata = item.metadata;
+    if (metadata == null || metadata.isEmpty) {
+      return 'Notification received.';
+    }
+    return metadata['body']?.toString() ??
+        metadata['message']?.toString() ??
+        metadata.values.map((value) => value?.toString() ?? '').join('\n');
+  }
+
+  String? _formatNotificationTime(DateTime? timestamp) {
+    if (timestamp == null) return null;
+    return DateFormat('hh:mm a').format(timestamp);
   }
 
   void _handleVehicleUpdated(DriverVehicle vehicle) {
@@ -290,13 +380,22 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
 
   Future<void> _loadNotifications() async {
     setState(() {
-      _notifications = const [
+      _systemNotifications = const [
         _NotificationItem(message: 'Loading...', type: NotificationType.info),
       ];
     });
 
     final driverId = widget.user.driverId;
     if (driverId == null || driverId.isEmpty) {
+      setState(() {
+        _systemNotifications = const [
+          _NotificationItem(
+            message: 'Notifications are unavailable for this profile.',
+            type: NotificationType.info,
+            isPlaceholder: true,
+          ),
+        ];
+      });
       return;
     }
 
@@ -393,23 +492,24 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         }
       }
 
-      if (items.isEmpty) {
+      if (items.isEmpty && _pushNotifications.isEmpty) {
         items.add(
           const _NotificationItem(
             message: 'No new notifications',
             type: NotificationType.info,
+            isPlaceholder: true,
           ),
         );
       }
 
       if (mounted) {
-        setState(() => _notifications = items);
+        setState(() => _systemNotifications = items);
       }
     } catch (_) {
       if (!mounted) return;
-      if (_notifications.isEmpty) {
+      if (_systemNotifications.isEmpty) {
         setState(
-          () => _notifications = const [
+          () => _systemNotifications = const [
             _NotificationItem(
               message: 'Unable to load notifications',
               type: NotificationType.info,
@@ -612,7 +712,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     final dateFormatter = DateFormat('dd-MM-yyyy');
     final timeFormatter = DateFormat('HH:mm:ss');
 
-    final textTheme = Theme.of(context).textTheme;
+    final theme = Theme.of(context);
+    final textTheme = theme.textTheme;
     final isHelper = (widget.user.driverRole?.toLowerCase().trim() == 'helper');
     final plantLabel =
         (widget.user.plantName != null && widget.user.plantName!.isNotEmpty)
@@ -626,6 +727,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     final tenureSubtitle = tenureText != null
         ? 'Working for $tenureText'
         : null;
+    final notifications = [..._pushNotifications, ..._systemNotifications];
 
     return Scaffold(
       appBar: AppBar(
@@ -694,14 +796,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 onTap: () {
                   Navigator.of(context).pop();
                   _openScreen(const NotificationSettingsScreen());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.assignment),
-                title: const Text('Attendance API Log'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _openScreen(AttendanceLogScreen(user: widget.user));
                 },
               ),
               ListTile(
@@ -872,6 +966,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 ),
                 const SizedBox(height: 8),
                 Card(
+                  color: Colors.white,
+                  elevation: 2,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
                   ),
@@ -932,14 +1028,29 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
-                ..._notifications.map(
-                  (item) => Card(
+                ...notifications.map((item) {
+                  final hasTitle =
+                      item.title != null && item.title!.trim().isNotEmpty;
+                  final timeLabel = _formatNotificationTime(item.timestamp);
+                  return Card(
                     child: ListTile(
                       leading: Icon(item.type.icon, color: item.type.color),
-                      title: Text(item.message),
+                      title: Text(hasTitle ? item.title!.trim() : item.message),
+                      subtitle: hasTitle ? Text(item.message) : null,
+                      trailing: timeLabel != null
+                          ? Text(
+                              timeLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.outline,
+                              ),
+                            )
+                          : null,
+                      onTap: item.isPlaceholder
+                          ? null
+                          : () => _showNotificationDetails(item),
                     ),
-                  ),
-                ),
+                  );
+                }),
                 const SizedBox(height: 16),
                 Text(
                   'Plant & Vehicle',
@@ -996,13 +1107,26 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 }
 
-enum NotificationType { success, info, warning }
+enum NotificationType { success, info, warning, alert }
 
 class _NotificationItem {
-  const _NotificationItem({required this.message, required this.type});
+  const _NotificationItem({
+    required this.message,
+    required this.type,
+    this.title,
+    this.timestamp,
+    this.metadata,
+    this.isPush = false,
+    this.isPlaceholder = false,
+  });
 
+  final String? title;
   final String message;
+  final DateTime? timestamp;
+  final Map<String, dynamic>? metadata;
   final NotificationType type;
+  final bool isPush;
+  final bool isPlaceholder;
 }
 
 extension on NotificationType {
@@ -1014,6 +1138,8 @@ extension on NotificationType {
         return Colors.blueGrey;
       case NotificationType.warning:
         return Colors.orange;
+      case NotificationType.alert:
+        return Colors.redAccent;
     }
   }
 
@@ -1025,6 +1151,8 @@ extension on NotificationType {
         return Icons.info;
       case NotificationType.warning:
         return Icons.warning;
+      case NotificationType.alert:
+        return Icons.notification_important;
     }
   }
 }
@@ -1162,30 +1290,48 @@ class _InfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: theme.colorScheme.primary),
+            Container(
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(10),
+              child: Icon(icon, color: theme.colorScheme.primary, size: 22),
+            ),
             const SizedBox(height: 12),
             Text(
               label,
               style: theme.textTheme.labelMedium?.copyWith(
                 color: theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              value,
-              style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             if (helperText != null) ...[
-              const SizedBox(height: 4),
-              Text(helperText!, style: theme.textTheme.bodySmall),
+              const SizedBox(height: 6),
+              Text(
+                helperText!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurface.withOpacity(0.65),
+                ),
+              ),
             ],
           ],
         ),

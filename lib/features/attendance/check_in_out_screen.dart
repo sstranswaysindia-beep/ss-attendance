@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -429,9 +430,29 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _capturePhoto() async {
-    final picker = ImagePicker();
     try {
-      final xFile = await picker.pickImage(
+      XFile? xFile;
+      try {
+        final platform = ImagePickerPlatform.instance;
+        xFile = await platform.getImageFromSource(
+          source: ImageSource.camera,
+          options: const ImagePickerOptions(
+            imageQuality: 85,
+            preferredCameraDevice: CameraDevice.front,
+          ),
+        );
+      } on UnimplementedError {
+        // Fallback to default picker implementation if the platform
+        // interface method is not supported.
+        xFile = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+          preferredCameraDevice: CameraDevice.front,
+          imageQuality: 85,
+        );
+      }
+
+      // Final safeguard fallback to the classic picker call.
+      xFile ??= await ImagePicker().pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
         imageQuality: 85,
@@ -648,6 +669,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
   @override
   Widget build(BuildContext context) {
+    final bool attendanceCompleted = _hasCompletedAttendanceToday;
+    final String buttonLabel = attendanceCompleted
+        ? 'Attendance Completed'
+        : _currentActionLabel;
+    final bool isButtonEnabled = !attendanceCompleted && !_isSubmitting;
+    final Color resolvedButtonColor = attendanceCompleted
+        ? Colors.blueGrey.shade400
+        : _currentAction == CheckFlowAction.checkIn
+        ? const Color(0xFF07DD05)
+        : const Color(0xFFDFCE34);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Check-in / Check-out'),
@@ -772,12 +804,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     ),
                     const SizedBox(height: 20),
                     FilledButton(
-                      onPressed: _isSubmitting ? null : _handleCheckInOut,
+                      onPressed: isButtonEnabled ? _handleCheckInOut : null,
                       style: FilledButton.styleFrom(
-                        backgroundColor:
-                            _currentAction == CheckFlowAction.checkIn
-                            ? const Color(0xFF07DD05) // Check-in green
-                            : const Color(0xFFDFCE34), // Check-out yellow
+                        backgroundColor: resolvedButtonColor,
+                        disabledBackgroundColor: Colors.blueGrey.shade200,
                       ),
                       child: _isSubmitting
                           ? const SizedBox(
@@ -793,23 +823,37 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                           : Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(
-                                  Icons.camera_alt,
+                                Icon(
+                                  attendanceCompleted
+                                      ? Icons.verified
+                                      : Icons.camera_alt,
                                   size: 16,
                                   color: Colors.white,
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
-                                  _currentActionLabel,
+                                  buttonLabel,
                                   style: const TextStyle(color: Colors.white),
                                 ),
                               ],
                             ),
                     ),
+                    if (attendanceCompleted) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        'You have already completed today\'s attendance.',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.blueGrey.shade700,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     _ShiftStatusCard(
                       actionLabel: _currentActionLabel,
                       hasOpenShift: _hasOpenShift,
+                      hasCompletedToday: attendanceCompleted,
                       summary: _submissionSummary,
                       activeShift: _activeShift,
                       isSyncPending: _isSyncPending,
@@ -880,6 +924,7 @@ class _ShiftStatusCard extends StatelessWidget {
   const _ShiftStatusCard({
     required this.actionLabel,
     required this.hasOpenShift,
+    required this.hasCompletedToday,
     required this.summary,
     required this.activeShift,
     required this.isSyncPending,
@@ -888,6 +933,7 @@ class _ShiftStatusCard extends StatelessWidget {
 
   final String actionLabel;
   final bool hasOpenShift;
+  final bool hasCompletedToday;
   final String? summary;
   final AttendanceRecord? activeShift;
   final bool isSyncPending;
@@ -898,19 +944,33 @@ class _ShiftStatusCard extends StatelessWidget {
     final theme = Theme.of(context);
     final subtitle =
         summary ??
-        (hasOpenShift ? 'Pending check-out.' : 'No recent attendance yet.');
-    final baseChip = Chip(
-      label: Text(
-        isSyncPending
-            ? 'Pending sync'
+        (isSyncPending
+            ? 'Sync in progress.'
             : hasOpenShift
-            ? 'Open shift'
-            : 'Ready',
-      ),
+            ? 'Pending check-out.'
+            : hasCompletedToday
+            ? 'Attendance completed for today.'
+            : 'No recent attendance yet.');
+    final cardTitle = hasOpenShift
+        ? 'Currently Checked-in'
+        : hasCompletedToday
+        ? 'Attendance Completed'
+        : 'Ready to $actionLabel';
+    final statusLabel = isSyncPending
+        ? 'Pending sync'
+        : hasOpenShift
+        ? 'Open shift'
+        : hasCompletedToday
+        ? 'Done'
+        : 'Ready';
+    final baseChip = Chip(
+      label: Text(statusLabel),
       backgroundColor: isSyncPending
           ? Colors.orange.shade200
           : hasOpenShift
           ? Colors.amber.shade200
+          : hasCompletedToday
+          ? Colors.lightGreen.shade200
           : Colors.lightBlue.shade200,
     );
     final statusChip = statusAnimation != null
@@ -919,6 +979,8 @@ class _ShiftStatusCard extends StatelessWidget {
 
     final cardColor = hasOpenShift
         ? Colors.amber.shade50
+        : hasCompletedToday
+        ? Colors.green.shade50
         : Colors.lightBlue.shade50;
 
     return Card(
@@ -932,12 +994,7 @@ class _ShiftStatusCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  hasOpenShift
-                      ? 'Currently Checked-in'
-                      : 'Ready to $actionLabel',
-                  style: theme.textTheme.titleMedium,
-                ),
+                Text(cardTitle, style: theme.textTheme.titleMedium),
                 statusChip,
               ],
             ),

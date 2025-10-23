@@ -95,9 +95,13 @@ class _DocumentsHubScreenState extends State<DocumentsHubScreen> {
   Widget build(BuildContext context) {
     if (_data == null) {
       if (_isLoading) {
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        return const Scaffold(
+          backgroundColor: Colors.white,
+          body: Center(child: CircularProgressIndicator()),
+        );
       }
       return Scaffold(
+        backgroundColor: Colors.white,
         appBar: AppBar(
           title: const Text('Documents'),
           leading: BackButton(onPressed: () => Navigator.of(context).pop()),
@@ -136,6 +140,7 @@ class _DocumentsHubScreenState extends State<DocumentsHubScreen> {
       child: DefaultTabController(
         length: 2,
         child: Scaffold(
+          backgroundColor: Colors.white,
           appBar: AppBar(
             leading: BackButton(
               onPressed: () {

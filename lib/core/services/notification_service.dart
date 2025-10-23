@@ -1,11 +1,28 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tz;
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:timezone/data/latest.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+class InAppNotificationData {
+  InAppNotificationData({
+    required this.id,
+    required this.title,
+    required this.body,
+    required this.data,
+    required this.receivedAt,
+  });
+
+  final String id;
+  final String title;
+  final String body;
+  final Map<String, dynamic> data;
+  final DateTime receivedAt;
+}
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -15,8 +32,23 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
+  final StreamController<InAppNotificationData> _inAppNotificationController =
+      StreamController<InAppNotificationData>.broadcast();
+  final StreamController<List<InAppNotificationData>>
+  _inAppNotificationListController =
+      StreamController<List<InAppNotificationData>>.broadcast();
+  final List<InAppNotificationData> _recentInAppNotifications = [];
   bool _isInitialized = false;
   String? _fcmToken;
+  int _notificationCounter = 0;
+
+  void _emitNotificationState() {
+    if (!_inAppNotificationListController.isClosed) {
+      _inAppNotificationListController.add(
+        List.unmodifiable(_recentInAppNotifications),
+      );
+    }
+  }
 
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -153,13 +185,39 @@ class NotificationService {
       print('Handling a foreground message: ${message.messageId}');
     }
 
-    // Show local notification for foreground messages
-    if (message.notification != null) {
+    final notification = message.notification;
+    final data = Map<String, dynamic>.from(message.data);
+    final title =
+        notification?.title ?? data['title']?.toString() ?? 'SS Transways';
+    final body =
+        notification?.body ??
+        data['body']?.toString() ??
+        data['message']?.toString() ??
+        '';
+    final notificationId = message.messageId?.isNotEmpty == true
+        ? message.messageId!
+        : 'local_${DateTime.now().millisecondsSinceEpoch}_${_notificationCounter++}';
+    final inAppNotification = InAppNotificationData(
+      id: notificationId,
+      title: title,
+      body: body,
+      data: data,
+      receivedAt: DateTime.now(),
+    );
+
+    _recentInAppNotifications.insert(0, inAppNotification);
+    if (_recentInAppNotifications.length > 20) {
+      _recentInAppNotifications.removeLast();
+    }
+    _inAppNotificationController.add(inAppNotification);
+    _emitNotificationState();
+
+    if (title.isNotEmpty || body.isNotEmpty) {
       showNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-        title: message.notification!.title ?? 'SS Transways',
-        body: message.notification!.body ?? '',
-        payload: message.data.toString(),
+        title: title,
+        body: body,
+        payload: data.isEmpty ? '' : data.toString(),
       );
     }
   }
@@ -180,6 +238,31 @@ class NotificationService {
   Future<String?> getStoredFCMToken() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('fcm_token');
+  }
+
+  Stream<InAppNotificationData> get inAppNotifications =>
+      _inAppNotificationController.stream;
+
+  Stream<List<InAppNotificationData>> get inAppNotificationList =>
+      _inAppNotificationListController.stream;
+
+  List<InAppNotificationData> get recentInAppNotifications =>
+      List.unmodifiable(_recentInAppNotifications);
+
+  void removeInAppNotification(String id) {
+    final before = _recentInAppNotifications.length;
+    _recentInAppNotifications.removeWhere((item) => item.id == id);
+    if (_recentInAppNotifications.length != before) {
+      _emitNotificationState();
+    }
+  }
+
+  void clearInAppNotifications() {
+    if (_recentInAppNotifications.isEmpty) {
+      return;
+    }
+    _recentInAppNotifications.clear();
+    _emitNotificationState();
   }
 
   Future<bool> requestPermissions() async {

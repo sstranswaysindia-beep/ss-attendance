@@ -33,75 +33,113 @@ class UpdateAvailableSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
+    const bannerColor = Color(0xFFFFD500);
+    const accentColor = Color(0xFF00296B);
 
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primaryContainer,
-                    shape: BoxShape.circle,
+            Container(
+              decoration: BoxDecoration(
+                color: bannerColor,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
                   ),
-                  padding: const EdgeInsets.all(12),
-                  child: Icon(
-                    Icons.system_update_alt_outlined,
-                    color: theme.colorScheme.onPrimaryContainer,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
+                ],
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Update available',
-                        style: textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
+                      Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: const Icon(
+                          Icons.system_update_alt_outlined,
+                          color: accentColor,
+                          size: 26,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        availableVersionCode == null
-                            ? 'A newer version is ready on the Play Store.'
-                            : 'Version $availableVersionCode is available on the Play Store.',
-                        style: textTheme.bodyMedium,
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Update available',
+                              style: textTheme.titleMedium?.copyWith(
+                                color: Colors.black,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              availableVersionCode == null
+                                  ? 'A newer version is ready on the Play Store.'
+                                  : 'Version $availableVersionCode is available on the Play Store.',
+                              style: textTheme.bodyMedium?.copyWith(
+                                color: Colors.black87,
+                                height: 1.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          onDismissed();
+                        },
+                        icon: const Icon(Icons.close, color: Colors.black87),
+                        tooltip: 'Dismiss',
                       ),
                     ],
                   ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                    onDismissed();
-                  },
-                  icon: const Icon(Icons.close),
-                  tooltip: 'Dismiss',
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () => _launchStore(context),
-                    icon: const Icon(Icons.download_rounded),
-                    label: const Text('Update now'),
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(48),
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: accentColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 18,
+                          vertical: 14,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      onPressed: () => _launchStore(context),
+                      icon: const Icon(Icons.download_rounded, size: 20),
+                      label: const Text(
+                        'Update now',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),

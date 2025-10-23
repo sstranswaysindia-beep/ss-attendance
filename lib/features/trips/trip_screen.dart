@@ -1446,6 +1446,8 @@ class _TripScreenState extends State<TripScreen> {
                         _TripsList(
                           trips: overview.trips,
                           onDeleteTrip: _handleDeleteTrip,
+                          canDeleteAll:
+                              widget.user.role != UserRole.driver,
                         ),
                       ] else
                         const SizedBox.shrink(),
@@ -1600,23 +1602,41 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      color: color.withOpacity(0.1),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: color.withOpacity(0.15)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color),
+            Container(
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+              padding: const EdgeInsets.all(10),
+              child: Icon(icon, color: color, size: 22),
+            ),
             const SizedBox(height: 12),
             Text(
               value,
-              style: theme.textTheme.headlineSmall?.copyWith(color: color),
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               label,
-              style: theme.textTheme.bodyMedium?.copyWith(color: color),
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurface.withOpacity(0.7),
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.4,
+              ),
             ),
           ],
         ),
@@ -1626,10 +1646,15 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _TripsList extends StatefulWidget {
-  const _TripsList({required this.trips, required this.onDeleteTrip});
+  const _TripsList({
+    required this.trips,
+    required this.onDeleteTrip,
+    this.canDeleteAll = false,
+  });
 
   final List<TripRecord> trips;
   final Function(TripRecord) onDeleteTrip;
+  final bool canDeleteAll;
 
   @override
   State<_TripsList> createState() => _TripsListState();
@@ -1653,6 +1678,27 @@ class _TripsListState extends State<_TripsList> {
     });
   }
 
+  bool _evaluateDeletePermission(TripRecord trip) {
+    if (widget.canDeleteAll) {
+      return true;
+    }
+    if (trip.canCurrentUserDelete) {
+      return true;
+    }
+
+    final startAt = DateTime.tryParse(trip.startDate);
+    if (startAt == null) {
+      return false;
+    }
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final tripDay = DateTime(startAt.year, startAt.month, startAt.day);
+
+    return tripDay == today || tripDay == yesterday;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.trips.isEmpty) {
@@ -1671,7 +1717,14 @@ class _TripsListState extends State<_TripsList> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ..._displayedTrips
-            .map((trip) => _TripTile(trip: trip, onDelete: widget.onDeleteTrip))
+            .map((trip) {
+              final canDelete = _evaluateDeletePermission(trip);
+              return _TripTile(
+                trip: trip,
+                onDelete: widget.onDeleteTrip,
+                canDelete: canDelete,
+              );
+            })
             .toList(growable: false),
         if (_hasMoreTrips)
           Padding(
@@ -1694,10 +1747,15 @@ class _TripsListState extends State<_TripsList> {
 }
 
 class _TripTile extends StatelessWidget {
-  const _TripTile({required this.trip, required this.onDelete});
+  const _TripTile({
+    required this.trip,
+    required this.onDelete,
+    required this.canDelete,
+  });
 
   final TripRecord trip;
   final Function(TripRecord) onDelete;
+  final bool canDelete;
 
   String _formatKm(double? value) {
     if (value == null) {
@@ -1825,18 +1883,19 @@ class _TripTile extends StatelessWidget {
                         ),
                       ),
                     const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: () => onDelete(trip),
-                      icon: const Icon(Icons.delete_outline),
-                      iconSize: 20,
-                      color: Colors.red.shade600,
-                      constraints: const BoxConstraints(
-                        minWidth: 32,
-                        minHeight: 32,
+                    if (canDelete)
+                      IconButton(
+                        onPressed: () => onDelete(trip),
+                        icon: const Icon(Icons.delete_outline),
+                        iconSize: 20,
+                        color: Colors.red.shade600,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
+                        ),
+                        padding: EdgeInsets.zero,
+                        tooltip: 'Delete trip',
                       ),
-                      padding: EdgeInsets.zero,
-                      tooltip: 'Delete trip',
-                    ),
                   ],
                 ),
               ],
@@ -2016,7 +2075,12 @@ class _PlantVehicleCard extends StatelessWidget {
 
     return Card(
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -2272,7 +2336,12 @@ class _DriverHelperCard extends StatelessWidget {
 
     return Card(
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -2566,6 +2635,7 @@ class _TripStartCardState extends State<_TripStartCard> {
     }
 
     return Card(
+      color: Colors.white,
       clipBehavior: Clip.antiAlias,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -2708,7 +2778,9 @@ class _TripStartCardState extends State<_TripStartCard> {
             TextField(
               controller: widget.noteController,
               maxLines: 2,
-              decoration: buildFieldDecoration('Note (optional)'),
+              decoration: buildFieldDecoration(
+                'Note (optional)',
+              ).copyWith(filled: true, fillColor: Colors.amber.shade50),
             ),
             const SizedBox(height: 12),
             Align(

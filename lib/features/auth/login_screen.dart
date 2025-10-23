@@ -7,9 +7,18 @@ import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({required this.onLogin, super.key});
+  const LoginScreen({
+    required this.onLogin,
+    this.appTitle = 'SS Transways India',
+    this.appSubtitle = 'Your Reliable Logistic Partner',
+    this.screenTitle = 'Login',
+    super.key,
+  });
 
   final void Function(AppUser user) onLogin;
+  final String appTitle;
+  final String appSubtitle;
+  final String screenTitle;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -89,6 +98,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),
+                color: Colors.white,
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Form(
@@ -116,7 +126,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Text(
-                                  'SS Transways India',
+                                  widget.appTitle,
                                   textAlign: TextAlign.center,
                                   style: theme.textTheme.headlineSmall
                                       ?.copyWith(
@@ -125,23 +135,25 @@ class _LoginScreenState extends State<LoginScreen> {
                                         fontSize: 29,
                                       ),
                                 ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  'Your Reliable Logistic Partner',
-                                  textAlign: TextAlign.right,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    color: const Color(0xFF000C66),
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
+                                if (widget.appSubtitle.isNotEmpty) ...[
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    widget.appSubtitle,
+                                    textAlign: TextAlign.right,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: const Color(0xFF000C66),
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                    ),
                                   ),
-                                ),
+                                ],
                               ],
                             ),
                           ],
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'Login',
+                          widget.screenTitle,
                           textAlign: TextAlign.center,
                           style: theme.textTheme.titleLarge,
                         ),
