@@ -136,17 +136,22 @@ class _SSAdminAppState extends State<SSAdminApp> {
           final clampedScale = mediaQuery.textScaleFactor.clamp(1.0, 1.1);
           return MediaQuery(
             data: mediaQuery.copyWith(textScaleFactor: clampedScale),
-            child: InAppNotificationBannerHost(child: child),
+            child: InAppNotificationBannerHost(
+              hideBell: child is _LoginRoute,
+              child: child,
+            ),
           );
         },
         home: _isLoading
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
             : _currentUser == null
-            ? LoginScreen(
-                onLogin: _handleLogin,
-                appTitle: 'SS Admin',
-                appSubtitle: 'Manage HR attendance and approvals',
-                screenTitle: 'Admin Login',
+            ? _LoginRoute(
+                child: LoginScreen(
+                  onLogin: _handleLogin,
+                  appTitle: 'SS Transways India',
+                  appSubtitle: 'Manage HR attendance and approvals',
+                  screenTitle: 'Admin Login',
+                ),
               )
             : _AdminHomeSwitchboard(
                 user: _currentUser!,
@@ -173,6 +178,17 @@ class _AdminHomeSwitchboard extends StatelessWidget {
       case UserRole.driver:
         return _UnauthorizedRoleScreen(onLogout: onLogout);
     }
+  }
+}
+
+class _LoginRoute extends StatelessWidget {
+  const _LoginRoute({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return child;
   }
 }
 

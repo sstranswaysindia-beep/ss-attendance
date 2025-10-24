@@ -4,8 +4,11 @@ import 'package:intl/intl.dart';
 import '../../core/models/app_user.dart';
 import '../../core/models/attendance_approval.dart';
 import '../../core/services/approvals_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+
+const Color _adminPrimaryColor = Color(0xFF00296B);
+const Color _adminAccentLight = Color(0xFFE3F2FD);
+const Color _adminPendingColor = Color(0xFFFFBB39);
 
 class ApprovalsScreen extends StatefulWidget {
   const ApprovalsScreen({
@@ -211,7 +214,18 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       case 'rejected':
         return Colors.red.shade100;
       default:
-        return Colors.orange.shade100;
+        return _adminPendingColor;
+    }
+  }
+
+  Color _chipLabelColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green.shade900;
+      case 'rejected':
+        return Colors.red.shade900;
+      default:
+        return Colors.black87;
     }
   }
 
@@ -228,8 +242,19 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
     };
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.title ?? 'Approvals')),
-      body: AppGradientBackground(
+      appBar: AppBar(
+        backgroundColor: _adminPrimaryColor,
+        foregroundColor: Colors.white,
+        title: Text(
+          widget.title ?? 'Approvals',
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+      ),
+      body: Container(
+        color: Colors.white,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -326,8 +351,19 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                 alignment: Alignment.centerRight,
                 child: TextButton.icon(
                   onPressed: _loadApprovals,
-                  icon: const Icon(Icons.refresh),
+                  icon: const Icon(Icons.refresh, color: Colors.white),
                   label: const Text('Refresh'),
+                  style: TextButton.styleFrom(
+                    backgroundColor: _adminPrimaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
               if (!_isLoading && _errorMessage == null && _approvals.isNotEmpty)
@@ -363,11 +399,23 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                           style: theme.textTheme.bodyMedium,
                         ),
                       )
-                    : Card(
+                    : Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x1400296B),
+                              blurRadius: 18,
+                              offset: Offset(0, 10),
+                            ),
+                          ],
+                        ),
                         child: ListView.separated(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          padding: const EdgeInsets.all(8),
                           itemCount: _approvals.length,
-                          separatorBuilder: (_, __) => const Divider(height: 0),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 12),
                           itemBuilder: (context, index) {
                             final approval = _approvals[index];
                             final statusLabel =
@@ -391,22 +439,42 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                               subtitleLines.add('Notes: ${approval.notes}');
                             }
 
-                            Widget content = Card(
-                              margin: EdgeInsets.zero,
+                            Widget content = Container(
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Colors.white, _adminAccentLight],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: _adminPrimaryColor.withOpacity(0.06),
+                                ),
+                              ),
                               child: ListTile(
-                                leading: CircleAvatar(
-                                  child: Text(
-                                    approval.driverName.isNotEmpty
-                                        ? approval.driverName[0].toUpperCase()
-                                        : '?',
+                                leading: _buildAvatar(approval),
+                                title: Text(
+                                  approval.driverName,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w600,
                                   ),
                                 ),
-                                title: Text(approval.driverName),
                                 subtitle: Text(subtitleLines.join('\n')),
                                 trailing: Chip(
-                                  label: Text(statusLabel),
+                                  label: Text(
+                                    statusLabel,
+                                    style: TextStyle(
+                                      color: _chipLabelColor(statusLabel),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                   backgroundColor: _statusChipColor(
                                     statusLabel,
+                                  ),
+                                  side: BorderSide(
+                                    color: _chipLabelColor(
+                                      statusLabel,
+                                    ).withOpacity(0.3),
                                   ),
                                 ),
                               ),
@@ -474,4 +542,37 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       ),
     );
   }
+}
+
+Widget _buildAvatar(AttendanceApproval approval) {
+  final photoUrl = approval.profilePhotoUrl;
+  if (photoUrl != null && photoUrl.trim().isNotEmpty) {
+    final uri = Uri.tryParse(photoUrl.trim());
+    if (uri != null && uri.hasScheme && uri.hasAuthority) {
+      return CircleAvatar(
+        backgroundColor: Colors.white,
+        backgroundImage: NetworkImage(photoUrl.trim()),
+      );
+    }
+  }
+
+  final initials = _extractInitials(approval.driverName);
+  return CircleAvatar(
+    backgroundColor: _adminPrimaryColor.withOpacity(0.12),
+    foregroundColor: _adminPrimaryColor,
+    child: Text(initials, style: const TextStyle(fontWeight: FontWeight.bold)),
+  );
+}
+
+String _extractInitials(String name) {
+  final parts = name
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((part) => part.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) return 'A';
+  if (parts.length == 1) {
+    return parts.first.substring(0, 1).toUpperCase();
+  }
+  return (parts.first[0] + parts.last[0]).toUpperCase();
 }

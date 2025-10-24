@@ -314,6 +314,7 @@ class AttendanceRepository {
   Future<AdminAttendanceOverview> fetchAdminOverview({
     required DateTime month,
     String? searchTerm,
+    String? plantId,
   }) async {
     final formattedMonth =
         '${month.year.toString().padLeft(4, '0')}-${month.month.toString().padLeft(2, '0')}';
@@ -322,7 +323,12 @@ class AttendanceRepository {
     if (trimmedSearch != null && trimmedSearch.isNotEmpty) {
       queryParameters['search'] = trimmedSearch;
     }
-    final uri = _adminOverviewEndpoint.replace(queryParameters: queryParameters);
+    if (plantId != null && plantId.isNotEmpty) {
+      queryParameters['plantId'] = plantId;
+    }
+    final uri = _adminOverviewEndpoint.replace(
+      queryParameters: queryParameters,
+    );
 
     final response = await _client.get(uri);
     final statusCode = response.statusCode;

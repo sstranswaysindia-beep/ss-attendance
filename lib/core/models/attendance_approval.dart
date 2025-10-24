@@ -5,6 +5,7 @@ class AttendanceApproval {
     required this.driverName,
     required this.plantId,
     required this.plantName,
+    this.profilePhotoUrl,
     this.vehicleId,
     this.vehicleNumber,
     this.inTime,
@@ -24,6 +25,9 @@ class AttendanceApproval {
       driverName: json['driverName']?.toString() ?? '',
       plantId: json['plantId']?.toString() ?? '',
       plantName: json['plantName']?.toString() ?? '',
+      profilePhotoUrl:
+          json['profilePhoto']?.toString() ??
+          json['profilePhotoUrl']?.toString(),
       vehicleId: json['vehicleId']?.toString(),
       vehicleNumber: json['vehicleNumber']?.toString(),
       inTime: json['inTime']?.toString(),
@@ -42,6 +46,7 @@ class AttendanceApproval {
   final String driverName;
   final String plantId;
   final String plantName;
+  final String? profilePhotoUrl;
   final String? vehicleId;
   final String? vehicleNumber;
   final String? inTime;
@@ -55,10 +60,7 @@ class AttendanceApproval {
 }
 
 class SupervisorPlantOption {
-  const SupervisorPlantOption({
-    required this.plantId,
-    required this.plantName,
-  });
+  const SupervisorPlantOption({required this.plantId, required this.plantName});
 
   factory SupervisorPlantOption.fromJson(Map<String, dynamic> json) {
     return SupervisorPlantOption(

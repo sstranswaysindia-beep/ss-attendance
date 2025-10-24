@@ -1,5 +1,6 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.util.Base64
 
 plugins {
     id("com.android.application")
@@ -15,6 +16,22 @@ val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
+
+val dartDefinesEncoded = (project.findProperty("dart-defines") as String?)
+    ?.split(",")
+    ?: emptyList()
+val dartDefines = dartDefinesEncoded.mapNotNull { encoded ->
+    try {
+        String(Base64.getDecoder().decode(encoded))
+    } catch (_: IllegalArgumentException) {
+        null
+    }
+}
+
+val isAdminBuild = dartDefines.contains("APP_VARIANT=admin")
+val baseApplicationId = "com.sstranswaysindia.app"
+val adminApplicationId = "com.sstranswaysindia.admin"
+val bundleBaseName = if (isAdminBuild) "admin-app" else "main-app"
 
 android {
     namespace = "com.sstranswaysindia.app"
@@ -33,13 +50,18 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.sstranswaysindia.app"
+        applicationId = if (isAdminBuild) adminApplicationId else baseApplicationId
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        resValue(
+            "string",
+            "app_name",
+            if (isAdminBuild) "SS Admin" else "SS Transways India"
+        )
     }
 
     signingConfigs {
@@ -67,4 +89,18 @@ dependencies {
 
 flutter {
     source = "../.."
+}
+
+android.applicationVariants.all {
+    outputs
+        .map { it as com.android.build.gradle.internal.api.BaseVariantOutputImpl }
+        .forEach { output ->
+            if (buildType.name == "release") {
+                output.outputFileName = when {
+                    output.outputFileName.endsWith(".apk") -> "${bundleBaseName}-release.apk"
+                    output.outputFileName.endsWith(".aab") -> "${bundleBaseName}-release.aab"
+                    else -> output.outputFileName
+                }
+            }
+        }
 }

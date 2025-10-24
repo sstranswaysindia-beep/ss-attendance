@@ -51,9 +51,14 @@ Future<void> showNotificationDetailDialog(
 }
 
 class InAppNotificationBannerHost extends StatefulWidget {
-  const InAppNotificationBannerHost({required this.child, super.key});
+  const InAppNotificationBannerHost({
+    required this.child,
+    this.hideBell = false,
+    super.key,
+  });
 
   final Widget child;
+  final bool hideBell;
 
   @override
   State<InAppNotificationBannerHost> createState() =>
@@ -136,11 +141,11 @@ class _InAppNotificationBannerHostState
   }
 
   void _openNotificationCenter() {
+    final navigator = Navigator.of(context, rootNavigator: true);
     showModalBottomSheet<void>(
-      context: context,
+      context: navigator.context,
       isScrollControlled: true,
       useSafeArea: true,
-      useRootNavigator: true,
       showDragHandle: true,
       builder: (context) =>
           _NotificationCenterSheet(initialNotifications: _inboxNotifications),
@@ -182,20 +187,23 @@ class _InAppNotificationBannerHostState
             ),
           ),
         ),
-        Positioned(
-          right: 0,
-          bottom: 0,
-          child: SafeArea(
-            minimum: const EdgeInsets.only(right: 16, bottom: 16),
-            child: _NotificationBellButton(
-              count: inboxCount,
-              onPressed: _openNotificationCenter,
+        if (!_shouldHideBell(inboxCount))
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: SafeArea(
+              minimum: const EdgeInsets.only(right: 16, bottom: 16),
+              child: _NotificationBellButton(
+                count: inboxCount,
+                onPressed: _openNotificationCenter,
+              ),
             ),
           ),
-        ),
       ],
     );
   }
+
+  bool _shouldHideBell(int inboxCount) => widget.hideBell;
 }
 
 class _InAppBannerCard extends StatelessWidget {
@@ -333,8 +341,8 @@ class _NotificationBellButton extends StatelessWidget {
             ),
             if (hasNotifications)
               Positioned(
-                right: -2,
-                top: -2,
+                right: -4,
+                top: -6,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 6,
@@ -343,10 +351,6 @@ class _NotificationBellButton extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: theme.colorScheme.error,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: theme.colorScheme.onPrimary,
-                      width: 1,
-                    ),
                   ),
                   child: Text(
                     badgeText,

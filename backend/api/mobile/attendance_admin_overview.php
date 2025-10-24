@@ -21,6 +21,15 @@ require __DIR__ . '/common.php';
 
 $monthParam = $_GET['month'] ?? date('Y-m');
 $searchRaw  = isset($_GET['search']) ? trim((string) $_GET['search']) : '';
+$plantRaw   = isset($_GET['plantId']) ? trim((string) $_GET['plantId']) : '';
+$plantId    = null;
+if ($plantRaw !== '') {
+    if (ctype_digit($plantRaw)) {
+        $plantId = (int) $plantRaw;
+    } elseif (in_array(strtolower($plantRaw), ['unassigned', 'none'], true)) {
+        $plantId = 'UNASSIGNED';
+    }
+}
 
 if (!preg_match('/^\d{4}-\d{2}$/', $monthParam)) {
     apiRespond(400, ['status' => 'error', 'error' => 'Invalid month format. Use YYYY-MM.']);
@@ -67,6 +76,15 @@ try {
         $types .= 'ss';
         $params[] = $searchLike;
         $params[] = $searchLike;
+    }
+    if ($plantId !== null) {
+        if ($plantId === 'UNASSIGNED') {
+            $sql .= ' AND d.plant_id IS NULL';
+        } else {
+            $sql .= ' AND d.plant_id = ?';
+            $types .= 'i';
+            $params[] = $plantId;
+        }
     }
 
     $sql .= '

@@ -4,8 +4,12 @@ import 'package:intl/intl.dart';
 import '../../core/models/admin_attendance_overview.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/attendance_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+
+const Color _adminPrimaryColor = Color(0xFF00296B);
+const Color _adminAccentLight = Color(0xFFE3F2FD);
+const Color _adminTagColor = Color(0xFF81D4FA);
+const String _unassignedPlantId = 'UNASSIGNED';
 
 class AdminAttendanceOverviewScreen extends StatefulWidget {
   const AdminAttendanceOverviewScreen({required this.user, super.key});
@@ -21,6 +25,9 @@ class _AdminAttendanceOverviewScreenState
     extends State<AdminAttendanceOverviewScreen> {
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final TextEditingController _searchController = TextEditingController();
+  String _selectedPlantLabel = 'All Plants';
+  String? _selectedPlantId;
+  Map<String, String?> _plantChipOptions = {};
 
   late final List<DateTime> _monthOptions;
   late DateTime _selectedMonth;
@@ -51,13 +58,16 @@ class _AdminAttendanceOverviewScreenState
   Future<void> _loadOverview({
     DateTime? month,
     String? searchTerm,
+    String? plantId,
     bool syncController = false,
   }) async {
     final targetMonth = month ?? _selectedMonth;
     final trimmedSearch = (searchTerm ?? _activeSearch).trim();
+    final effectivePlantId = plantId ?? _selectedPlantId;
     setState(() {
       _selectedMonth = DateTime(targetMonth.year, targetMonth.month, 1);
       _activeSearch = trimmedSearch;
+      _selectedPlantId = effectivePlantId;
       if (syncController && _searchController.text.trim() != trimmedSearch) {
         _searchController.text = trimmedSearch;
       }
@@ -69,9 +79,23 @@ class _AdminAttendanceOverviewScreenState
       final overview = await _attendanceRepository.fetchAdminOverview(
         month: _selectedMonth,
         searchTerm: trimmedSearch.isEmpty ? null : trimmedSearch,
+        plantId: effectivePlantId,
       );
       if (!mounted) return;
-      setState(() => _overview = overview);
+      setState(() {
+        _overview = overview;
+        final lookup = _buildPlantLookup(overview.drivers);
+        if (effectivePlantId == null || _plantChipOptions.isEmpty) {
+          _plantChipOptions = lookup;
+        } else {
+          _plantChipOptions.addAll(lookup);
+        }
+        if (_selectedPlantId != null &&
+            !_plantChipOptions.values.contains(_selectedPlantId)) {
+          _selectedPlantId = null;
+          _selectedPlantLabel = 'All Plants';
+        }
+      });
     } on AttendanceFailure catch (error) {
       if (!mounted) return;
       setState(() {
@@ -118,6 +142,7 @@ class _AdminAttendanceOverviewScreenState
     final workedDates = driver.workedDates..sort();
     showModalBottomSheet<void>(
       context: context,
+      backgroundColor: Colors.white,
       showDragHandle: true,
       builder: (context) {
         final theme = Theme.of(context);
@@ -136,18 +161,40 @@ class _AdminAttendanceOverviewScreenState
                   runSpacing: 8,
                   children: [
                     Chip(
-                      avatar: const Icon(Icons.badge, size: 18),
-                      label: Text(driver.displayRole),
+                      avatar: const Icon(
+                        Icons.badge,
+                        size: 18,
+                        color: _adminPrimaryColor,
+                      ),
+                      backgroundColor: _adminTagColor,
+                      label: Text(
+                        driver.displayRole,
+                        style: const TextStyle(color: _adminPrimaryColor),
+                      ),
                     ),
                     Chip(
-                      avatar: const Icon(Icons.apartment, size: 18),
-                      label: Text(driver.displayPlant),
+                      avatar: const Icon(
+                        Icons.apartment,
+                        size: 18,
+                        color: _adminPrimaryColor,
+                      ),
+                      backgroundColor: _adminTagColor,
+                      label: Text(
+                        driver.displayPlant,
+                        style: const TextStyle(color: _adminPrimaryColor),
+                      ),
                     ),
                     Chip(
-                      avatar: const Icon(Icons.calendar_month, size: 18),
+                      avatar: const Icon(
+                        Icons.calendar_month,
+                        size: 18,
+                        color: _adminPrimaryColor,
+                      ),
                       label: Text(
                         '${driver.daysWorked}/${driver.totalDays} days in $monthLabel',
+                        style: const TextStyle(color: _adminPrimaryColor),
                       ),
+                      backgroundColor: _adminTagColor,
                     ),
                   ],
                 ),
@@ -203,19 +250,17 @@ class _AdminAttendanceOverviewScreenState
     final filterCard = Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.primaryContainer.withOpacity(0.85),
-            theme.colorScheme.secondaryContainer.withOpacity(0.85),
-          ],
+        gradient: const LinearGradient(
+          colors: [Colors.white, _adminAccentLight],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        boxShadow: [
+        border: Border.all(color: _adminPrimaryColor.withOpacity(0.08)),
+        boxShadow: const [
           BoxShadow(
-            color: theme.colorScheme.primary.withOpacity(0.15),
-            blurRadius: 16,
-            offset: const Offset(0, 12),
+            color: Color(0x1400296B),
+            blurRadius: 18,
+            offset: Offset(0, 10),
           ),
         ],
       ),
@@ -226,7 +271,7 @@ class _AdminAttendanceOverviewScreenState
           Text(
             'Overview Filters',
             style: theme.textTheme.titleMedium?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer,
+              color: _adminPrimaryColor,
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -235,7 +280,7 @@ class _AdminAttendanceOverviewScreenState
             decoration: InputDecoration(
               labelText: 'Select month',
               filled: true,
-              fillColor: theme.colorScheme.background,
+              fillColor: Colors.white,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -266,7 +311,7 @@ class _AdminAttendanceOverviewScreenState
                   decoration: InputDecoration(
                     labelText: 'Search driver or plant',
                     filled: true,
-                    fillColor: theme.colorScheme.background,
+                    fillColor: Colors.white,
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: _activeSearch.isNotEmpty
                         ? IconButton(
@@ -287,6 +332,8 @@ class _AdminAttendanceOverviewScreenState
                 icon: const Icon(Icons.manage_search),
                 label: const Text('Search'),
                 style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFF0088CC),
+                  foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
                     vertical: 16,
@@ -295,7 +342,7 @@ class _AdminAttendanceOverviewScreenState
               ),
             ],
           ),
-          if (_activeSearch.isNotEmpty)
+    if (_activeSearch.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 12),
               child: Wrap(
@@ -303,7 +350,11 @@ class _AdminAttendanceOverviewScreenState
                 children: [
                   InputChip(
                     avatar: const Icon(Icons.filter_alt, size: 18),
-                    label: Text('Active filter: $_activeSearch'),
+                    label: Text(
+                      'Active filter: $_activeSearch',
+                      style: const TextStyle(color: _adminPrimaryColor),
+                    ),
+                    backgroundColor: _adminTagColor,
                     onDeleted: _clearSearch,
                   ),
                 ],
@@ -315,10 +366,33 @@ class _AdminAttendanceOverviewScreenState
 
     final drivers = _overview?.drivers ?? const <DriverAttendanceOverview>[];
     final hasSearch = _activeSearch.isNotEmpty;
+    final Map<String, String?> baseLookup = _plantChipOptions.isNotEmpty
+        ? Map<String, String?>.from(_plantChipOptions)
+        : _buildPlantLookup(drivers);
+    final uniquePlants = baseLookup.keys.toList()..sort();
+    uniquePlants.insert(0, 'All Plants');
+    final List<DriverAttendanceOverview> displayDrivers;
+    if (_selectedPlantId == null) {
+      displayDrivers = drivers;
+    } else if (_selectedPlantId == _unassignedPlantId) {
+      displayDrivers =
+          drivers.where((driver) => driver.plantId == null).toList();
+    } else {
+      displayDrivers = drivers
+          .where(
+            (driver) => driver.plantId?.toString() == _selectedPlantId,
+          )
+          .toList();
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Attendance Overview'),
+        backgroundColor: _adminPrimaryColor,
+        foregroundColor: Colors.white,
+        title: const Text(
+          'Attendance Overview',
+          style: TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+        ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -327,7 +401,8 @@ class _AdminAttendanceOverviewScreenState
           ),
         ],
       ),
-      body: AppGradientBackground(
+      body: Container(
+        color: Colors.white,
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : _errorMessage != null
@@ -353,16 +428,40 @@ class _AdminAttendanceOverviewScreenState
                 children: [
                   filterCard,
                   const SizedBox(height: 16),
+                  _PlantFilterChips(
+                    plants: uniquePlants,
+                    selectedPlant: _selectedPlantLabel,
+                    onSelected: (plant) {
+                      final rawId = plant == 'All Plants'
+                          ? null
+                          : baseLookup[plant]?.trim();
+                      final normalizedId =
+                          (rawId == null || rawId.isEmpty) ? null : rawId;
+                      if (plant == _selectedPlantLabel &&
+                          normalizedId == _selectedPlantId) {
+                        return;
+                      }
+                      setState(() {
+                        _selectedPlantLabel = plant;
+                        _selectedPlantId = normalizedId;
+                      });
+                      _loadOverview(
+                        plantId: normalizedId,
+                        syncController: false,
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 16),
                   _MonthSummaryCard(
                     overview: _overview!,
                     hasSearch: hasSearch,
                     activeSearch: _activeSearch,
-                    driverCount: drivers.length,
+                    driverCount: displayDrivers.length,
                   ),
                   const SizedBox(height: 16),
                   Text('Driver Attendance', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  if (drivers.isEmpty)
+                  if (displayDrivers.isEmpty)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Text(
@@ -373,11 +472,29 @@ class _AdminAttendanceOverviewScreenState
                       ),
                     )
                   else
-                    ...drivers.map(_buildDriverCard),
+                    ...displayDrivers.map(_buildDriverCard),
                 ],
               ),
       ),
     );
+  }
+
+  Map<String, String?> _buildPlantLookup(
+    List<DriverAttendanceOverview> drivers,
+  ) {
+    final map = <String, String?>{};
+    for (final driver in drivers) {
+      final name = driver.displayPlant.trim();
+      if (name.isEmpty) continue;
+      map.putIfAbsent(
+        name,
+        () {
+          final id = driver.plantId;
+          return id == null ? _unassignedPlantId : id.toString();
+        },
+      );
+    }
+    return map;
   }
 
   Widget _buildDriverCard(DriverAttendanceOverview driver) {
@@ -400,15 +517,15 @@ class _AdminAttendanceOverviewScreenState
         ? CircleAvatar(
             radius: 30,
             backgroundImage: NetworkImage(driver.profilePhoto),
-            backgroundColor: theme.colorScheme.primary.withOpacity(0.08),
+            backgroundColor: _adminPrimaryColor.withOpacity(0.08),
           )
         : CircleAvatar(
             radius: 30,
-            backgroundColor: theme.colorScheme.primary.withOpacity(0.12),
+            backgroundColor: _adminPrimaryColor.withOpacity(0.12),
             child: Text(
               driver.initials,
-              style: TextStyle(
-                color: theme.colorScheme.primary,
+              style: const TextStyle(
+                color: _adminPrimaryColor,
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
               ),
@@ -419,17 +536,15 @@ class _AdminAttendanceOverviewScreenState
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(
-          colors: [
-            theme.colorScheme.surface,
-            theme.colorScheme.secondaryContainer.withOpacity(0.6),
-          ],
+        gradient: const LinearGradient(
+          colors: [Colors.white, _adminAccentLight],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
+        border: Border.all(color: _adminPrimaryColor.withOpacity(0.06)),
         boxShadow: [
           BoxShadow(
-            color: theme.shadowColor.withOpacity(0.08),
+            color: _adminPrimaryColor.withOpacity(0.08),
             blurRadius: 14,
             offset: const Offset(0, 10),
           ),
@@ -468,13 +583,35 @@ class _AdminAttendanceOverviewScreenState
                             children: [
                               Chip(
                                 visualDensity: VisualDensity.compact,
-                                avatar: const Icon(Icons.badge, size: 16),
-                                label: Text(driver.displayRole),
+                                avatar: const Icon(
+                                  Icons.badge,
+                                  size: 16,
+                                  color: _adminPrimaryColor,
+                                ),
+                                label: Text(
+                                  driver.displayRole,
+                                  style: const TextStyle(
+                                    color: _adminPrimaryColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                backgroundColor: _adminTagColor,
                               ),
                               Chip(
                                 visualDensity: VisualDensity.compact,
-                                avatar: const Icon(Icons.apartment, size: 16),
-                                label: Text(driver.displayPlant),
+                                avatar: const Icon(
+                                  Icons.apartment,
+                                  size: 16,
+                                  color: _adminPrimaryColor,
+                                ),
+                                label: Text(
+                                  driver.displayPlant,
+                                  style: const TextStyle(
+                                    color: _adminPrimaryColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                backgroundColor: _adminTagColor,
                               ),
                             ],
                           ),
@@ -524,9 +661,20 @@ class _AdminAttendanceOverviewScreenState
                       icon: const Icon(Icons.event_note_outlined, size: 16),
                       label: const Text('View schedule'),
                       style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black87,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
                         minimumSize: const Size(0, 0),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: _adminPrimaryColor.withOpacity(0.2),
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -573,18 +721,20 @@ class _MonthSummaryCard extends StatelessWidget {
                 current.daysWorked > best.daysWorked ? current : best,
           );
 
-    final baseColor = theme.colorScheme.surface.withOpacity(0.95);
-    final highlightColor = theme.colorScheme.primary.withOpacity(0.08);
-
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        color: baseColor,
-        boxShadow: [
+        gradient: const LinearGradient(
+          colors: [Colors.white, _adminAccentLight],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: _adminPrimaryColor.withOpacity(0.08)),
+        boxShadow: const [
           BoxShadow(
-            color: theme.shadowColor.withOpacity(0.08),
+            color: Color(0x1400296B),
             blurRadius: 18,
-            offset: const Offset(0, 10),
+            offset: Offset(0, 10),
           ),
         ],
       ),
@@ -599,6 +749,7 @@ class _MonthSummaryCard extends StatelessWidget {
                 'Month Snapshot',
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
+                  color: _adminPrimaryColor,
                 ),
               ),
               Container(
@@ -607,13 +758,13 @@ class _MonthSummaryCard extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: highlightColor,
+                  color: _adminTagColor,
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
                   overview.formattedMonth,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.primary,
+                    color: _adminPrimaryColor,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -657,14 +808,16 @@ class _MonthSummaryCard extends StatelessWidget {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(16),
-                color: theme.colorScheme.secondaryContainer.withOpacity(0.35),
+                gradient: const LinearGradient(
+                  colors: [Colors.white, _adminAccentLight],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                border: Border.all(color: _adminPrimaryColor.withOpacity(0.08)),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.emoji_events_outlined,
-                    color: theme.colorScheme.secondary,
-                  ),
+                  Icon(Icons.emoji_events_outlined, color: _adminPrimaryColor),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -673,13 +826,15 @@ class _MonthSummaryCard extends StatelessWidget {
                         Text(
                           'Top performer',
                           style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.secondary,
+                            color: _adminPrimaryColor,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                         Text(
                           '${leader.driverName} • ${leader.daysWorked}/${leader.totalDays} days',
-                          style: theme.textTheme.bodyMedium,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: _adminPrimaryColor,
+                          ),
                         ),
                       ],
                     ),
@@ -731,28 +886,76 @@ class _SummaryTile extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        color: theme.colorScheme.surfaceVariant.withOpacity(0.4),
+        gradient: const LinearGradient(
+          colors: [Colors.white, _adminAccentLight],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(color: _adminPrimaryColor.withOpacity(0.06)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: theme.colorScheme.primary),
+          Icon(icon, color: _adminPrimaryColor),
           const SizedBox(height: 12),
           Text(
             value,
             style: theme.textTheme.titleLarge?.copyWith(
               fontWeight: FontWeight.w600,
+              color: _adminPrimaryColor,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
+              color: _adminPrimaryColor,
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _PlantFilterChips extends StatelessWidget {
+  const _PlantFilterChips({
+    required this.plants,
+    required this.selectedPlant,
+    required this.onSelected,
+  });
+
+  final List<String> plants;
+  final String selectedPlant;
+  final ValueChanged<String> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: plants.map((plant) {
+        final isSelected = plant == selectedPlant;
+        return ChoiceChip(
+          label: Text(
+            plant,
+            style: TextStyle(
+              color: _adminPrimaryColor,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+          backgroundColor: const Color(0xFFFFBB39).withOpacity(0.4),
+          selectedColor: const Color(0xFFFFBB39),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(
+              color: _adminPrimaryColor.withOpacity(isSelected ? 0.4 : 0.2),
+            ),
+          ),
+          selected: isSelected,
+          onSelected: (_) => onSelected(plant),
+        );
+      }).toList(),
     );
   }
 }
