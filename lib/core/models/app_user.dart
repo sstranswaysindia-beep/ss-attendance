@@ -37,6 +37,7 @@ class AppUser {
     this.supervisedPlants = const <Map<String, dynamic>>[],
     this.supervisedPlantIds = const <dynamic>[],
     this.canViewDocuments = false,
+    this.geofencingEnabled = false,
   });
 
   final String id;
@@ -72,6 +73,7 @@ class AppUser {
   final List<Map<String, dynamic>> supervisedPlants;
   final List<dynamic> supervisedPlantIds;
   final bool canViewDocuments;
+  final bool geofencingEnabled;
 
   Map<String, dynamic> toJson() {
     return {
@@ -108,6 +110,7 @@ class AppUser {
       'supervisedPlants': supervisedPlants,
       'supervisedPlantIds': supervisedPlantIds,
       'canViewDocuments': canViewDocuments,
+      'geofencingEnabled': geofencingEnabled,
     };
   }
 
@@ -151,6 +154,23 @@ class AppUser {
           ?.cast<Map<String, dynamic>>() ?? [],
       supervisedPlantIds: json['supervisedPlantIds'] as List<dynamic>? ?? [],
       canViewDocuments: json['canViewDocuments'] == true,
+      geofencingEnabled: _parseGeofenceFlag(
+        json['geofencingEnabled'] ?? json['geofencing_enable'],
+      ),
     );
+  }
+
+  static bool _parseGeofenceFlag(dynamic raw) {
+    if (raw == null) {
+      return false;
+    }
+    if (raw is bool) {
+      return raw;
+    }
+    final normalized = raw.toString().trim().toLowerCase();
+    return normalized == 'y' ||
+        normalized == 'yes' ||
+        normalized == '1' ||
+        normalized == 'true';
   }
 }

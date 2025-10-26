@@ -13,6 +13,7 @@ import '../../core/services/app_update_service.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
+import '../../core/models/supervisor_today_attendance.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/services/notification_service.dart';
@@ -85,6 +86,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   String? _documentsOverviewError;
   bool _hasPromptedForUpdate = false;
 
+  bool _isLoadingTodayAttendance = false;
+  String? _todayAttendanceError;
+  List<SupervisorTodayAttendancePlant> _todayAttendance = const [];
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +109,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
     _loadActiveShift();
     _loadNotifications();
+    _loadSupervisorTodayAttendance();
     _loadAppVersion();
     if (widget.user.canViewDocuments) {
       _loadDocumentsOverview();
@@ -356,6 +362,48 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         onDismissed: () {},
       ),
     );
+  }
+
+  Future<void> _loadSupervisorTodayAttendance({bool silent = false}) async {
+    setState(() {
+      _isLoadingTodayAttendance = true;
+      if (!silent) {
+        _todayAttendanceError = null;
+      }
+    });
+    try {
+      final response = await _attendanceRepository.fetchSupervisorTodayAttendance(
+        supervisorUserId: widget.user.id.toString(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _todayAttendance = response;
+        _todayAttendanceError = null;
+      });
+    } on AttendanceFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _todayAttendanceError = error.message;
+      });
+      if (!silent) {
+        showAppToast(context, error.message, isError: true);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      const fallback = "Unable to load today's attendance.";
+      setState(() {
+        _todayAttendanceError = fallback;
+      });
+      if (!silent) {
+        showAppToast(context, fallback, isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingTodayAttendance = false;
+        });
+      }
+    }
   }
 
   Future<void> _loadDocumentsOverview({bool silent = false}) async {
@@ -780,6 +828,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                         .then((_) {
                           _loadActiveShift();
                           _loadNotifications();
+                          _loadSupervisorTodayAttendance(silent: true);
                         });
                   },
                   label: _attendanceButtonLabel,
@@ -837,7 +886,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                     ApprovalsScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       const Divider(height: 0),
                       HoverListTile(
@@ -850,7 +902,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                     AttendanceHistoryScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       const Divider(height: 0),
                       HoverListTile(
@@ -863,7 +918,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                     MonthlyStatisticsScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       if (widget.user.canViewDocuments) ...[
                         const Divider(height: 0),
@@ -895,7 +953,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                     SalaryAdvanceScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       const Divider(height: 0),
                       HoverListTile(
@@ -908,7 +969,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                     AdvanceSalaryScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       const Divider(height: 0),
                       HoverListTile(
@@ -922,7 +986,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                 ),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       const Divider(height: 0),
                       HoverListTile(
@@ -934,7 +1001,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                 builder: (_) => TripScreen(user: widget.user),
                               ),
                             )
-                            .then((_) => _loadNotifications()),
+                            .then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
                       ),
                       // Show Average Calculator for all supervisors
                       const Divider(height: 0),
@@ -946,6 +1016,22 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Text('Today Attendance', style: textTheme.titleMedium),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _isLoadingTodayAttendance
+                          ? null
+                          : () => _loadSupervisorTodayAttendance(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildTodayAttendanceSection(theme),
                 const SizedBox(height: 16),
                 Text('Notifications', style: textTheme.titleMedium),
                 const SizedBox(height: 8),
@@ -986,6 +1072,323 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildTodayAttendanceSection(ThemeData theme) {
+    if (_isLoadingTodayAttendance && _todayAttendance.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_todayAttendanceError != null && _todayAttendance.isEmpty) {
+      return Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _todayAttendanceError!,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _isLoadingTodayAttendance
+                    ? null
+                    : () => _loadSupervisorTodayAttendance(),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final hasDrivers =
+        _todayAttendance.any((plant) => plant.drivers.isNotEmpty);
+    final items = <Widget>[];
+
+    if (_todayAttendanceError != null && hasDrivers) {
+      items.add(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Text(
+            _todayAttendanceError!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (!hasDrivers) {
+      items.add(
+        Card(
+          color: Colors.white,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: const Padding(
+            padding: EdgeInsets.all(16),
+            child: Text('No drivers found for your supervised plants today.'),
+          ),
+        ),
+      );
+    } else {
+      for (final plant in _todayAttendance) {
+        items.add(_buildPlantAttendanceCard(theme, plant));
+      }
+    }
+
+    if (_isLoadingTodayAttendance && _todayAttendance.isNotEmpty) {
+      items.insert(
+        0,
+        const Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(
+            height: 18,
+            width: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: items,
+    );
+  }
+
+  Widget _buildPlantAttendanceCard(
+    ThemeData theme,
+    SupervisorTodayAttendancePlant plant,
+  ) {
+    final title = plant.plantName.isEmpty ? 'Unassigned Plant' : plant.plantName;
+
+    if (plant.drivers.isEmpty) {
+      return Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(Icons.factory_outlined),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'No drivers linked to this plant.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.factory_outlined),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Column(
+              children: plant.drivers
+                  .map((driver) => _buildDriverAttendanceTile(theme, driver))
+                  .toList(growable: false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDriverAttendanceTile(
+    ThemeData theme,
+    SupervisorTodayAttendanceDriver driver,
+  ) {
+    final hasCheckIn = driver.hasCheckIn;
+    final hasCheckOut = driver.hasCheckOut;
+    final hasAny = hasCheckIn || hasCheckOut;
+    final isComplete = hasCheckIn && hasCheckOut;
+    final isPartial = hasAny && !isComplete;
+
+    final gradientColors = isComplete
+        ? const [Color(0xFF00D100), Color(0xFF00AA00)]
+        : isPartial
+            ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
+            : const [Color(0xFFED1C24), Color(0xFFB3121B)];
+
+    const primaryTextColor = Colors.black87;
+    const subtleTextColor = Colors.black54;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradientColors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          _buildDriverAvatar(driver, primaryTextColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  driver.driverName,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: primaryTextColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Status: ${hasAny ? 'Done' : 'Not Done'}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: primaryTextColor,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                if (isPartial)
+                  Text(
+                    'Check-out pending',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: subtleTextColor,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDriverAvatar(
+    SupervisorTodayAttendanceDriver driver,
+    Color textColor,
+  ) {
+    final badge = driver.roleBadge;
+    final photo = driver.profilePhoto?.trim();
+    final avatarBackground = Colors.white.withOpacity(0.85);
+
+    Widget baseAvatar;
+    if (photo != null && photo.isNotEmpty) {
+      baseAvatar = CircleAvatar(
+        radius: 26,
+        backgroundColor: avatarBackground,
+        backgroundImage: NetworkImage(photo),
+      );
+    } else {
+      baseAvatar = CircleAvatar(
+        radius: 26,
+        backgroundColor: avatarBackground,
+        child: Text(
+          _driverInitials(driver.driverName),
+          style: TextStyle(
+            color: textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
+    }
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        baseAvatar,
+        Positioned(
+          right: -2,
+          bottom: -2,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.black87.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              badge,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _driverInitials(String name) {
+    final parts =
+        name.trim().split(RegExp(r'\\s+')).where((p) => p.isNotEmpty).toList();
+    if (parts.isEmpty) {
+      return 'DR';
+    }
+    if (parts.length == 1) {
+      final word = parts.first;
+      if (word.length >= 2) {
+        return word.substring(0, 2).toUpperCase();
+      }
+      return word.substring(0, 1).toUpperCase();
+    }
+    return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 }
 

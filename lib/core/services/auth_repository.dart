@@ -74,6 +74,8 @@ class AuthRepository {
       final role = _parseRole(userJson['role']?.toString());
       final bool canViewDocuments =
           _parseFlag(userJson['view_document'] ?? userJson['viewDocument']);
+      final bool geofencingEnabled =
+          _parseFlag(userJson['geofencing_enable'] ?? userJson['geofencingEnabled']);
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
@@ -97,6 +99,7 @@ class AuthRepository {
           displayName: displayName,
           role: role,
           canViewDocuments: canViewDocuments,
+          geofencingEnabled: geofencingEnabled,
         );
       }
 
@@ -161,6 +164,7 @@ class AuthRepository {
           supervisedPlantIds: supervisedPlantIds,
           availableVehicles: vehicles,
           canViewDocuments: canViewDocuments,
+          geofencingEnabled: geofencingEnabled,
         );
       }
 
@@ -268,6 +272,7 @@ class AuthRepository {
         supervisedPlantIds:
             supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
         canViewDocuments: canViewDocuments,
+        geofencingEnabled: geofencingEnabled,
       );
     } on AuthFailure {
       rethrow;

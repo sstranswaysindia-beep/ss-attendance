@@ -42,7 +42,7 @@ if ($username === '' || $password === '') {
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
-$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document FROM users WHERE username = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable FROM users WHERE username = ? LIMIT 1');
 $stmt->bind_param('s', $username);
 $stmt->execute();
 $userRow = $stmt->get_result()->fetch_assoc();
@@ -409,6 +409,7 @@ apiRespond(200, [
         'role'     => $userRow['role'],
         'full_name' => $userRow['full_name'],
         'view_document' => $userRow['view_document'] ?? null,
+        'geofencing_enable' => $userRow['geofencing_enable'] ?? null,
     ],
     'driver' => $driverInfo,
     'supervisor' => $supervisorInfo,

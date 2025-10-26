@@ -348,142 +348,299 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     showDialog(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(isAdvanceReceived ? 'You Got ₹' : 'You Gave ₹'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: amountController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Amount',
-                    prefixText: '₹',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: selectedDescription,
-                  decoration: InputDecoration(
-                    labelText: _isDescriptionLoading
-                        ? 'Loading descriptions...'
-                        : 'Description',
-                    border: const OutlineInputBorder(),
-                    errorText: _descriptionLoadError,
-                  ),
-                  items: _descriptionOptions
-                      .map(
-                        (label) => DropdownMenuItem<String>(
-                          value: label,
-                          child: Text(label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: _isDescriptionLoading
-                      ? null
-                      : (value) {
-                          setState(() {
-                            selectedDescription = value;
-                          });
-                        },
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: extraNotesController,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Additional description (optional)',
-                    hintText: 'Add more details for this entry',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                ListTile(
-                  leading: const Icon(Icons.calendar_today),
-                  title: Text('Date: ${_formatDate(selectedDate)}'),
-                  subtitle: Text(_formatTime(selectedDate)),
-                  trailing: const Icon(Icons.edit),
-                  onTap: () async {
-                    final date = await showDatePicker(
-                      context: context,
-                      initialDate: selectedDate,
-                      firstDate: DateTime.now().subtract(
-                        const Duration(days: 365),
-                      ),
-                      lastDate: DateTime.now(),
-                    );
-                    if (date != null) {
-                      final time = await showTimePicker(
-                        context: context,
-                        initialTime: TimeOfDay.fromDateTime(selectedDate),
-                      );
-                      if (time != null) {
-                        setState(() {
-                          selectedDate = DateTime(
-                            date.year,
-                            date.month,
-                            date.day,
-                            time.hour,
-                            time.minute,
-                          );
-                        });
-                      }
-                    }
-                  },
-                ),
-                // Receipt upload section for YOU GAVE (expense) transactions
-                if (!isAdvanceReceived) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.withOpacity(0.3)),
-                      borderRadius: BorderRadius.circular(8),
+        builder: (context, setState) {
+          Future<void> _handleReceiptSelection(ImageSource source) async {
+            try {
+              setState(() {
+                _isUploadingPhoto = true;
+              });
+
+              final XFile? image = await _imagePicker.pickImage(
+                source: source,
+                maxWidth: 1920,
+                maxHeight: 1080,
+                imageQuality: 85,
+              );
+
+              if (image != null) {
+                setState(() {
+                  selectedReceiptPath = image.path;
+                });
+              }
+            } catch (e) {
+              showAppToast(context, 'Error selecting image: $e', isError: true);
+            } finally {
+              setState(() {
+                _isUploadingPhoto = false;
+              });
+            }
+          }
+
+          return AlertDialog(
+            title: Text(isAdvanceReceived ? 'You Got ₹' : 'You Gave ₹'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: amountController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Amount',
+                      prefixText: '₹',
+                      border: OutlineInputBorder(),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Receipt (Optional)',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    value: selectedDescription,
+                    decoration: InputDecoration(
+                      labelText: _isDescriptionLoading
+                          ? 'Loading descriptions...'
+                          : 'Description',
+                      border: const OutlineInputBorder(),
+                      errorText: _descriptionLoadError,
+                    ),
+                    items: _descriptionOptions
+                        .map(
+                          (label) => DropdownMenuItem<String>(
+                            value: label,
+                            child: Text(label),
                           ),
+                        )
+                        .toList(),
+                    onChanged: _isDescriptionLoading
+                        ? null
+                        : (value) {
+                            setState(() {
+                              selectedDescription = value;
+                            });
+                          },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: extraNotesController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Additional description (optional)',
+                      hintText: 'Add more details for this entry',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  ListTile(
+                    leading: const Icon(Icons.calendar_today),
+                    title: Text('Date: ${_formatDate(selectedDate)}'),
+                    subtitle: Text(_formatTime(selectedDate)),
+                    trailing: const Icon(Icons.edit),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: selectedDate,
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: 365),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            if (selectedReceiptPath != null) ...[
-                              // Show selected receipt
-                              Expanded(
+                        lastDate: DateTime.now(),
+                      );
+                      if (date != null) {
+                        final time = await showTimePicker(
+                          context: context,
+                          initialTime: TimeOfDay.fromDateTime(selectedDate),
+                        );
+                        if (time != null) {
+                          setState(() {
+                            selectedDate = DateTime(
+                              date.year,
+                              date.month,
+                              date.day,
+                              time.hour,
+                              time.minute,
+                            );
+                          });
+                        }
+                      }
+                    },
+                  ),
+                  // Receipt upload section for YOU GAVE (expense) transactions
+                  if (!isAdvanceReceived) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Receipt (Optional)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              if (selectedReceiptPath != null) ...[
+                                // Show selected receipt
+                                Expanded(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 4,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(
+                                        color: Colors.green.withOpacity(0.3),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(
+                                          Icons.receipt,
+                                          size: 16,
+                                          color: Colors.green,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        const Text(
+                                          'Receipt Selected',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: Colors.green,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              // Upload/Change receipt button
+                              GestureDetector(
+                                onTap: _isUploadingPhoto
+                                    ? null
+                                    : () async {
+                                        final ImageSource?
+                                        source = await showModalBottomSheet<ImageSource>(
+                                          context: context,
+                                          shape: const RoundedRectangleBorder(
+                                            borderRadius: BorderRadius.vertical(
+                                              top: Radius.circular(16),
+                                            ),
+                                          ),
+                                          builder: (sheetContext) => SafeArea(
+                                            child: Column(
+                                              mainAxisSize: MainAxisSize.min,
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.stretch,
+                                              children: [
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 20,
+                                                        vertical: 16,
+                                                      ),
+                                                  child: Text(
+                                                    'Attach receipt',
+                                                    style: Theme.of(context)
+                                                        .textTheme
+                                                        .titleMedium
+                                                        ?.copyWith(
+                                                          fontWeight:
+                                                              FontWeight.w600,
+                                                        ),
+                                                  ),
+                                                ),
+                                                ListTile(
+                                                  leading: const Icon(
+                                                    Icons.camera_alt_outlined,
+                                                  ),
+                                                  title: const Text(
+                                                    'Capture photo',
+                                                  ),
+                                                  onTap: () => Navigator.pop(
+                                                    sheetContext,
+                                                    ImageSource.camera,
+                                                  ),
+                                                ),
+                                                ListTile(
+                                                  leading: const Icon(
+                                                    Icons
+                                                        .photo_library_outlined,
+                                                  ),
+                                                  title: const Text(
+                                                    'Choose from gallery',
+                                                  ),
+                                                  onTap: () => Navigator.pop(
+                                                    sheetContext,
+                                                    ImageSource.gallery,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 16),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+
+                                        if (source != null) {
+                                          await _handleReceiptSelection(source);
+                                        }
+                                      },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 8,
                                     vertical: 4,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: Colors.green.withOpacity(0.1),
+                                    color: _isUploadingPhoto
+                                        ? Colors.grey.withOpacity(0.3)
+                                        : Colors.blue.withOpacity(0.1),
                                     borderRadius: BorderRadius.circular(4),
                                     border: Border.all(
-                                      color: Colors.green.withOpacity(0.3),
+                                      color: _isUploadingPhoto
+                                          ? Colors.grey.withOpacity(0.3)
+                                          : Colors.blue.withOpacity(0.3),
                                     ),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(
-                                        Icons.receipt,
-                                        size: 16,
-                                        color: Colors.green,
-                                      ),
+                                      if (_isUploadingPhoto)
+                                        const SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      else
+                                        Icon(
+                                          selectedReceiptPath != null
+                                              ? Icons.edit
+                                              : Icons.attach_file,
+                                          size: 16,
+                                          color: _isUploadingPhoto
+                                              ? Colors.grey
+                                              : Colors.blue,
+                                        ),
                                       const SizedBox(width: 4),
-                                      const Text(
-                                        'Receipt Selected',
+                                      Text(
+                                        _isUploadingPhoto
+                                            ? 'Selecting...'
+                                            : (selectedReceiptPath != null
+                                                  ? 'Change'
+                                                  : 'Attach Receipt'),
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: Colors.green,
+                                          color: _isUploadingPhoto
+                                              ? Colors.grey
+                                              : Colors.blue,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
@@ -491,235 +648,143 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 8),
                             ],
-                            // Upload/Change receipt button
-                            GestureDetector(
-                              onTap: _isUploadingPhoto
-                                  ? null
-                                  : () async {
-                                      try {
-                                        final XFile? image = await _imagePicker
-                                            .pickImage(
-                                              source: ImageSource.gallery,
-                                              maxWidth: 1920,
-                                              maxHeight: 1080,
-                                              imageQuality: 85,
-                                            );
-
-                                        if (image != null) {
-                                          setState(() {
-                                            _isUploadingPhoto = true;
-                                          });
-
-                                          // For now, just store the local path
-                                          // The actual upload will happen after transaction creation
-                                          setState(() {
-                                            selectedReceiptPath = image.path;
-                                            _isUploadingPhoto = false;
-                                          });
-                                        }
-                                      } catch (e) {
-                                        setState(() {
-                                          _isUploadingPhoto = false;
-                                        });
-                                        showAppToast(
-                                          context,
-                                          'Error selecting image: $e',
-                                          isError: true,
-                                        );
-                                      }
-                                    },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _isUploadingPhoto
-                                      ? Colors.grey.withOpacity(0.3)
-                                      : Colors.blue.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(
-                                    color: _isUploadingPhoto
-                                        ? Colors.grey.withOpacity(0.3)
-                                        : Colors.blue.withOpacity(0.3),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (_isUploadingPhoto)
-                                      const SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    else
-                                      Icon(
-                                        selectedReceiptPath != null
-                                            ? Icons.edit
-                                            : Icons.attach_file,
-                                        size: 16,
-                                        color: _isUploadingPhoto
-                                            ? Colors.grey
-                                            : Colors.blue,
-                                      ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      _isUploadingPhoto
-                                          ? 'Selecting...'
-                                          : (selectedReceiptPath != null
-                                                ? 'Change'
-                                                : 'Attach Receipt'),
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: _isUploadingPhoto
-                                            ? Colors.grey
-                                            : Colors.blue,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final amount = double.tryParse(amountController.text);
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final amount = double.tryParse(amountController.text);
 
-                if (amount == null || amount <= 0) {
-                  showAppToast(
-                    context,
-                    'Please enter a valid amount',
-                    isError: true,
-                  );
-                  return;
-                }
-
-                final baseDescription = selectedDescription?.trim() ?? '';
-                final extraNotes = extraNotesController.text.trim();
-                final combinedDescription = () {
-                  if (baseDescription.isEmpty && extraNotes.isEmpty) {
-                    return '';
-                  }
-                  if (baseDescription.isEmpty) {
-                    return extraNotes;
-                  }
-                  if (extraNotes.isEmpty) {
-                    return baseDescription;
-                  }
-                  return '$baseDescription — $extraNotes';
-                }();
-
-                if (combinedDescription.isEmpty) {
-                  showAppToast(
-                    context,
-                    'Please provide a description',
-                    isError: true,
-                  );
-                  return;
-                }
-
-                Navigator.pop(context);
-
-                final type = isAdvanceReceived ? 'advance_received' : 'expense';
-                print('🔵 CREATING TRANSACTION');
-                print('🔵 Type: $type');
-                print('🔵 Amount: $amount');
-                print('🔵 Description: $combinedDescription');
-                print('🔵 Selected Receipt Path: $selectedReceiptPath');
-
-                final transactionId = await _addTransactionWithDate(
-                  type,
-                  amount,
-                  combinedDescription,
-                  selectedDate,
-                );
-
-                print('🔵 Transaction ID returned: $transactionId');
-
-                // Upload receipt if provided for expense transactions
-                if (!isAdvanceReceived &&
-                    selectedReceiptPath != null &&
-                    transactionId != null) {
-                  try {
-                    print('🔵 RECEIPT UPLOAD START');
-                    print('🔵 Transaction ID: $transactionId');
-                    print(
-                      '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
+                  if (amount == null || amount <= 0) {
+                    showAppToast(
+                      context,
+                      'Please enter a valid amount',
+                      isError: true,
                     );
-                    print('🔵 File path: $selectedReceiptPath');
+                    return;
+                  }
 
-                    // Check if file exists
-                    final file = File(selectedReceiptPath!);
-                    final fileExists = await file.exists();
-                    print('🔵 File exists: $fileExists');
-                    if (fileExists) {
-                      final fileSize = await file.length();
-                      print('🔵 File size: $fileSize bytes');
+                  final baseDescription = selectedDescription?.trim() ?? '';
+                  final extraNotes = extraNotesController.text.trim();
+                  final combinedDescription = () {
+                    if (baseDescription.isEmpty && extraNotes.isEmpty) {
+                      return '';
                     }
+                    if (baseDescription.isEmpty) {
+                      return extraNotes;
+                    }
+                    if (extraNotes.isEmpty) {
+                      return baseDescription;
+                    }
+                    return '$baseDescription — $extraNotes';
+                  }();
 
-                    final response = await _financeRepository.uploadReceipt(
-                      transactionId: transactionId,
-                      driverId: widget.user.driverId ?? widget.user.id,
-                      filePath: selectedReceiptPath!,
+                  if (combinedDescription.isEmpty) {
+                    showAppToast(
+                      context,
+                      'Please provide a description',
+                      isError: true,
                     );
+                    return;
+                  }
 
-                    print('🟢 Upload response: $response');
+                  Navigator.pop(context);
 
-                    if (response['status'] == 'ok') {
-                      showAppToast(context, 'Receipt uploaded successfully');
-                      print('🟢 Receipt upload SUCCESS');
-                      // Reload data to show the receipt
-                      if (mounted) {
-                        await _loadData();
+                  final type = isAdvanceReceived
+                      ? 'advance_received'
+                      : 'expense';
+                  print('🔵 CREATING TRANSACTION');
+                  print('🔵 Type: $type');
+                  print('🔵 Amount: $amount');
+                  print('🔵 Description: $combinedDescription');
+                  print('🔵 Selected Receipt Path: $selectedReceiptPath');
+
+                  final transactionId = await _addTransactionWithDate(
+                    type,
+                    amount,
+                    combinedDescription,
+                    selectedDate,
+                  );
+
+                  print('🔵 Transaction ID returned: $transactionId');
+
+                  // Upload receipt if provided for expense transactions
+                  if (!isAdvanceReceived &&
+                      selectedReceiptPath != null &&
+                      transactionId != null) {
+                    try {
+                      print('🔵 RECEIPT UPLOAD START');
+                      print('🔵 Transaction ID: $transactionId');
+                      print(
+                        '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
+                      );
+                      print('🔵 File path: $selectedReceiptPath');
+
+                      // Check if file exists
+                      final file = File(selectedReceiptPath!);
+                      final fileExists = await file.exists();
+                      print('🔵 File exists: $fileExists');
+                      if (fileExists) {
+                        final fileSize = await file.length();
+                        print('🔵 File size: $fileSize bytes');
                       }
-                    } else {
-                      print('🔴 Receipt upload FAILED: ${response['error']}');
+
+                      final response = await _financeRepository.uploadReceipt(
+                        transactionId: transactionId,
+                        driverId: widget.user.driverId ?? widget.user.id,
+                        filePath: selectedReceiptPath!,
+                      );
+
+                      print('🟢 Upload response: $response');
+
+                      if (response['status'] == 'ok') {
+                        showAppToast(context, 'Receipt uploaded successfully');
+                        print('🟢 Receipt upload SUCCESS');
+                        // Reload data to show the receipt
+                        if (mounted) {
+                          await _loadData();
+                        }
+                      } else {
+                        print('🔴 Receipt upload FAILED: ${response['error']}');
+                        showAppToast(
+                          context,
+                          'Receipt upload failed: ${response['error'] ?? 'Unknown error'}',
+                          isError: true,
+                        );
+                      }
+                    } catch (e) {
+                      print('🔴 Upload exception: $e');
+                      print('🔴 Exception type: ${e.runtimeType}');
                       showAppToast(
                         context,
-                        'Receipt upload failed: ${response['error'] ?? 'Unknown error'}',
+                        'Error uploading receipt: $e',
                         isError: true,
                       );
                     }
-                  } catch (e) {
-                    print('🔴 Upload exception: $e');
-                    print('🔴 Exception type: ${e.runtimeType}');
-                    showAppToast(
-                      context,
-                      'Error uploading receipt: $e',
-                      isError: true,
-                    );
+                    print('🔵 Receipt upload process completed');
+                  } else {
+                    print('🔵 Receipt upload SKIPPED');
+                    print('🔵 isAdvanceReceived: $isAdvanceReceived');
+                    print('🔵 selectedReceiptPath: $selectedReceiptPath');
+                    print('🔵 transactionId: $transactionId');
                   }
-                  print('🔵 Receipt upload process completed');
-                } else {
-                  print('🔵 Receipt upload SKIPPED');
-                  print('🔵 isAdvanceReceived: $isAdvanceReceived');
-                  print('🔵 selectedReceiptPath: $selectedReceiptPath');
-                  print('🔵 transactionId: $transactionId');
-                }
-              },
-              child: const Text('Add'),
-            ),
-          ],
-        ),
+                },
+                child: const Text('Add'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

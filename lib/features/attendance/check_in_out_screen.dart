@@ -50,6 +50,9 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   File? _capturedPhoto;
   String? _submissionSummary;
   bool _hasShownLocationWarning = false;
+  bool? _locationServiceEnabled;
+  LocationPermission? _locationPermissionStatus;
+  bool _locationStatusRefreshing = false;
 
   String? _selectedVehicleId;
   String? _selectedVehicleNumber;
@@ -70,6 +73,9 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
     _initialiseVehicleSelection();
     _loadActiveShift();
+    if (widget.user.geofencingEnabled) {
+      _preflightLocationCheck();
+    }
   }
 
   @override
@@ -150,6 +156,64 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       });
       _updateStatusAnimation();
       showAppToast(context, 'Unable to load attendance status.', isError: true);
+    }
+  }
+
+  Future<void> _preflightLocationCheck() async {
+    if (!widget.user.geofencingEnabled) {
+      return;
+    }
+    setState(() => _locationStatusRefreshing = true);
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      final permission = await Geolocator.checkPermission();
+      if (!mounted) return;
+      setState(() {
+        _locationServiceEnabled = serviceEnabled;
+        _locationPermissionStatus = permission;
+        _locationStatusRefreshing = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _locationServiceEnabled = null;
+        _locationPermissionStatus = null;
+        _locationStatusRefreshing = false;
+      });
+    }
+  }
+
+  Future<void> _openLocationSettings() async {
+    try {
+      final didOpen = await Geolocator.openLocationSettings();
+      if (!mounted) return;
+      if (didOpen) {
+        await _preflightLocationCheck();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      showAppToast(
+        context,
+        'Unable to open location settings on this device.',
+        isError: true,
+      );
+    }
+  }
+
+  Future<void> _openAppPermissionSettings() async {
+    try {
+      final didOpen = await Geolocator.openAppSettings();
+      if (!mounted) return;
+      if (didOpen) {
+        await _preflightLocationCheck();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      showAppToast(
+        context,
+        'Unable to open app permissions screen.',
+        isError: true,
+      );
     }
   }
 
@@ -550,7 +614,26 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     _updateStatusAnimation();
 
     try {
-      final locationPayload = await _captureCurrentLocation();
+      final locationPayload = await _captureCurrentLocation(
+        requireHighAccuracy: widget.user.geofencingEnabled,
+      );
+
+      if (widget.user.geofencingEnabled && locationPayload == null) {
+        if (!mounted) {
+          return;
+        }
+        setState(() {
+          _isSubmitting = false;
+          _isSyncPending = false;
+        });
+        _updateStatusAnimation();
+        showAppToast(
+          context,
+          'Precise location is required for attendance. Enable GPS and try again.',
+          isError: true,
+        );
+        return;
+      }
       final result = await _attendanceRepository.submit(
         driverId: driverId,
         plantId: plantId,
@@ -608,9 +691,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     }
   }
 
-  Future<Map<String, dynamic>?> _captureCurrentLocation() async {
+  Future<Map<String, dynamic>?> _captureCurrentLocation({
+    bool requireHighAccuracy = false,
+  }) async {
+    bool? serviceEnabledValue;
+    LocationPermission? permissionValue;
     try {
+      if (mounted) {
+        setState(() => _locationStatusRefreshing = true);
+      }
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      serviceEnabledValue = serviceEnabled;
       if (!serviceEnabled) {
         if (mounted && !_hasShownLocationWarning) {
           _hasShownLocationWarning = true;
@@ -623,17 +714,26 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       }
 
       var permission = await Geolocator.checkPermission();
+      permissionValue = permission;
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
+        permissionValue = permission;
       }
 
-      if (permission == LocationPermission.deniedForever ||
-          permission == LocationPermission.denied) {
+      final bool hasPermission =
+          permission == LocationPermission.always ||
+          permission == LocationPermission.whileInUse;
+
+      if (!hasPermission) {
         if (mounted && !_hasShownLocationWarning) {
           _hasShownLocationWarning = true;
+          final bool permanentlyDenied =
+              permission == LocationPermission.deniedForever;
           showAppToast(
             context,
-            'Location permission denied. Attendance submitted without GPS.',
+            permanentlyDenied
+                ? 'Location permission permanently denied. Open app settings to enable it.'
+                : 'Location permission denied. Attendance submitted without GPS.',
             isError: true,
           );
         }
@@ -641,8 +741,12 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       }
 
       final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        desiredAccuracy: requireHighAccuracy
+            ? LocationAccuracy.bestForNavigation
+            : LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 15),
       );
+      _hasShownLocationWarning = false;
       return <String, dynamic>{
         'latitude': position.latitude,
         'longitude': position.longitude,
@@ -653,6 +757,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         'speedAccuracy': position.speedAccuracy,
         'heading': position.heading,
         'source': 'geolocator',
+        'geofenceEnforced': requireHighAccuracy,
       };
     } catch (error) {
       if (mounted && !_hasShownLocationWarning) {
@@ -664,6 +769,227 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         );
       }
       return null;
+    } finally {
+      if (mounted) {
+        setState(() {
+          if (serviceEnabledValue != null) {
+            _locationServiceEnabled = serviceEnabledValue;
+          }
+          if (permissionValue != null) {
+            _locationPermissionStatus = permissionValue;
+          }
+          _locationStatusRefreshing = false;
+        });
+      }
+    }
+  }
+
+  Widget _buildGeofenceBanner(BuildContext context) {
+    if (!widget.user.geofencingEnabled) {
+      return const SizedBox.shrink();
+    }
+    final theme = Theme.of(context);
+    final bool? serviceStatus = _locationServiceEnabled;
+    final LocationPermission? permissionStatus = _locationPermissionStatus;
+    final bool serviceKnown = serviceStatus != null;
+    final bool serviceEnabled = serviceStatus == true;
+    final bool permissionKnown = permissionStatus != null;
+    final bool permissionGranted =
+        permissionStatus == LocationPermission.always ||
+        permissionStatus == LocationPermission.whileInUse;
+    final bool permissionForeverDenied =
+        permissionStatus == LocationPermission.deniedForever;
+
+    final String serviceLabel = serviceKnown
+        ? (serviceEnabled ? 'GPS enabled' : 'GPS disabled')
+        : (_locationStatusRefreshing
+              ? 'Checking GPS status…'
+              : 'GPS status unknown');
+    final IconData serviceIcon = serviceKnown
+        ? (serviceEnabled ? Icons.gps_fixed : Icons.gps_off)
+        : Icons.location_searching;
+    final Color serviceColor = serviceKnown
+        ? (serviceEnabled ? Colors.green.shade700 : Colors.red.shade600)
+        : Colors.blueGrey.shade600;
+
+    final String permissionLabel = permissionKnown
+        ? _permissionDescription(permissionStatus!)
+        : (_locationStatusRefreshing
+              ? 'Checking permission…'
+              : 'Permission unchecked');
+    final IconData permissionIcon;
+    final Color permissionColor;
+
+    if (!permissionKnown) {
+      permissionIcon = Icons.lock_clock;
+      permissionColor = Colors.blueGrey.shade600;
+    } else if (permissionGranted) {
+      permissionIcon = Icons.lock_open;
+      permissionColor = Colors.green.shade700;
+    } else if (permissionForeverDenied) {
+      permissionIcon = Icons.lock;
+      permissionColor = Colors.red.shade600;
+    } else {
+      permissionIcon = Icons.lock_outline;
+      permissionColor = Colors.orange.shade700;
+    }
+
+    final bool isSupervisor = widget.user.role == UserRole.supervisor;
+    final String subjectLine = isSupervisor
+        ? 'Supervisors must mark attendance from within their assigned plant boundary.'
+        : 'Drivers must remain inside the plant geofence before submitting attendance.';
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.indigo.shade50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.indigo.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.shield_outlined,
+                color: Colors.indigo.shade600,
+                size: 28,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Geofence active',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: Colors.indigo.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Precise GPS is mandatory for check-in and check-out. $subjectLine',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: Colors.indigo.shade700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildStatusPill(
+                icon: serviceIcon,
+                label: serviceLabel,
+                color: serviceColor,
+              ),
+              _buildStatusPill(
+                icon: permissionIcon,
+                label: permissionLabel,
+                color: permissionColor,
+              ),
+              _buildStatusPill(
+                icon: isSupervisor ? Icons.manage_accounts : Icons.badge,
+                label: isSupervisor ? 'Supervisor account' : 'Driver account',
+                color: Colors.indigo.shade700,
+                backgroundColor: Colors.indigo.shade100,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 12,
+              runSpacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: _locationStatusRefreshing
+                      ? null
+                      : _preflightLocationCheck,
+                  icon: _locationStatusRefreshing
+                      ? SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  label: Text(
+                    _locationStatusRefreshing ? 'Checking…' : 'Refresh status',
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: _openLocationSettings,
+                  icon: const Icon(Icons.gps_fixed),
+                  label: const Text('Location settings'),
+                ),
+                if (permissionForeverDenied)
+                  TextButton.icon(
+                    onPressed: _openAppPermissionSettings,
+                    icon: const Icon(Icons.app_settings_alt),
+                    label: const Text('App permissions'),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusPill({
+    required IconData icon,
+    required String label,
+    required Color color,
+    Color? backgroundColor,
+  }) {
+    final Color resolvedBackground = backgroundColor ?? color.withOpacity(0.12);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: resolvedBackground,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: color.withOpacity(0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w600,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _permissionDescription(LocationPermission permission) {
+    switch (permission) {
+      case LocationPermission.always:
+        return 'Permission: always';
+      case LocationPermission.whileInUse:
+        return 'Permission: while in use';
+      case LocationPermission.denied:
+        return 'Permission denied';
+      case LocationPermission.deniedForever:
+        return 'Permission permanently denied';
+      default:
+        return 'Permission: ${permission.name}';
     }
   }
 
@@ -700,6 +1026,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
                   children: [
+                    if (widget.user.geofencingEnabled) ...[
+                      _buildGeofenceBanner(context),
+                      const SizedBox(height: 16),
+                    ],
                     Row(
                       children: [
                         Expanded(

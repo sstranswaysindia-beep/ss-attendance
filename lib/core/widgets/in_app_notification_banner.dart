@@ -141,7 +141,33 @@ class _InAppNotificationBannerHostState
   }
 
   void _openNotificationCenter() {
-    final navigator = Navigator.of(context, rootNavigator: true);
+    final navigator =
+        Navigator.maybeOf(context, rootNavigator: true) ??
+            Navigator.maybeOf(context);
+    if (navigator == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final fallback =
+            Navigator.maybeOf(context) ??
+                Navigator.maybeOf(context, rootNavigator: true);
+        if (fallback != null) {
+          showModalBottomSheet<void>(
+            context: fallback.context,
+            isScrollControlled: true,
+            useSafeArea: true,
+            showDragHandle: true,
+            builder: (ctx) => _NotificationCenterSheet(
+              initialNotifications: _inboxNotifications,
+            ),
+          );
+        } else {
+          debugPrint(
+            'InAppNotificationBanner: Unable to open notification center - no Navigator available even after retry.',
+          );
+        }
+      });
+      return;
+    }
+
     showModalBottomSheet<void>(
       context: navigator.context,
       isScrollControlled: true,

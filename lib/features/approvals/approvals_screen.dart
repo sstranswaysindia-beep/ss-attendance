@@ -154,6 +154,16 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
 
     final isApprove = direction == DismissDirection.endToStart;
     final action = isApprove ? 'approve' : 'reject';
+    final hasOutTime = (approval.outTime ?? '').trim().isNotEmpty;
+    if (isApprove && !hasOutTime) {
+      showAppToast(
+        context,
+        'Cannot approve until out punch is submitted.',
+        isError: true,
+      );
+      return false;
+    }
+
 
     setState(() => _processingApprovals.add(approval.attendanceId));
 
@@ -428,12 +438,15 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                               approval.attendanceId,
                             );
 
+                            final rawOut = approval.outTime?.trim() ?? '';
+                            final outDisplay = rawOut.isEmpty ? 'Pending' : rawOut;
+
                             final subtitleLines = <String>[
                               'Plant: ${approval.plantName}',
                               if ((approval.vehicleNumber ?? '').isNotEmpty)
                                 'Vehicle: ${approval.vehicleNumber}',
                               'In: ${approval.inTime ?? '-'}',
-                              'Out: ${approval.outTime ?? '-'}',
+                              'Out: $outDisplay',
                             ];
                             if ((approval.notes ?? '').isNotEmpty) {
                               subtitleLines.add('Notes: ${approval.notes}');

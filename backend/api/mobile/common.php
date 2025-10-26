@@ -66,6 +66,21 @@ function apiEnsurePost(): void {
     }
 }
 
+function apiBuildProfileUrl(?string $path): string {
+    if ($path === null) {
+        return '';
+    }
+    $trimmed = trim($path);
+    if ($trimmed === '') {
+        return '';
+    }
+    if (stripos($trimmed, 'http://') === 0 || stripos($trimmed, 'https://') === 0) {
+        return $trimmed;
+    }
+    $trimmed = ltrim($trimmed, '/');
+    return 'https://sstranswaysindia.com/' . $trimmed;
+}
+
 function apiSaveUploadedFile(string $field, int $driverId, string $prefix, ?string $customPath = null, ?string $customFilename = null): ?string {
     if (empty($_FILES[$field]) || $_FILES[$field]['error'] !== UPLOAD_ERR_OK) {
         return null;
@@ -127,4 +142,194 @@ function apiBindParams(mysqli_stmt $stmt, string $types, array $values): void {
     }
 
     $stmt->bind_param($types, ...$references);
+}
+
+function geofenceHaversineDistanceMeters(float $lat1, float $lng1, float $lat2, float $lng2): float {
+    $earthRadius = 6371000.0; // meters
+    $latFrom = deg2rad($lat1);
+    $latTo = deg2rad($lat2);
+    $latDelta = deg2rad($lat2 - $lat1);
+    $lngDelta = deg2rad($lng2 - $lng1);
+
+    $a = sin($latDelta / 2) * sin($latDelta / 2) +
+        cos($latFrom) * cos($latTo) *
+        sin($lngDelta / 2) * sin($lngDelta / 2);
+    $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+    return $earthRadius * $c;
+}
+
+/**
+ * @param array<int, array{lat: float, lng: float}> $points
+ */
+function geofencePointInPolygon(float $lat, float $lng, array $points): bool {
+    $numPoints = count($points);
+    if ($numPoints < 3) {
+        return false;
+    }
+
+    $inside = false;
+    $x = $lng;
+    $y = $lat;
+    for ($i = 0, $j = $numPoints - 1; $i < $numPoints; $j = $i++) {
+        $xi = $points[$i]['lng'];
+        $yi = $points[$i]['lat'];
+        $xj = $points[$j]['lng'];
+        $yj = $points[$j]['lat'];
+
+        $intersect = (($yi > $y) !== ($yj > $y)) &&
+            ($x < ($xj - $xi) * ($y - $yi) / (($yj - $yi) ?: 1e-9) + $xi);
+        if ($intersect) {
+            $inside = !$inside;
+        }
+    }
+    return $inside;
+}
+
+/**
+ * @param mixed $rawPoints
+ * @return array<int, array{lat: float, lng: float}>
+ */
+function geofenceNormalizePolygonPoints($rawPoints): array {
+    if (!is_array($rawPoints)) {
+        return [];
+    }
+    $normalized = [];
+    foreach ($rawPoints as $point) {
+        $lat = null;
+        $lng = null;
+        if (is_array($point)) {
+            if (isset($point['lat'], $point['lng'])) {
+                $lat = $point['lat'];
+                $lng = $point['lng'];
+            } elseif (count($point) >= 2) {
+                $values = array_values($point);
+                $lat = $values[0];
+                $lng = $values[1];
+            }
+        }
+        if ($lat !== null && $lng !== null && is_numeric($lat) && is_numeric($lng)) {
+            $normalized[] = ['lat' => (float) $lat, 'lng' => (float) $lng];
+        }
+    }
+    return $normalized;
+}
+
+/**
+ * @return array<int, array<string, mixed>>
+ */
+function geofenceFetchActive(mysqli $conn, int $plantId): array {
+    $stmt = $conn->prepare('SELECT id, fence_type, center_lat, center_lng, radius_m, polygon_json FROM plant_geofences WHERE plant_id = ? AND is_active = 1');
+    if (!$stmt) {
+        return [];
+    }
+    $stmt->bind_param('i', $plantId);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $geofences = [];
+    while ($row = $result->fetch_assoc()) {
+        $fenceType = strtolower((string) ($row['fence_type'] ?? 'circle'));
+        $radius = isset($row['radius_m']) ? (float) $row['radius_m'] : 120.0;
+        $polygonRaw = $row['polygon_json'] ?? null;
+        $polygonPoints = [];
+        if ($polygonRaw !== null && $polygonRaw !== '') {
+            $decoded = json_decode((string) $polygonRaw, true);
+            $polygonPoints = geofenceNormalizePolygonPoints($decoded);
+        }
+        $geofences[] = [
+            'id' => (int) $row['id'],
+            'fence_type' => $fenceType,
+            'center_lat' => isset($row['center_lat']) ? (float) $row['center_lat'] : null,
+            'center_lng' => isset($row['center_lng']) ? (float) $row['center_lng'] : null,
+            'radius' => $radius > 0 ? $radius : 120.0,
+            'polygon_points' => $polygonPoints,
+        ];
+    }
+    $stmt->close();
+    return $geofences;
+}
+
+/**
+ * @param array<string, mixed>|null $location
+ * @return array{status: string, out_of_geofence: bool, message?: string}
+ */
+function geofenceEvaluate(
+    mysqli $conn,
+    int $plantId,
+    ?array $location,
+    bool $enforce
+): array {
+    $geofences = geofenceFetchActive($conn, $plantId);
+    if ($enforce && empty($geofences)) {
+        return [
+            'status' => 'error',
+            'out_of_geofence' => false,
+            'message' => 'Geofence not configured for this plant. Contact administrator.',
+        ];
+    }
+
+    if ($location === null) {
+        if ($enforce) {
+            return [
+                'status' => 'error',
+                'out_of_geofence' => false,
+                'message' => 'Location is required for geofenced attendance. Enable GPS and try again.',
+            ];
+        }
+        return ['status' => 'ok', 'out_of_geofence' => false];
+    }
+
+    if (!isset($location['latitude'], $location['longitude'])) {
+        if ($enforce) {
+            return [
+                'status' => 'error',
+                'out_of_geofence' => false,
+                'message' => 'Invalid location payload received. Please retry.',
+            ];
+        }
+        return ['status' => 'ok', 'out_of_geofence' => false];
+    }
+
+    $lat = (float) $location['latitude'];
+    $lng = (float) $location['longitude'];
+    $inside = false;
+
+    foreach ($geofences as $geofence) {
+        $type = $geofence['fence_type'];
+        if ($type === 'circle') {
+            if ($geofence['center_lat'] === null || $geofence['center_lng'] === null) {
+                continue;
+            }
+            $distance = geofenceHaversineDistanceMeters(
+                $lat,
+                $lng,
+                $geofence['center_lat'],
+                $geofence['center_lng']
+            );
+            if ($distance <= $geofence['radius']) {
+                $inside = true;
+                break;
+            }
+        } elseif ($type === 'polygon') {
+            if (empty($geofence['polygon_points'])) {
+                continue;
+            }
+            if (geofencePointInPolygon($lat, $lng, $geofence['polygon_points'])) {
+                $inside = true;
+                break;
+            }
+        }
+    }
+
+    if (!$inside && $enforce) {
+        return [
+            'status' => 'error',
+            'out_of_geofence' => true,
+            'message' => 'You are outside the allowed geofence for this plant. Move closer to the site boundary and try again.',
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'out_of_geofence' => !$inside,
+    ];
 }

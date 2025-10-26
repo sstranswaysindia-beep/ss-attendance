@@ -9,6 +9,7 @@ import '../models/admin_attendance_overview.dart';
 import '../models/attendance_record.dart';
 import '../models/daily_attendance_summary.dart';
 import '../models/monthly_stat.dart';
+import '../models/supervisor_today_attendance.dart';
 
 class AttendanceFailure implements Exception {
   AttendanceFailure(this.message);
@@ -53,6 +54,8 @@ class AttendanceRepository {
     Uri? deleteEndpoint,
     Uri? adjustRequestEndpoint,
     Uri? adminOverviewEndpoint,
+    Uri? supervisorTodayEndpoint,
+    Uri? adminTodayEndpoint,
   }) : _client = client ?? http.Client(),
        _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
        _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
@@ -61,7 +64,11 @@ class AttendanceRepository {
        _adjustRequestEndpoint =
            adjustRequestEndpoint ?? Uri.parse(_defaultAdjustRequestEndpoint),
        _adminOverviewEndpoint =
-           adminOverviewEndpoint ?? Uri.parse(_defaultAdminOverviewEndpoint);
+           adminOverviewEndpoint ?? Uri.parse(_defaultAdminOverviewEndpoint),
+       _supervisorTodayEndpoint = supervisorTodayEndpoint ??
+           Uri.parse(_defaultSupervisorTodayEndpoint),
+       _adminTodayEndpoint =
+           adminTodayEndpoint ?? Uri.parse(_defaultAdminTodayEndpoint);
 
   static const String _defaultSubmitEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_submit.php';
@@ -75,6 +82,11 @@ class AttendanceRepository {
       'https://sstranswaysindia.com/api/mobile/attendance_adjust_request_submit.php';
   static const String _defaultAdminOverviewEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_admin_overview.php';
+  static const String _defaultSupervisorTodayEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_supervisor_today.php';
+  static const String _defaultAdminTodayEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_admin_today.php';
+
 
   final http.Client _client;
   final Uri _submitEndpoint;
@@ -83,6 +95,8 @@ class AttendanceRepository {
   final Uri _deleteEndpoint;
   final Uri _adjustRequestEndpoint;
   final Uri _adminOverviewEndpoint;
+  final Uri _supervisorTodayEndpoint;
+  final Uri _adminTodayEndpoint;
 
   Future<AttendanceSubmissionResult> submit({
     required String driverId,
@@ -308,6 +322,81 @@ class AttendanceRepository {
     final stats = payload['stats'] as List<dynamic>? ?? const [];
     return stats
         .map((item) => MonthlyStat.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<List<SupervisorTodayAttendancePlant>> fetchSupervisorTodayAttendance({
+    required String supervisorUserId,
+    String? plantId,
+  }) async {
+    final queryParameters = <String, String>{
+      'supervisorUserId': supervisorUserId,
+    };
+    final trimmedPlant = plantId?.trim();
+    if (trimmedPlant != null && trimmedPlant.isNotEmpty) {
+      queryParameters['plantId'] = trimmedPlant;
+    }
+    final uri = _supervisorTodayEndpoint.replace(queryParameters: queryParameters);
+
+    final response = await _client.get(uri);
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
+    }
+
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load attendance status.',
+      );
+    }
+
+    final plants = payload['plants'] as List<dynamic>? ?? const [];
+    return plants
+        .map((item) => SupervisorTodayAttendancePlant.fromJson(
+              item as Map<String, dynamic>,
+            ))
+        .toList(growable: false);
+  }
+
+  Future<List<SupervisorTodayAttendancePlant>> fetchAdminTodayAttendance({
+    String? plantId,
+  }) async {
+    final trimmedPlant = plantId?.trim();
+    final queryParameters = <String, String>{};
+    if (trimmedPlant != null && trimmedPlant.isNotEmpty) {
+      queryParameters['plantId'] = trimmedPlant;
+    }
+    final uri = queryParameters.isEmpty
+        ? _adminTodayEndpoint
+        : _adminTodayEndpoint.replace(queryParameters: queryParameters);
+
+    final response = await _client.get(uri);
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
+    }
+
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load attendance status.',
+      );
+    }
+
+    final plants = payload['plants'] as List<dynamic>? ?? const [];
+    return plants
+        .map((item) => SupervisorTodayAttendancePlant.fromJson(
+              item as Map<String, dynamic>,
+            ))
         .toList(growable: false);
   }
 

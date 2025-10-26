@@ -88,7 +88,7 @@ try {
             'joiningDate' => isset($row['joining_date']) && $row['joining_date'] !== null
                 ? (string) $row['joining_date']
                 : null,
-            'profilePhoto' => (string) ($row['profile_photo_url'] ?? ''),
+            'profilePhoto' => apiBuildProfileUrl($row['profile_photo_url'] ?? null),
             'plantId' => isset($row['plant_id']) ? (int) $row['plant_id'] : null,
             'plantName' => (string) ($row['plant_name'] ?? ''),
         ];

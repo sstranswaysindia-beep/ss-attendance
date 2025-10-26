@@ -120,7 +120,7 @@ try {
             'role' => $row['driver_role'] ?? '',
             'plantId' => $row['plant_id'] !== null ? (int) $row['plant_id'] : null,
             'plantName' => $row['plant_name'] ?? '',
-            'profilePhoto' => $row['profile_photo_url'] ?? '',
+            'profilePhoto' => apiBuildProfileUrl($row['profile_photo_url'] ?? null),
             'daysWorked' => (int) $row['days_present'],
             'totalDays' => $daysInMonth,
             'datesWorked' => $dates,

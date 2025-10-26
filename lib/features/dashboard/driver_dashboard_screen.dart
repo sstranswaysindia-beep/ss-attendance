@@ -739,11 +739,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
           ),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Meter reading',
-            onPressed: _openMeterReadingSheet,
-            icon: const Icon(Icons.speed),
-          ),
+          if (!isHelper)
+            IconButton(
+              tooltip: 'Meter reading',
+              onPressed: _openMeterReadingSheet,
+              icon: const Icon(Icons.speed),
+            ),
           IconButton(
             onPressed: () {
               widget.onLogout();

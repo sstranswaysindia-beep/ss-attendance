@@ -11,6 +11,22 @@ const Color _adminAccentLight = Color(0xFFE3F2FD);
 const Color _adminTagColor = Color(0xFF81D4FA);
 const String _unassignedPlantId = 'UNASSIGNED';
 
+const List<Color> _topPerformerBackgrounds = <Color>[
+  Color(0xFFFFF4E5),
+  Color(0xFFE8F5E9),
+  Color(0xFFE3F2FD),
+  Color(0xFFFFEBEE),
+  Color(0xFFF3E5F5),
+];
+
+const List<Color> _topPerformerAccents = <Color>[
+  Color(0xFFFF9800),
+  Color(0xFF2E7D32),
+  Color(0xFF1565C0),
+  Color(0xFFC62828),
+  Color(0xFF6A1B9A),
+];
+
 class AdminAttendanceOverviewScreen extends StatefulWidget {
   const AdminAttendanceOverviewScreen({required this.user, super.key});
 
@@ -714,12 +730,16 @@ class _MonthSummaryCard extends StatelessWidget {
     final averageAttendance = potentialDays == 0
         ? 0
         : (totalWorkedDays / potentialDays) * 100;
-    final leader = overview.drivers.isEmpty
-        ? null
-        : overview.drivers.reduce(
-            (best, current) =>
-                current.daysWorked > best.daysWorked ? current : best,
-          );
+    final sortedDrivers = overview.drivers.toList()
+      ..sort((a, b) {
+        final byDays = b.daysWorked.compareTo(a.daysWorked);
+        if (byDays != 0) return byDays;
+        final byPercentage =
+            b.attendancePercentage.compareTo(a.attendancePercentage);
+        if (byPercentage != 0) return byPercentage;
+        return a.driverName.toLowerCase().compareTo(b.driverName.toLowerCase());
+      });
+    final topDrivers = sortedDrivers.take(5).toList(growable: false);
 
     return Container(
       decoration: BoxDecoration(
@@ -803,45 +823,32 @@ class _MonthSummaryCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 16),
-          if (leader != null)
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                gradient: const LinearGradient(
-                  colors: [Colors.white, _adminAccentLight],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                border: Border.all(color: _adminPrimaryColor.withOpacity(0.08)),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.emoji_events_outlined, color: _adminPrimaryColor),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Top performer',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: _adminPrimaryColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        Text(
-                          '${leader.driverName} • ${leader.daysWorked}/${leader.totalDays} days',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: _adminPrimaryColor,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+          if (topDrivers.isNotEmpty) ...[
+            Text(
+              'Top performers',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: _adminPrimaryColor,
+                fontWeight: FontWeight.w700,
               ),
             ),
+            const SizedBox(height: 8),
+            Column(
+              children: List<Widget>.generate(topDrivers.length, (index) {
+                final driver = topDrivers[index];
+                final background =
+                    _topPerformerBackgrounds[index % _topPerformerBackgrounds.length];
+                final accent =
+                    _topPerformerAccents[index % _topPerformerAccents.length];
+                return _TopPerformerTile(
+                  driver: driver,
+                  rank: index + 1,
+                  background: background,
+                  accent: accent,
+                );
+              }),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (overview.generatedAt != null || hasSearch)
             const SizedBox(height: 12),
           if (overview.generatedAt != null)
@@ -861,6 +868,96 @@ class _MonthSummaryCard extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopPerformerTile extends StatelessWidget {
+  const _TopPerformerTile({
+    required this.driver,
+    required this.rank,
+    required this.background,
+    required this.accent,
+  });
+
+  final DriverAttendanceOverview driver;
+  final int rank;
+  final Color background;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final daysLabel = driver.totalDays > 0
+        ? '${driver.daysWorked}/${driver.totalDays} days'
+        : '${driver.daysWorked} days';
+    final percentageLabel =
+        '${driver.attendancePercentage.toStringAsFixed(1)}%';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accent.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: accent,
+            child: Text(
+              rank.toString(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  driver.driverName,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: _adminPrimaryColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${driver.displayRole} • ${driver.displayPlant}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: _adminPrimaryColor.withOpacity(0.75),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                daysLabel,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: _adminPrimaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                percentageLabel,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

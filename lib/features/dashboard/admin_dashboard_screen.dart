@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/models/app_user.dart';
 import '../../core/widgets/app_toast.dart';
 import '../approvals/approvals_screen.dart';
+import '../attendance/admin_today_attendance_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../statistics/admin_attendance_overview_screen.dart';
 import '../finance/advance_salary_screen.dart';
@@ -15,7 +16,7 @@ import '../master/admin_vehicle_master_screen.dart';
 const Color _adminPrimaryColor = Color(0xFF00296B);
 const Color _adminCardTint = Color(0xFFE3F2FD);
 
-class AdminDashboardScreen extends StatelessWidget {
+class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({
     required this.user,
     required this.onLogout,
@@ -26,9 +27,15 @@ class AdminDashboardScreen extends StatelessWidget {
   final VoidCallback onLogout;
 
   @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final date = DateFormat('dd-MM-yyyy').format(now);
+    final theme = Theme.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -43,7 +50,7 @@ class AdminDashboardScreen extends StatelessWidget {
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (_) => AdvanceSalaryScreen(user: user),
+                  builder: (_) => AdvanceSalaryScreen(user: widget.user),
                 ),
               );
             },
@@ -52,7 +59,7 @@ class AdminDashboardScreen extends StatelessWidget {
           ),
           IconButton(
             onPressed: () {
-              onLogout();
+              widget.onLogout();
               showAppToast(context, 'Logged out successfully');
             },
             icon: const Icon(Icons.logout),
@@ -65,29 +72,39 @@ class AdminDashboardScreen extends StatelessWidget {
           padding: const EdgeInsets.all(16),
           child: ListView(
             children: [
-              _AdminWelcomeHeader(user: user, date: date),
+              _AdminWelcomeHeader(user: widget.user, date: date),
               const SizedBox(height: 16),
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
-                children: [
-                  _AdminCard(
-                    title: 'Attendance Overview',
-                    icon: Icons.insights,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            AdminAttendanceOverviewScreen(user: user),
-                      ),
+              children: [
+                _AdminCard(
+                  title: 'Attendance Overview',
+                  icon: Icons.insights,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          AdminAttendanceOverviewScreen(user: widget.user),
                     ),
                   ),
-                  _AdminCard(
-                    title: 'Supervisor Approvals',
-                    icon: Icons.verified_user,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ApprovalsScreen(
-                          user: user,
+                ),
+                _AdminCard(
+                  title: 'Today Attendance',
+                  icon: Icons.fact_check,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          AdminTodayAttendanceScreen(user: widget.user),
+                    ),
+                  ),
+                ),
+                _AdminCard(
+                  title: 'Supervisor Approvals',
+                  icon: Icons.verified_user,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ApprovalsScreen(
+                          user: widget.user,
                           title: 'Supervisor Approvals',
                           endpointOverride: Uri.parse(
                             'https://sstranswaysindia.com/api/mobile/attendance_admin_supervisor_approvals.php',
@@ -102,7 +119,8 @@ class AdminDashboardScreen extends StatelessWidget {
                     icon: Icons.person_search,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => AdminDriverMasterScreen(user: user),
+                        builder: (_) =>
+                            AdminDriverMasterScreen(user: widget.user),
                       ),
                     ),
                   ),
@@ -111,7 +129,8 @@ class AdminDashboardScreen extends StatelessWidget {
                     icon: Icons.directions_bus,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => AdminVehicleMasterScreen(user: user),
+                        builder: (_) =>
+                            AdminVehicleMasterScreen(user: widget.user),
                       ),
                     ),
                   ),
@@ -120,7 +139,8 @@ class AdminDashboardScreen extends StatelessWidget {
                     icon: Icons.picture_as_pdf,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => AttendanceHistoryScreen(user: user),
+                        builder: (_) =>
+                            AttendanceHistoryScreen(user: widget.user),
                       ),
                     ),
                   ),
@@ -174,6 +194,7 @@ class AdminDashboardScreen extends StatelessWidget {
       ),
     );
   }
+
 }
 
 class _AdminCard extends StatelessWidget {

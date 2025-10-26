@@ -71,17 +71,92 @@ if (!$assignmentId) {
     // For supervisors without driver_id, we don't need assignment lookup
 }
 
+$geofencingEnabled = false;
+$locationGeofenceUserRow = null;
+if ($driverExists) {
+    $geofenceStmt = $conn->prepare('SELECT id, geofencing_enable FROM users WHERE driver_id = ? LIMIT 1');
+    if ($geofenceStmt) {
+        $geofenceStmt->bind_param('i', $driverId);
+        $geofenceStmt->execute();
+        $row = $geofenceStmt->get_result()->fetch_assoc();
+        $geofenceStmt->close();
+        if ($row) {
+            $locationGeofenceUserRow = $row;
+        }
+    }
+    if ($locationGeofenceUserRow === null) {
+        $fallbackStmt = $conn->prepare('SELECT id, geofencing_enable FROM users WHERE id = ? LIMIT 1');
+        if ($fallbackStmt) {
+            $fallbackStmt->bind_param('i', $driverId);
+            $fallbackStmt->execute();
+            $row = $fallbackStmt->get_result()->fetch_assoc();
+            $fallbackStmt->close();
+            if ($row) {
+                $locationGeofenceUserRow = $row;
+            }
+        }
+    }
+} else {
+    $geofenceStmt = $conn->prepare('SELECT id, geofencing_enable FROM users WHERE id = ? LIMIT 1');
+    if ($geofenceStmt) {
+        $geofenceStmt->bind_param('i', $driverId);
+        $geofenceStmt->execute();
+        $row = $geofenceStmt->get_result()->fetch_assoc();
+        $geofenceStmt->close();
+        if ($row) {
+            $locationGeofenceUserRow = $row;
+        }
+    }
+}
+
+if ($locationGeofenceUserRow !== null) {
+    $flag = strtoupper(trim((string) ($locationGeofenceUserRow['geofencing_enable'] ?? '')));
+    $geofencingEnabled = $flag === 'Y';
+}
+
 $locationJsonValue = null;
+$locationArray = null;
 if ($locationJson !== null) {
     if (is_array($locationJson)) {
+        $locationArray = $locationJson;
         $locationJsonValue = json_encode($locationJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     } elseif (is_string($locationJson)) {
         $locationJsonValue = $locationJson;
+        $decodedLocation = json_decode($locationJson, true);
+        if (is_array($decodedLocation)) {
+            $locationArray = $decodedLocation;
+        }
     }
+}
+if ($locationArray !== null && $locationJsonValue === null) {
+    $locationJsonValue = json_encode($locationArray, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 }
 
 try {
     if ($actionRaw === 'check_in') {
+        $checkInGeofence = geofenceEvaluate($conn, $plantId, $locationArray, $geofencingEnabled);
+        if ($checkInGeofence['status'] === 'error') {
+            error_log(sprintf(
+                'GEOFENCE BLOCK check_in driver=%s plant=%d reason=%s',
+                $driverExists ? (string) $driverId : 'user_' . $driverId,
+                $plantId,
+                $checkInGeofence['message'] ?? 'unknown'
+            ));
+            apiRespond(422, [
+                'status' => 'error',
+                'error' => $checkInGeofence['message'] ?? 'Geofence validation failed.',
+            ]);
+        }
+        $outOfGeofenceFlag = $checkInGeofence['out_of_geofence'] ? 1 : 0;
+        if ($geofencingEnabled) {
+            error_log(sprintf(
+                'GEOFENCE check_in driver=%s plant=%d inside=%s',
+                $driverExists ? (string) $driverId : 'user_' . $driverId,
+                $plantId,
+                $outOfGeofenceFlag === 0 ? 'true' : 'false'
+            ));
+        }
+
         // Check for existing open attendance record
         if ($driverExists) {
             // For drivers, check by driver_id
@@ -184,11 +259,12 @@ try {
                     source,
                     approval_status,
                     pending_sync,
-                    in_location_json
-                ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+                    in_location_json,
+                    out_of_geofence
+                ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)'
             );
             $insertStmt->bind_param(
-                'iiissssss',
+                'iiissssssi',
                 $plantId,
                 $vehicleId,
                 $assignmentId,
@@ -197,7 +273,8 @@ try {
                 $supervisorNotes,
                 $source,
                 $pendingStatus,
-                $locationJsonValue
+                $locationJsonValue,
+                $outOfGeofenceFlag
             );
         } else {
             $insertStmt = $conn->prepare(
@@ -212,11 +289,12 @@ try {
                     source,
                     approval_status,
                     pending_sync,
-                    in_location_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)'
+                    in_location_json,
+                    out_of_geofence
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)'
             );
             $insertStmt->bind_param(
-                'iiiissssss',
+                'iiiissssssi',
                 $attendanceDriverId,
                 $plantId,
                 $vehicleId,
@@ -226,7 +304,8 @@ try {
                 $notes,
                 $source,
                 $pendingStatus,
-                $locationJsonValue
+                $locationJsonValue,
+                $outOfGeofenceFlag
             );
         }
         $insertStmt->execute();
@@ -270,6 +349,29 @@ try {
     
     $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_out', $photoPath, $photoFilename);
 
+    $checkOutGeofence = geofenceEvaluate($conn, $plantId, $locationArray, $geofencingEnabled);
+    if ($checkOutGeofence['status'] === 'error') {
+        error_log(sprintf(
+            'GEOFENCE BLOCK check_out driver=%s plant=%d reason=%s',
+            $driverExists ? (string) $driverId : 'user_' . $driverId,
+            $plantId,
+            $checkOutGeofence['message'] ?? 'unknown'
+        ));
+        apiRespond(422, [
+            'status' => 'error',
+            'error' => $checkOutGeofence['message'] ?? 'Geofence validation failed.',
+        ]);
+    }
+    $checkOutOutOfGeofence = $checkOutGeofence['out_of_geofence'] ? 1 : 0;
+    if ($geofencingEnabled) {
+        error_log(sprintf(
+            'GEOFENCE check_out driver=%s plant=%d inside=%s',
+            $driverExists ? (string) $driverId : 'user_' . $driverId,
+            $plantId,
+            $checkOutOutOfGeofence === 0 ? 'true' : 'false'
+        ));
+    }
+
     $updateStmt = $conn->prepare(
         'UPDATE attendance
             SET out_time = ?,
@@ -279,6 +381,7 @@ try {
                 assignment_id = ?,
                 pending_sync = 0,
                 out_location_json = ?,
+                out_of_geofence = CASE WHEN ? = 1 THEN 1 ELSE out_of_geofence END,
                 approval_status = CASE
                     WHEN approval_status IS NULL OR approval_status = "" THEN "Pending"
                     ELSE approval_status
@@ -288,13 +391,14 @@ try {
           WHERE id = ?'
     );
     $updateStmt->bind_param(
-        'ssiiisssssi',
+        'ssiiisissssi',
         $eventTimeSql,
         $photoUrl,
         $vehicleId,
         $plantId,
         $assignmentId,
         $locationJsonValue,
+        $checkOutOutOfGeofence,
         $notes,
         $notes,
         $source,
