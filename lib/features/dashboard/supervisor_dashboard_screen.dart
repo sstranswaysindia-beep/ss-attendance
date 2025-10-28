@@ -30,6 +30,7 @@ import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
 import '../meter/meter_reading_sheet.dart';
+import '../attendance/proxy_attendance_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
@@ -327,6 +328,32 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     }
   }
 
+  Future<void> _openProxyAttendanceScreen() async {
+    if (!widget.user.proxyEnabled) {
+      showAppToast(
+        context,
+        'Proxy attendance is not enabled for your account.',
+        isError: true,
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ProxyAttendanceScreen(user: widget.user),
+      ),
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    await Future.wait<void>([
+      _loadSupervisorTodayAttendance(silent: true),
+      _loadActiveShift(),
+    ]);
+  }
+
   Future<void> _openMeterReadingSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -372,9 +399,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       }
     });
     try {
-      final response = await _attendanceRepository.fetchSupervisorTodayAttendance(
-        supervisorUserId: widget.user.id.toString(),
-      );
+      final response = await _attendanceRepository
+          .fetchSupervisorTodayAttendance(
+            supervisorUserId: widget.user.id.toString(),
+          );
       if (!mounted) return;
       setState(() {
         _todayAttendance = response;
@@ -640,6 +668,12 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       appBar: AppBar(
         title: const Text('Supervisor Dashboard'),
         actions: [
+          if (user.proxyEnabled)
+            IconButton(
+              tooltip: 'Proxy attendance',
+              onPressed: _openProxyAttendanceScreen,
+              icon: const Icon(Icons.switch_account),
+            ),
           IconButton(
             tooltip: 'Meter reading',
             onPressed: _openMeterReadingSheet,
@@ -1083,9 +1117,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       return Card(
         color: Colors.white,
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -1112,8 +1144,9 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       );
     }
 
-    final hasDrivers =
-        _todayAttendance.any((plant) => plant.drivers.isNotEmpty);
+    final hasDrivers = _todayAttendance.any(
+      (plant) => plant.drivers.isNotEmpty,
+    );
     final items = <Widget>[];
 
     if (_todayAttendanceError != null && hasDrivers) {
@@ -1174,15 +1207,15 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     ThemeData theme,
     SupervisorTodayAttendancePlant plant,
   ) {
-    final title = plant.plantName.isEmpty ? 'Unassigned Plant' : plant.plantName;
+    final title = plant.plantName.isEmpty
+        ? 'Unassigned Plant'
+        : plant.plantName;
 
     if (plant.drivers.isEmpty) {
       return Card(
         color: Colors.white,
         elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
@@ -1216,9 +1249,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     return Card(
       color: Colors.white,
       elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1263,8 +1294,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     final gradientColors = isComplete
         ? const [Color(0xFF00D100), Color(0xFF00AA00)]
         : isPartial
-            ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
-            : const [Color(0xFFED1C24), Color(0xFFB3121B)];
+        ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
+        : const [Color(0xFFED1C24), Color(0xFFB3121B)];
 
     const primaryTextColor = Colors.black87;
     const subtleTextColor = Colors.black54;
@@ -1340,10 +1371,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         backgroundColor: avatarBackground,
         child: Text(
           _driverInitials(driver.driverName),
-          style: TextStyle(
-            color: textColor,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
         ),
       );
     }
@@ -1376,8 +1404,11 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   }
 
   String _driverInitials(String name) {
-    final parts =
-        name.trim().split(RegExp(r'\\s+')).where((p) => p.isNotEmpty).toList();
+    final parts = name
+        .trim()
+        .split(RegExp(r'\\s+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
     if (parts.isEmpty) {
       return 'DR';
     }

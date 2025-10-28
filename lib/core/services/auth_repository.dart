@@ -72,10 +72,15 @@ class AuthRepository {
       await _sendFCMTokenToServer(userJson['id']?.toString() ?? username);
 
       final role = _parseRole(userJson['role']?.toString());
-      final bool canViewDocuments =
-          _parseFlag(userJson['view_document'] ?? userJson['viewDocument']);
-      final bool geofencingEnabled =
-          _parseFlag(userJson['geofencing_enable'] ?? userJson['geofencingEnabled']);
+      final bool canViewDocuments = _parseFlag(
+        userJson['view_document'] ?? userJson['viewDocument'],
+      );
+      final bool geofencingEnabled = _parseFlag(
+        userJson['geofencing_enable'] ?? userJson['geofencingEnabled'],
+      );
+      final bool proxyEnabled = _parseFlag(
+        userJson['proxy_enabled'] ?? userJson['proxyEnabled'],
+      );
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
@@ -100,6 +105,7 @@ class AuthRepository {
           role: role,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
+          proxyEnabled: proxyEnabled,
         );
       }
 
@@ -165,6 +171,7 @@ class AuthRepository {
           availableVehicles: vehicles,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
+          proxyEnabled: proxyEnabled,
         );
       }
 
@@ -273,6 +280,7 @@ class AuthRepository {
             supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
         canViewDocuments: canViewDocuments,
         geofencingEnabled: geofencingEnabled,
+        proxyEnabled: proxyEnabled,
       );
     } on AuthFailure {
       rethrow;

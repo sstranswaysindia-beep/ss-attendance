@@ -38,6 +38,7 @@ class AppUser {
     this.supervisedPlantIds = const <dynamic>[],
     this.canViewDocuments = false,
     this.geofencingEnabled = false,
+    this.proxyEnabled = false,
   });
 
   final String id;
@@ -74,6 +75,7 @@ class AppUser {
   final List<dynamic> supervisedPlantIds;
   final bool canViewDocuments;
   final bool geofencingEnabled;
+  final bool proxyEnabled;
 
   Map<String, dynamic> toJson() {
     return {
@@ -111,6 +113,7 @@ class AppUser {
       'supervisedPlantIds': supervisedPlantIds,
       'canViewDocuments': canViewDocuments,
       'geofencingEnabled': geofencingEnabled,
+      'proxyEnabled': proxyEnabled,
     };
   }
 
@@ -143,19 +146,26 @@ class AppUser {
       address: json['address'] as String?,
       vehicleNumber: json['vehicleNumber'] as String?,
       driverRole: json['driverRole'] as String?,
-      availableVehicles: (json['availableVehicles'] as List<dynamic>?)
-          ?.map((v) => DriverVehicle.fromJson(v as Map<String, dynamic>))
-          .toList() ?? [],
-      joiningDate: json['joiningDate'] != null 
-          ? DateTime.parse(json['joiningDate'] as String) 
+      availableVehicles:
+          (json['availableVehicles'] as List<dynamic>?)
+              ?.map((v) => DriverVehicle.fromJson(v as Map<String, dynamic>))
+              .toList() ??
+          [],
+      joiningDate: json['joiningDate'] != null
+          ? DateTime.parse(json['joiningDate'] as String)
           : null,
       supervisorName: json['supervisorName'] as String?,
-      supervisedPlants: (json['supervisedPlants'] as List<dynamic>?)
-          ?.cast<Map<String, dynamic>>() ?? [],
+      supervisedPlants:
+          (json['supervisedPlants'] as List<dynamic>?)
+              ?.cast<Map<String, dynamic>>() ??
+          [],
       supervisedPlantIds: json['supervisedPlantIds'] as List<dynamic>? ?? [],
       canViewDocuments: json['canViewDocuments'] == true,
       geofencingEnabled: _parseGeofenceFlag(
         json['geofencingEnabled'] ?? json['geofencing_enable'],
+      ),
+      proxyEnabled: _parseGeofenceFlag(
+        json['proxyEnabled'] ?? json['proxy_enabled'],
       ),
     );
   }
