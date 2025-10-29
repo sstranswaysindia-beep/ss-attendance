@@ -51,18 +51,40 @@ class ProxyEmployee {
   final DateTime? lastCheckIn;
   final DateTime? lastCheckOut;
 
-  String get statusLabel {
-    if (hasOpenShift) {
-      return 'Checked in';
-    }
-    if (lastCheckIn == null) {
-      return 'No attendance';
-    }
-    return 'Checked out';
+  DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
   }
 
-  bool get attendanceCompleted =>
-      !hasOpenShift && lastCheckIn != null && lastCheckOut != null;
+  bool _isSameDay(DateTime? value) {
+    if (value == null) return false;
+    final normalized = DateTime(value.year, value.month, value.day);
+    return normalized == _today();
+  }
+
+  bool get hasCheckInToday => _isSameDay(lastCheckIn);
+
+  bool get hasCheckOutToday => _isSameDay(lastCheckOut);
+
+  bool get hasOpenShiftToday => hasOpenShift && hasCheckInToday && !hasCheckOutToday;
+
+  bool get attendanceCompletedToday =>
+      hasCheckInToday && hasCheckOutToday && !hasOpenShiftToday;
+
+  bool get hasAttendanceToday => hasCheckInToday || hasCheckOutToday;
+
+  String get statusLabel {
+    if (hasOpenShiftToday) {
+      return 'Checked in';
+    }
+    if (attendanceCompletedToday) {
+      return 'Checked out';
+    }
+    if (!hasAttendanceToday) {
+      return 'No attendance';
+    }
+    return 'Pending';
+  }
 
   String get roleBadge {
     final normalized = (driverRole ?? '').toLowerCase();
@@ -77,17 +99,16 @@ class ProxyEmployee {
 
   String lastCheckInDisplay([DateFormat? formatter]) {
     final date = lastCheckIn;
-    if (date == null) {
-      return '—';
-    }
+    if (!hasCheckInToday || date == null) return '—';
     final fmt = formatter ?? DateFormat('dd MMM • HH:mm');
     return fmt.format(date);
   }
 
   String lastCheckOutDisplay([DateFormat? formatter]) {
     final date = lastCheckOut;
-    if (date == null) {
-      return hasOpenShift ? 'Pending' : '—';
+    if (hasOpenShiftToday) return 'Pending';
+    if (!hasCheckOutToday || date == null) {
+      return '—';
     }
     final fmt = formatter ?? DateFormat('dd MMM • HH:mm');
     return fmt.format(date);

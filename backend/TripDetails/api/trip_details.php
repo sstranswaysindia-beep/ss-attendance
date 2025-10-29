@@ -60,9 +60,19 @@ try {
   $hasTripHelpers   = table_exists($db,'trip_helpers');  // plural
   $hasTripCustomers = table_exists($db,'trip_customers');
   $hasDrivers       = table_exists($db,'drivers');
+  $hasHelpers       = table_exists($db,'helpers');
 
   if (!$hasTrips) {
     json(['ok'=>false,'error'=>'trips table missing'], 500);
+  }
+
+  $helperNameCol = 'name';
+  if ($hasHelpers) {
+    foreach (['name','helper_name','full_name','display_name'] as $c) {
+      if (has_col($db,'helpers',$c)) { $helperNameCol = $c; break; }
+    }
+  } else {
+    $helperNameCol = null;
   }
 
   // columns to fetch from trips
@@ -100,7 +110,6 @@ try {
   $helper_ids = [];
   $helpers    = []; // names
   if ($hasTripHelpers) {
-    // gather IDs
     $h = $db->prepare('SELECT helper_id FROM trip_helpers WHERE trip_id=? ORDER BY helper_id');
     $h->bind_param('i', $trip_id);
     $h->execute();
@@ -108,20 +117,37 @@ try {
     while ($row = $hr->fetch_assoc()) { $helper_ids[] = (int)$row['helper_id']; }
     $h->close();
 
-    if (!empty($helper_ids) && $hasDrivers) {
-      // pick a display name column
-      $nameCol = 'name';
-      foreach (['name','driver_name','full_name'] as $c) { if (has_col($db,'drivers',$c)) { $nameCol=$c; break; } }
-      $in = implode(',', array_fill(0, count($helper_ids), '?'));
-      $types = str_repeat('i', count($helper_ids));
-      $q = $db->prepare("SELECT id, `$nameCol` AS nm FROM drivers WHERE id IN ($in)");
-      $q->bind_param($types, ...$helper_ids);
-      $q->execute();
-      $qr = $q->get_result();
-      $map = [];
-      while ($row = $qr->fetch_assoc()) { $map[(int)$row['id']] = (string)$row['nm']; }
-      $q->close();
-      foreach ($helper_ids as $hid) { $helpers[] = isset($map[$hid]) ? $map[$hid] : ("Helper #".$hid); }
+    if (!empty($helper_ids)) {
+      $nameMap = [];
+      if ($hasDrivers) {
+        $nameCol = 'name';
+        foreach (['name','driver_name','full_name'] as $c) { if (has_col($db,'drivers',$c)) { $nameCol=$c; break; } }
+        $marks = implode(',', array_fill(0, count($helper_ids), '?'));
+        $types = str_repeat('i', count($helper_ids));
+        $q = $db->prepare("SELECT id, `$nameCol` AS nm FROM drivers WHERE id IN ($marks)");
+        $q->bind_param($types, ...$helper_ids);
+        $q->execute();
+        $qr = $q->get_result();
+        while ($row = $qr->fetch_assoc()) { $nameMap[(int)$row['id']] = (string)$row['nm']; }
+        $q->close();
+      }
+      if ($hasHelpers && $helperNameCol) {
+        $missing = array_values(array_filter($helper_ids, fn($hid) => !isset($nameMap[$hid])));
+        if (!empty($missing)) {
+          $marks = implode(',', array_fill(0, count($missing), '?'));
+          $types = str_repeat('i', count($missing));
+          $sql = "SELECT id, `$helperNameCol` AS nm FROM helpers WHERE id IN ($marks)";
+          $q = $db->prepare($sql);
+          $q->bind_param($types, ...$missing);
+          $q->execute();
+          $qr = $q->get_result();
+          while ($row = $qr->fetch_assoc()) { $nameMap[(int)$row['id']] = (string)$row['nm']; }
+          $q->close();
+        }
+      }
+      foreach ($helper_ids as $hid) {
+        $helpers[] = isset($nameMap[$hid]) ? $nameMap[$hid] : ("Helper #".$hid);
+      }
     }
   } elseif ($hasTripHelper) {
     // legacy single helper -> present as array(1) for ids + names
@@ -135,15 +161,30 @@ try {
     }
     $h->close();
 
-    if (!empty($helper_ids) && $hasDrivers) {
-      $nameCol = 'name';
-      foreach (['name','driver_name','full_name'] as $c) { if (has_col($db,'drivers',$c)) { $nameCol=$c; break; } }
-      $q = $db->prepare("SELECT `$nameCol` FROM drivers WHERE id=? LIMIT 1");
-      $q->bind_param('i', $helper_ids[0]);
-      $q->execute();
-      $q->bind_result($nm);
-      if ($q->fetch()) $helpers = [ (string)$nm ];
-      $q->close();
+    if (!empty($helper_ids)) {
+      $hid = $helper_ids[0];
+      $name = null;
+      if ($hasDrivers) {
+        $nameCol = 'name';
+        foreach (['name','driver_name','full_name'] as $c) { if (has_col($db,'drivers',$c)) { $nameCol=$c; break; } }
+        $q = $db->prepare("SELECT `$nameCol` FROM drivers WHERE id=? LIMIT 1");
+        $q->bind_param('i', $hid);
+        $q->execute();
+        $q->bind_result($nm);
+        if ($q->fetch()) $name = (string)$nm;
+        $q->close();
+      }
+      if ($name === null && $hasHelpers && $helperNameCol) {
+        $q = $db->prepare("SELECT `$helperNameCol` FROM helpers WHERE id=? LIMIT 1");
+        $q->bind_param('i', $hid);
+        $q->execute();
+        $q->bind_result($nm);
+        if ($q->fetch()) $name = (string)$nm;
+        $q->close();
+      }
+      if ($name !== null) {
+        $helpers = [ $name ];
+      }
     }
   }
 

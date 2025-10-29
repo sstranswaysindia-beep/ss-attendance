@@ -8,6 +8,14 @@ import '../../core/services/finance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
+const Color _financePrimaryColor = Color(0xFF00296B);
+const Color _financeAccentLight = Color(0xFFE3F2FD);
+const LinearGradient _financeCardGradient = LinearGradient(
+  colors: [Colors.white, _financeAccentLight],
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+);
+
 class SalaryAdvanceScreen extends StatefulWidget {
   const SalaryAdvanceScreen({
     required this.user,
@@ -35,6 +43,25 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _purposeController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
+
+  Widget _gradientCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(16),
+    EdgeInsetsGeometry? margin,
+  }) {
+    return Container(
+      margin: margin ?? const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        gradient: _financeCardGradient,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _financePrimaryColor.withOpacity(0.06)),
+      ),
+      child: Padding(
+        padding: padding,
+        child: child,
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -147,12 +174,20 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         if (baseSalary != null && baseSalary.isNotEmpty) ...[
-                          Card(
+                          _gradientCard(
+                            padding: EdgeInsets.zero,
                             child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
                               leading: const Icon(Icons.account_balance),
                               title: const Text('Monthly Salary'),
                               subtitle: const Text('As per HR records'),
-                              trailing: Text('₹$baseSalary', style: theme.textTheme.titleMedium),
+                              trailing: Text(
+                                '₹$baseSalary',
+                                style: theme.textTheme.titleMedium,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 16),
@@ -160,45 +195,59 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                         Text('Salary Credits', style: theme.textTheme.titleMedium),
                         const SizedBox(height: 12),
                         if (_salaryCredits.isEmpty)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                'No salary credits recorded yet.',
-                                style: theme.textTheme.bodyMedium,
-                              ),
+                          _gradientCard(
+                            child: Text(
+                              'No salary credits recorded yet.',
+                              style: theme.textTheme.bodyMedium,
                             ),
                           )
                         else
                           ..._salaryCredits.map(
                             (credit) {
-                              final isDeleting = _salaryDeleting.contains(credit.salaryCreditId);
-                              return Card(
-                                child: Dismissible(
-                                  key: ValueKey('salary-${credit.salaryCreditId}'),
-                                  direction: DismissDirection.endToStart,
-                                  confirmDismiss: (_) async {
-                                    await _confirmDeleteSalary(credit);
-                                    return false;
-                                  },
-                                  background: Container(
-                                    alignment: Alignment.centerRight,
-                                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.shade100,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Icon(Icons.delete, color: Colors.red),
+                              final isDeleting =
+                                  _salaryDeleting.contains(credit.salaryCreditId);
+                              return Dismissible(
+                                key: ValueKey('salary-${credit.salaryCreditId}'),
+                                direction: DismissDirection.endToStart,
+                                confirmDismiss: (_) async {
+                                  await _confirmDeleteSalary(credit);
+                                  return false;
+                                },
+                                background: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
                                   ),
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade100,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: const Icon(Icons.delete, color: Colors.red),
+                                ),
+                                child: _gradientCard(
+                                  padding: EdgeInsets.zero,
+                                  margin: const EdgeInsets.symmetric(vertical: 6),
                                   child: ListTile(
-                                    leading: const Icon(Icons.account_balance_wallet),
-                                    title: Text('₹${credit.amount.toStringAsFixed(2)}'),
-                                    subtitle: Text('Credited on ${_formatDate(credit.creditedOn)}'),
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
+                                    leading:
+                                        const Icon(Icons.account_balance_wallet),
+                                    title: Text(
+                                      '₹${credit.amount.toStringAsFixed(2)}',
+                                    ),
+                                    subtitle: Text(
+                                      'Credited on ${_formatDate(credit.creditedOn)}',
+                                    ),
                                     trailing: isDeleting
                                         ? const SizedBox(
                                             width: 16,
                                             height: 16,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                            child:
+                                                CircularProgressIndicator(strokeWidth: 2),
                                           )
                                         : null,
                                   ),
@@ -234,13 +283,10 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                         ),
                         const SizedBox(height: 12),
                         if (_advanceRequests.isEmpty)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                'No advance requests for the selected filter.',
-                                style: theme.textTheme.bodyMedium,
-                              ),
+                          _gradientCard(
+                            child: Text(
+                              'No advance requests for the selected filter.',
+                              style: theme.textTheme.bodyMedium,
                             ),
                           )
                         else
@@ -255,28 +301,40 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                               };
                               final isDeleting =
                                   _advanceDeleting.contains(request.advanceRequestId);
-                              return Card(
-                                child: Dismissible(
-                                  key: ValueKey('advance-${request.advanceRequestId}'),
-                                  direction: request.status == 'Pending'
-                                      ? DismissDirection.endToStart
-                                      : DismissDirection.none,
-                                  confirmDismiss: (_) async {
-                                    await _confirmDeleteAdvance(request);
-                                    return false;
-                                  },
-                                  background: Container(
-                                    alignment: Alignment.centerRight,
-                                    padding: const EdgeInsets.symmetric(horizontal: 20),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.shade100,
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: const Icon(Icons.delete, color: Colors.red),
+                              return Dismissible(
+                                key: ValueKey('advance-${request.advanceRequestId}'),
+                                direction: request.status == 'Pending'
+                                    ? DismissDirection.endToStart
+                                    : DismissDirection.none,
+                                confirmDismiss: (_) async {
+                                  await _confirmDeleteAdvance(request);
+                                  return false;
+                                },
+                                background: Container(
+                                  margin: const EdgeInsets.symmetric(
+                                    horizontal: 4,
+                                    vertical: 2,
                                   ),
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.shade100,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: const Icon(Icons.delete, color: Colors.red),
+                                ),
+                                child: _gradientCard(
+                                  padding: EdgeInsets.zero,
+                                  margin: const EdgeInsets.symmetric(vertical: 6),
                                   child: ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 12,
+                                    ),
                                     leading: const Icon(Icons.request_page),
-                                    title: Text('₹${request.amount.toStringAsFixed(2)}'),
+                                    title: Text(
+                                      '₹${request.amount.toStringAsFixed(2)}',
+                                    ),
                                     subtitle: Text(
                                       '${request.purpose}\nRequested: ${_formatDate(request.requestedAt)}',
                                     ),
@@ -287,19 +345,23 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                       children: [
                                         Chip(
                                           label: Text(request.status),
-                                          backgroundColor: statusColor.withOpacity(0.15),
+                                          backgroundColor:
+                                              statusColor.withOpacity(0.15),
                                           labelStyle: TextStyle(color: statusColor),
                                         ),
                                         if (request.disbursedAt != null)
-                                          Text('Disbursed: ${_formatDate(request.disbursedAt)}',
-                                              style: theme.textTheme.bodySmall),
+                                          Text(
+                                            'Disbursed: ${_formatDate(request.disbursedAt)}',
+                                            style: theme.textTheme.bodySmall,
+                                          ),
                                         if (isDeleting)
                                           const Padding(
                                             padding: EdgeInsets.only(top: 4),
                                             child: SizedBox(
                                               width: 16,
                                               height: 16,
-                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                              child:
+                                                  CircularProgressIndicator(strokeWidth: 2),
                                             ),
                                           ),
                                       ],

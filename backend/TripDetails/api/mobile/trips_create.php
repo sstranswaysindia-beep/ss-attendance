@@ -210,23 +210,53 @@ try {
 
     $hasPluralHelpers = td_table_exists($db, 'trip_helpers');
     $hasLegacyHelper = td_table_exists($db, 'trip_helper');
-    if (!empty($helperIds)) {
-        if ($hasPluralHelpers) {
-            $helperStmt = $db->prepare('INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)');
-            foreach ($helperIds as $helperId) {
-                $helperStmt->bind_param('ii', $tripId, $helperId);
-                $helperStmt->execute();
-            }
-            $helperStmt->close();
-        } elseif ($hasLegacyHelper) {
-            $primaryHelper = (int)$helperIds[0];
-            if ($primaryHelper > 0) {
-                $legacyStmt = $db->prepare('REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)');
-                $legacyStmt->bind_param('ii', $tripId, $primaryHelper);
-                $legacyStmt->execute();
-                $legacyStmt->close();
+    $hasHelperTextCol = td_has_column('trips', 'helper_text');
+
+    if (!empty($helperIds) && $hasPluralHelpers) {
+        $helperStmt = $db->prepare('INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)');
+        foreach ($helperIds as $helperId) {
+            $helperStmt->bind_param('ii', $tripId, $helperId);
+            $helperStmt->execute();
+        }
+        $helperStmt->close();
+    } elseif (!empty($helperIds) && !$hasPluralHelpers && $hasHelperTextCol) {
+        // legacy installs may rely on helper_text column
+        $textValue = implode(',', array_map('intval', $helperIds));
+        $upd = $db->prepare('UPDATE trips SET helper_text=? WHERE id=?');
+        $upd->bind_param('si', $textValue, $tripId);
+        $upd->execute();
+        $upd->close();
+    }
+
+    if ($hasLegacyHelper) {
+        $primaryHelper = 0;
+        foreach ($helperIds as $hid) {
+            if ((int)$hid > 0) {
+                $primaryHelper = (int)$hid;
+                break;
             }
         }
+
+        if ($primaryHelper > 0) {
+            $legacyStmt = $db->prepare('REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)');
+            $legacyStmt->bind_param('ii', $tripId, $primaryHelper);
+            $legacyStmt->execute();
+            $legacyStmt->close();
+        }
+    } elseif ($hasHelperTextCol && empty($helperIds)) {
+        // Ensure helper_text cleared when no helpers selected
+        $upd = $db->prepare('UPDATE trips SET helper_text = NULL WHERE id=?');
+        $upd->bind_param('i', $tripId);
+        $upd->execute();
+        $upd->close();
+    }
+
+    if (empty($helperIds) && $hasPluralHelpers) {
+        // No helpers supplied: ensure no stale multi records
+        $del = $db->prepare('DELETE FROM trip_helpers WHERE trip_id=?');
+        $del->bind_param('i', $tripId);
+        $del->execute();
+        $del->close();
     }
 
     $plantId = td_vehicle_plant($db, $vehicleId);
@@ -246,6 +276,12 @@ try {
             $update->bind_param('ii', $plantId, $helperId);
             $update->execute();
             $update->close();
+        }
+    }
+
+    if (!empty($helperIds)) {
+        foreach ($helperIds as $helperId) {
+            td_upsert_assignment($db, $helperId, $vehicleId, $plantId);
         }
     }
 

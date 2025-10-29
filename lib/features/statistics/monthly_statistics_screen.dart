@@ -8,6 +8,14 @@ import '../../core/services/attendance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
+const Color _statsPrimaryColor = Color(0xFF00296B);
+const Color _statsAccentLight = Color(0xFFE3F2FD);
+const LinearGradient _statsCardGradient = LinearGradient(
+  colors: [Colors.white, _statsAccentLight],
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+);
+
 class MonthlyStatisticsScreen extends StatefulWidget {
   const MonthlyStatisticsScreen({required this.user, super.key});
 
@@ -203,50 +211,64 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
                   ),
                   const SizedBox(height: 16),
                   if (_selected != null)
-                    Card(
-                      shape: RoundedRectangleBorder(
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: _statsCardGradient,
                         borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            _StatTile(
-                              label: 'Days Present',
-                              value: '${_selected!.daysPresent}',
-                            ),
-                            const Divider(),
-                            _StatTile(
-                              label: 'Total Hours',
-                              value: _selected!.totalHours ?? '-',
-                            ),
-                            const Divider(),
-                            _StatTile(
-                              label: 'Average In Time',
-                              value: _selected!.averageInTime ?? '-',
-                            ),
-                            const Divider(),
-                            _StatTile(
-                              label: 'Average Hours/Day',
-                              value: _selected!.averageHours ?? '-',
-                            ),
-                          ],
+                        border: Border.all(
+                          color: _statsPrimaryColor.withOpacity(0.06),
                         ),
+                      ),
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _StatTile(
+                            label: 'Days Present',
+                            value: '${_selected!.daysPresent}',
+                          ),
+                          const Divider(),
+                          _StatTile(
+                            label: 'Total Hours',
+                            value: _selected!.totalHours ?? '-',
+                          ),
+                          const Divider(),
+                          _StatTile(
+                            label: 'Average In Time',
+                            value: _selected!.averageInTime ?? '-',
+                          ),
+                          const Divider(),
+                          _StatTile(
+                            label: 'Average Hours/Day',
+                            value: _selected!.averageHours ?? '-',
+                          ),
+                        ],
                       ),
                     ),
                   const SizedBox(height: 16),
                   Text('Monthly Overview', style: theme.textTheme.titleMedium),
                   const SizedBox(height: 8),
-                  Card(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: _stats.length,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
-                      itemBuilder: (context, index) {
-                        final stat = _stats[index];
-                        return ListTile(
+                  ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: _stats.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final stat = _stats[index];
+                      return Container(
+                        decoration: BoxDecoration(
+                          gradient: _statsCardGradient,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: _statsPrimaryColor.withOpacity(0.06),
+                          ),
+                        ),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        child: ListTile(
+                          contentPadding: EdgeInsets.zero,
                           title: Text(_formatMonthKey(stat.month)),
                           subtitle: Text('Days present: ${stat.daysPresent}'),
                           trailing: Column(
@@ -260,9 +282,9 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
                               ),
                             ],
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 24),
                   Text('Daily Breakdown', style: theme.textTheme.titleMedium),
@@ -283,15 +305,27 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
                       ),
                     )
                   else
-                    Card(
-                      child: ListView.separated(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _dailySummaries.length,
-                        separatorBuilder: (_, __) => const Divider(height: 0),
-                        itemBuilder: (context, index) {
-                          final summary = _dailySummaries[index];
-                          return ListTile(
+                    ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: _dailySummaries.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final summary = _dailySummaries[index];
+                        return Container(
+                          decoration: BoxDecoration(
+                            gradient: _statsCardGradient,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: _statsPrimaryColor.withOpacity(0.06),
+                            ),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          child: ListTile(
+                            contentPadding: EdgeInsets.zero,
                             leading: CircleAvatar(
                               backgroundColor: summary.hasOpenShift
                                   ? Colors.orange.shade100
@@ -317,9 +351,9 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
                                   ),
                               ],
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                        );
+                      },
                     ),
                 ],
               ),

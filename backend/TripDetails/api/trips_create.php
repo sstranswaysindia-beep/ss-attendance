@@ -187,25 +187,46 @@ try {
   // helpers (plural table preferred; fallback to legacy)
   $has_plural_helpers  = table_exists($db,'trip_helpers');
   $has_legacy_helper   = table_exists($db,'trip_helper');
+  $has_helper_text_col = has_col($db,'trips','helper_text');
 
-  if (!empty($helper_ids)) {
-    if ($has_plural_helpers) {
-      $ih = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
-      foreach ($helper_ids as $hid) {
-        $ih->bind_param('ii', $trip_id, $hid);
-        $ih->execute();
-      }
-      $ih->close();
-    } elseif ($has_legacy_helper) {
-      // legacy: only first helper can be stored
-      $first = (int)$helper_ids[0];
-      if ($first > 0) {
-        $ih = $db->prepare("REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)");
-        $ih->bind_param('ii', $trip_id, $first);
-        $ih->execute();
-        $ih->close();
-      }
+  if (!empty($helper_ids) && $has_plural_helpers) {
+    $ih = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
+    foreach ($helper_ids as $hid) {
+      $ih->bind_param('ii', $trip_id, $hid);
+      $ih->execute();
     }
+    $ih->close();
+  } elseif (!empty($helper_ids) && !$has_plural_helpers && $has_helper_text_col) {
+    $textValue = implode(',', array_map('intval', $helper_ids));
+    $upd = $db->prepare("UPDATE trips SET helper_text=? WHERE id=?");
+    $upd->bind_param('si', $textValue, $trip_id);
+    $upd->execute();
+    $upd->close();
+  }
+
+  if ($has_legacy_helper) {
+    $first = 0;
+    foreach ($helper_ids as $hid) {
+      if ((int)$hid > 0) { $first = (int)$hid; break; }
+    }
+    if ($first > 0) {
+      $ih = $db->prepare("REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)");
+      $ih->bind_param('ii', $trip_id, $first);
+      $ih->execute();
+      $ih->close();
+    }
+  } elseif ($has_helper_text_col && empty($helper_ids)) {
+    $upd = $db->prepare("UPDATE trips SET helper_text = NULL WHERE id=?");
+    $upd->bind_param('i', $trip_id);
+    $upd->execute();
+    $upd->close();
+  }
+
+  if (empty($helper_ids) && $has_plural_helpers) {
+    $del = $db->prepare("DELETE FROM trip_helpers WHERE trip_id=?");
+    $del->bind_param('i', $trip_id);
+    $del->execute();
+    $del->close();
   }
 
   // Resolve plant_id from vehicle

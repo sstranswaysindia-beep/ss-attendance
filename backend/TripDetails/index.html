@@ -1437,6 +1437,24 @@ let rowsToRender = freshRows;
 // If you later add an explicit “filter by driver” toggle,
 // gate the filter behind that flag instead of silently applying it here.
 
+    rowsToRender = rowsToRender.map(r => {
+      if (Array.isArray(r.helper_ids) && r.helper_ids.length) {
+        const names = String(r.helpers || '')
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
+        r.helper_ids.forEach((id, idx) => {
+          const nm = names[idx] || getHelperName(id);
+          if (nm) helperNameById.set(String(id), nm);
+        });
+        if ((!r.helpers || !String(r.helpers).trim()) && r.helper_ids.length) {
+          const derived = r.helper_ids.map(getHelperName).filter(Boolean).join(', ');
+          if (derived) r.helpers = derived;
+        }
+      }
+      return r;
+    });
+
     if (reset) state.lastTrips = [];
     state.lastTrips = state.lastTrips.concat(rowsToRender);
 

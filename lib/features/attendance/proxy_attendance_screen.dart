@@ -28,11 +28,24 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
   List<ProxyPlantOption> _plants = const [];
   ProxyEmployee? _selectedEmployee;
   String? _selectedPlantId;
+  final TextEditingController _notesController = TextEditingController();
+  final Map<String, bool> _platformSelections = <String, bool>{};
+  final Map<String, String> _notesByDriver = <String, String>{};
+  bool _platformSelected = false;
+  static const String _platformTag = 'Rest';
 
   @override
   void initState() {
     super.initState();
+    _notesController.addListener(_handleNotesChanged);
     _loadData();
+  }
+
+  @override
+  void dispose() {
+    _notesController.removeListener(_handleNotesChanged);
+    _notesController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -68,6 +81,7 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
             (response.employees.isNotEmpty ? response.employees.first : null);
         _isLoading = false;
       });
+      _applySelectionState();
     } on ProxyAttendanceFailure catch (error) {
       if (!mounted) return;
       setState(() {
@@ -75,6 +89,7 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
         _errorMessage = error.message;
         _employees = const [];
       });
+      _applySelectionState();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -82,6 +97,7 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
         _errorMessage = 'Unable to load proxy records.';
         _employees = const [];
       });
+      _applySelectionState();
     }
   }
 
@@ -99,7 +115,7 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
       );
       return;
     }
-    if (action == 'check_in' && employee.attendanceCompleted) {
+    if (action == 'check_in' && employee.attendanceCompletedToday) {
       showAppToast(
         context,
         'Attendance already completed for this employee today.',
@@ -110,11 +126,14 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
 
     setState(() => _isSubmitting = true);
     try {
+      final notes = _notesController.text.trim();
+      final payloadNotes = notes.isEmpty ? null : notes;
       await _repository.submit(
         supervisorUserId: widget.user.id,
         driverId: employee.driverId,
         userId: employee.userId,
         action: action,
+        notes: payloadNotes,
       );
 
       if (!mounted) return;
@@ -315,6 +334,7 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
           .toList(),
       onChanged: (employee) {
         setState(() => _selectedEmployee = employee);
+        _applySelectionState();
       },
     );
   }
@@ -464,7 +484,9 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
         ),
       );
     }
-    if (employee.attendanceCompleted) {
+    final bool completedToday = employee.attendanceCompletedToday;
+
+    if (completedToday) {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -487,37 +509,78 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
       );
     }
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: (!_isSubmitting && !employee.hasOpenShift)
-                ? () => _submit('check_in')
-                : null,
-            icon: _isSubmitting && !employee.hasOpenShift
-                ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.login),
-            label: const Text('Check-in'),
+        Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: (!_isSubmitting && !employee.hasOpenShiftToday)
+                    ? () => _submit('check_in')
+                    : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF00D100),
+                  disabledBackgroundColor: const Color(0xFF9CF09C),
+                  foregroundColor: Colors.white,
+                ),
+                icon: _isSubmitting && !employee.hasOpenShiftToday
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.login),
+                label: const Text('Check-in'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: (!_isSubmitting && employee.hasOpenShiftToday)
+                    ? () => _submit('check_out')
+                    : null,
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0000D1),
+                  disabledBackgroundColor: const Color(0xFF9BA4FF),
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Color(0xFF0000D1)),
+                ),
+                icon: _isSubmitting && employee.hasOpenShiftToday
+                    ? const SizedBox(
+                        height: 16,
+                        width: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.logout),
+                label: const Text('Check-out'),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: _isSubmitting
+                ? null
+                : () => _setPlatformSelected(!_platformSelected),
+            icon: Icon(
+              _platformSelected
+                  ? Icons.check_box
+                  : Icons.check_box_outline_blank,
+              size: 28,
+            ),
+            label: const Text('Rest'),
           ),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: (!_isSubmitting && employee.hasOpenShift)
-                ? () => _submit('check_out')
-                : null,
-            icon: _isSubmitting && employee.hasOpenShift
-                ? const SizedBox(
-                    height: 16,
-                    width: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.logout),
-            label: const Text('Check-out'),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _notesController,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Notes (optional)',
+            border: OutlineInputBorder(),
           ),
         ),
       ],
@@ -555,6 +618,86 @@ class _ProxyAttendanceScreenState extends State<ProxyAttendanceScreen> {
         ],
       ),
     );
+  }
+
+  void _applySelectionState() {
+    final employee = _selectedEmployee;
+    if (employee == null) {
+      _setNotesText('');
+      _storeNotes('');
+      setState(() => _platformSelected = false);
+      return;
+    }
+    final driverId = employee.driverId;
+    final bool selected = _platformSelections[driverId] ?? false;
+    var notes = _notesByDriver[driverId] ?? _notesController.text;
+    notes = selected ? _appendPlatformTag(notes) : _removePlatformTag(notes);
+    _setNotesText(notes);
+    _storeNotes(notes);
+    setState(() => _platformSelected = selected);
+  }
+
+  void _setPlatformSelected(bool selected) {
+    final employee = _selectedEmployee;
+    if (employee == null) {
+      return;
+    }
+    setState(() {
+      _platformSelected = selected;
+      _platformSelections[employee.driverId] = selected;
+      final updated = selected
+          ? _appendPlatformTag(_notesController.text)
+          : _removePlatformTag(_notesController.text);
+      _setNotesText(updated);
+      _storeNotes(updated);
+    });
+  }
+
+  void _handleNotesChanged() {
+    _storeNotes(_notesController.text);
+  }
+
+  void _storeNotes(String value) {
+    final employee = _selectedEmployee;
+    if (employee == null) {
+      return;
+    }
+    if (value.isEmpty) {
+      _notesByDriver.remove(employee.driverId);
+    } else {
+      _notesByDriver[employee.driverId] = value;
+    }
+  }
+
+  void _setNotesText(String value) {
+    _notesController.removeListener(_handleNotesChanged);
+    _notesController.text = value;
+    _notesController.selection = TextSelection.fromPosition(
+      TextPosition(offset: value.length),
+    );
+    _notesController.addListener(_handleNotesChanged);
+  }
+
+  bool _containsPlatformTag(String text) => text.contains(_platformTag);
+
+  String _appendPlatformTag(String text) {
+    final trimmed = text.trim();
+    if (_containsPlatformTag(trimmed)) {
+      return trimmed.isEmpty ? _platformTag : trimmed;
+    }
+    if (trimmed.isEmpty) {
+      return _platformTag;
+    }
+    return '$trimmed | $_platformTag';
+  }
+
+  String _removePlatformTag(String text) {
+    var updated = text.replaceAll(' | $_platformTag', '');
+    updated = updated.replaceAll(_platformTag, '');
+    updated = updated.replaceAll(RegExp(r'\s*\|\s*$'), '');
+    updated = updated.replaceAll(RegExp(r'^\s*\|\s*'), '');
+    updated = updated.replaceAll(RegExp(r'\s*\|\s*'), ' | ');
+    return updated.trim();
   }
 
   bool _isSelf(ProxyEmployee employee) {

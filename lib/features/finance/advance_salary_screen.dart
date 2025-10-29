@@ -2352,22 +2352,68 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _viewReceipt(String receiptPath) {
-    // Show receipt in a dialog
+    final trimmedPath = receiptPath.trim();
+    final imageUrl = trimmedPath.isEmpty
+        ? null
+        : trimmedPath.startsWith('http')
+            ? trimmedPath
+            : 'https://sstranswaysindia.com'
+                '${trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath'}';
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Receipt'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Receipt Path: $receiptPath'),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
-        ),
+        content: imageUrl == null
+            ? const Text('No receipt available for this entry.')
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    height: 320,
+                    child: InteractiveViewer(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          imageUrl,
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) {
+                            if (progress == null) return child;
+                            return const Center(
+                              child: CircularProgressIndicator(),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) => Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.broken_image, size: 48),
+                              const SizedBox(height: 12),
+                              Text(
+                                'Unable to load receipt image.',
+                                style:
+                                    Theme.of(context).textTheme.bodyMedium,
+                                textAlign: TextAlign.center,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SelectableText(
+                    imageUrl,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }

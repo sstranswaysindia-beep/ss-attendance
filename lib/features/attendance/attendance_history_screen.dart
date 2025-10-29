@@ -7,6 +7,14 @@ import '../../core/services/attendance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
+const Color _historyPrimaryColor = Color(0xFF00296B);
+const Color _historyAccentLight = Color(0xFFE3F2FD);
+const LinearGradient _historyCardGradient = LinearGradient(
+  colors: [Colors.white, _historyAccentLight],
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+);
+
 class AttendanceHistoryScreen extends StatefulWidget {
   const AttendanceHistoryScreen({required this.user, super.key});
 
@@ -313,52 +321,75 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                 )
               else
                 Expanded(
-                  child: Card(
-                    child: ListView.separated(
-                      itemCount: filteredRecords.length,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
-                      itemBuilder: (context, index) {
-                        final record = filteredRecords[index];
-                        final statusColor = _statusColor(record.status);
-                        final inTime = _formatTime(record.inTime);
-                        final outTime = _formatTime(record.outTime);
-                        final parsedDate =
-                            record.inTime != null && record.inTime!.isNotEmpty
-                            ? DateTime.tryParse(record.inTime!)
-                            : null;
-                        final dayLabel = parsedDate != null
-                            ? DateFormat('dd').format(parsedDate)
-                            : '--';
-                        final subtitleSegments = <String>[
-                          'In: $inTime',
-                          'Out: $outTime',
-                        ];
-                        if (record.notes != null && record.notes!.isNotEmpty) {
-                          final extractedNotes = record.isAdjustRequest
-                              ? _extractAdjustReason(record.notes!)
-                              : record.notes!;
-                          if (extractedNotes.isNotEmpty) {
-                            subtitleSegments.add('Notes: $extractedNotes');
-                          }
+                  child: ListView.separated(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    itemCount: filteredRecords.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final record = filteredRecords[index];
+                      final statusColor = _statusColor(record.status);
+                      final inTime = _formatTime(record.inTime);
+                      final outTime = _formatTime(record.outTime);
+                      final parsedDate =
+                          record.inTime != null && record.inTime!.isNotEmpty
+                              ? DateTime.tryParse(record.inTime!)
+                              : null;
+                      final dayLabel = parsedDate != null
+                          ? DateFormat('dd').format(parsedDate)
+                          : '--';
+                      final subtitleSegments = <String>[
+                        'In: $inTime',
+                        'Out: $outTime',
+                      ];
+                      if (record.notes != null && record.notes!.isNotEmpty) {
+                        final extractedNotes = record.isAdjustRequest
+                            ? _extractAdjustReason(record.notes!)
+                            : record.notes!;
+                        if (extractedNotes.isNotEmpty) {
+                          subtitleSegments.add('Notes: $extractedNotes');
                         }
+                      }
 
-                        return Dismissible(
-                          key: ValueKey('attendance-${record.attendanceId}'),
-                          direction: DismissDirection.endToStart,
-                          confirmDismiss: (_) async {
-                            await _deleteRecord(record);
-                            return false;
-                          },
-                          background: Container(
-                            alignment: Alignment.centerRight,
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            decoration: BoxDecoration(
-                              color: Colors.red.shade100,
-                              borderRadius: BorderRadius.circular(12),
+                      return Dismissible(
+                        key: ValueKey('attendance-${record.attendanceId}'),
+                        direction: DismissDirection.endToStart,
+                        confirmDismiss: (_) async {
+                          await _deleteRecord(record);
+                          return false;
+                        },
+                        background: Container(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          alignment: Alignment.centerRight,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade100,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: const Icon(Icons.delete, color: Colors.red),
+                        ),
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(
+                            horizontal: 4,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            gradient: _historyCardGradient,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: _historyPrimaryColor.withOpacity(0.06),
                             ),
-                            child: const Icon(Icons.delete, color: Colors.red),
                           ),
                           child: ListTile(
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
                             leading: CircleAvatar(
                               backgroundColor: statusColor.withOpacity(0.15),
                               child: Text(dayLabel),
@@ -378,21 +409,34 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                                   labelStyle: TextStyle(
                                     color: statusColor.withOpacity(0.9),
                                   ),
-                                  backgroundColor: statusColor.withOpacity(0.1),
+                                  backgroundColor:
+                                      statusColor.withOpacity(0.12),
+                                  side: BorderSide(
+                                    color: statusColor.withOpacity(0.3),
+                                  ),
                                 ),
                                 if (record.isAdjustRequest) ...[
                                   const SizedBox(height: 6),
-                                  const Chip(
-                                    label: Text('Past Request'),
-                                    avatar: Icon(Icons.edit_calendar, size: 16),
+                                  Chip(
+                                    label: const Text('Past Request'),
+                                    avatar: const Icon(
+                                      Icons.edit_calendar,
+                                      size: 16,
+                                    ),
+                                    backgroundColor:
+                                        _historyPrimaryColor.withOpacity(0.12),
+                                    labelStyle: const TextStyle(
+                                      color: _historyPrimaryColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
                                 ],
                               ],
                             ),
                           ),
-                        );
-                      },
-                    ),
+                        ),
+                      );
+                    },
                   ),
                 ),
             ],

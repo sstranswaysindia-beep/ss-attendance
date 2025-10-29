@@ -104,6 +104,16 @@ $helper_id =
     ? (($in['helper_id'] === '' || $in['helper_id'] === null) ? 0 : (int)$in['helper_id']) // 0 => clear
     : null; // null => do not touch
 
+$helper_ids_to_apply = null;
+if (array_key_exists('helper_ids', $in)) {
+  $helper_ids_to_apply = array_values(array_unique(array_filter(
+    array_map('intval', (array)$in['helper_ids']),
+    fn($v)=> $v>0
+  )));
+}
+if ($helper_ids_to_apply === null && $helper_id !== null) {
+  $helper_ids_to_apply = $helper_id > 0 ? [$helper_id] : [];
+}
 $note = array_key_exists('note',$in) ? trim((string)$in['note']) : null;
 
 $set_driver_ids = array_values(array_unique(array_filter(
@@ -129,6 +139,11 @@ if (!$tp) json(['ok'=>false,'error'=>'Trip vehicle not found'], 500);
 $vehicle_id = (int)$tp['vehicle_id'];
 $plant_id   = (int)$tp['plant_id'];
 
+$has_trip_helpers_table = table_exists($db,'trip_helpers');
+$has_trip_helper_legacy = table_exists($db,'trip_helper');
+$drivers_have_plant_col = has_col($db,'drivers','plant_id');
+$has_helper_text_col    = has_col($db,'trips','helper_text');
+
 $db->begin_transaction();
 try {
   /* Update note */
@@ -138,38 +153,47 @@ try {
   }
 
   /* Helper upsert/clear (+ assignments + optional drivers.plant_id mirror) */
-  if ($helper_id !== null) {
-    if (table_exists($db,'trip_helper')) {
-      // clear then re-insert when >0
+  if ($helper_ids_to_apply !== null) {
+    if ($has_trip_helpers_table) {
+      $del = $db->prepare("DELETE FROM trip_helpers WHERE trip_id=?");
+      $del->bind_param('i',$trip_id); $del->execute(); $del->close();
+
+      if (!empty($helper_ids_to_apply)) {
+        $ins = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
+        foreach ($helper_ids_to_apply as $hid) {
+          $ins->bind_param('ii',$trip_id,$hid); $ins->execute();
+        }
+        $ins->close();
+      }
+    } elseif ($has_helper_text_col) {
+      $val = !empty($helper_ids_to_apply) ? implode(',', array_map('strval', $helper_ids_to_apply)) : '';
+      $u = $db->prepare("UPDATE trips SET helper_text=? WHERE id=?");
+      $u->bind_param('si',$val,$trip_id); $u->execute(); $u->close();
+    }
+
+    if ($has_trip_helper_legacy) {
       $d = $db->prepare("DELETE FROM trip_helper WHERE trip_id=?");
       $d->bind_param('i',$trip_id); $d->execute(); $d->close();
 
-      if ($helper_id > 0) {
-        $i = $db->prepare("INSERT INTO trip_helper (trip_id, helper_id) VALUES (?,?)");
-        $i->bind_param('ii',$trip_id,$helper_id); $i->execute(); $i->close();
-
-        // reflect assignment
-        upsert_assignment($db, $helper_id, $vehicle_id, $plant_id);
-
-        // optional mirror to drivers.plant_id
-        if (has_col($db,'drivers','plant_id')) {
-          $u = $db->prepare("UPDATE drivers SET plant_id=? WHERE id=?");
-          $u->bind_param('ii', $plant_id, $helper_id);
-          $u->execute();
-          $u->close();
+      if (!empty($helper_ids_to_apply)) {
+        $primary = (int)$helper_ids_to_apply[0];
+        if ($primary > 0) {
+          $i = $db->prepare("INSERT INTO trip_helper (trip_id, helper_id) VALUES (?,?)");
+          $i->bind_param('ii',$trip_id,$primary); $i->execute(); $i->close();
         }
       }
-    } elseif (has_col($db,'trips','helper_text')) {
-      $val = ($helper_id > 0) ? (string)$helper_id : '';
-      $u = $db->prepare("UPDATE trips SET helper_text=? WHERE id=?");
-      $u->bind_param('si',$val,$trip_id); $u->execute(); $u->close();
-      if ($helper_id > 0) {
-        upsert_assignment($db, $helper_id, $vehicle_id, $plant_id);
-        if (has_col($db,'drivers','plant_id')) {
+    } elseif ($has_helper_text_col && empty($helper_ids_to_apply)) {
+      $u = $db->prepare("UPDATE trips SET helper_text = NULL WHERE id=?");
+      $u->bind_param('i',$trip_id); $u->execute(); $u->close();
+    }
+
+    if (!empty($helper_ids_to_apply)) {
+      foreach ($helper_ids_to_apply as $hid) {
+        upsert_assignment($db, $hid, $vehicle_id, $plant_id);
+        if ($drivers_have_plant_col) {
           $u = $db->prepare("UPDATE drivers SET plant_id=? WHERE id=?");
-          $u->bind_param('ii', $plant_id, $helper_id);
-          $u->execute();
-          $u->close();
+          $u->bind_param('ii', $plant_id, $hid);
+          $u->execute(); $u->close();
         }
       }
     }
@@ -236,7 +260,7 @@ try {
     // upsert assignments & mirror plant for all current drivers
     foreach ($set_driver_ids as $did) {
       upsert_assignment($db, $did, $vehicle_id, $plant_id);
-      if (has_col($db,'drivers','plant_id')) {
+      if ($drivers_have_plant_col) {
         $u = $db->prepare("UPDATE drivers SET plant_id=? WHERE id=?");
         $u->bind_param('ii', $plant_id, $did);
         $u->execute();

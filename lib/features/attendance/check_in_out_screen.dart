@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
-import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -53,6 +52,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   bool? _locationServiceEnabled;
   LocationPermission? _locationPermissionStatus;
   bool _locationStatusRefreshing = false;
+  bool _platformAttendanceSelected = false;
+  static const String _platformNoteTag = 'Rest';
 
   String? _selectedVehicleId;
   String? _selectedVehicleNumber;
@@ -137,6 +138,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           _submissionSummary = _hasOpenShift
               ? 'Checked in at ${_formatDateTime(currentAttendance.inTime)}'
               : 'Last check-out ${_formatDateTime(currentAttendance.outTime)}';
+          final bool recordOpen = _isRecordOpen(currentAttendance);
+          if (recordOpen) {
+            _platformAttendanceSelected = _containsPlatformTag(
+              currentAttendance.notes ?? '',
+            );
+          } else {
+            _platformAttendanceSelected = false;
+          }
+        } else {
+          _platformAttendanceSelected = false;
         }
       });
       _updateStatusAnimation();
@@ -215,6 +226,12 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         isError: true,
       );
     }
+  }
+
+  void _togglePlatformAttendance() {
+    setState(() {
+      _platformAttendanceSelected = !_platformAttendanceSelected;
+    });
   }
 
   Future<AttendanceRecord?> _fetchCurrentAttendance() async {
@@ -495,28 +512,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
   Future<void> _capturePhoto() async {
     try {
-      XFile? xFile;
-      try {
-        final platform = ImagePickerPlatform.instance;
-        xFile = await platform.getImageFromSource(
-          source: ImageSource.camera,
-          options: const ImagePickerOptions(
-            imageQuality: 85,
-            preferredCameraDevice: CameraDevice.front,
-          ),
-        );
-      } on UnimplementedError {
-        // Fallback to default picker implementation if the platform
-        // interface method is not supported.
-        xFile = await ImagePicker().pickImage(
-          source: ImageSource.camera,
-          preferredCameraDevice: CameraDevice.front,
-          imageQuality: 85,
-        );
-      }
-
-      // Final safeguard fallback to the classic picker call.
-      xFile ??= await ImagePicker().pickImage(
+      final picker = ImagePicker();
+      final xFile = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
         imageQuality: 85,
@@ -643,6 +640,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
             ? AttendanceAction.checkIn
             : AttendanceAction.checkOut,
         photoFile: _capturedPhoto,
+        notes: _buildSubmissionNotes(performedAction),
         locationJson: locationPayload,
       );
 
@@ -978,6 +976,51 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     );
   }
 
+  String? _buildSubmissionNotes(CheckFlowAction action) {
+    final existing = _activeShift?.notes ?? '';
+    var updated = existing.trim();
+    if (_platformAttendanceSelected) {
+      updated = _appendPlatformTag(updated);
+    } else {
+      updated = _removePlatformTag(updated);
+    }
+    updated = updated.trim();
+    if (updated.isEmpty) {
+      return null;
+    }
+    if (action == CheckFlowAction.checkIn &&
+        !_platformAttendanceSelected &&
+        existing.isEmpty) {
+      return null;
+    }
+    return updated;
+  }
+
+  bool _isRecordOpen(AttendanceRecord record) {
+    final outTime = record.outTime;
+    return outTime == null || outTime.isEmpty;
+  }
+
+  bool _containsPlatformTag(String text) => text.contains(_platformNoteTag);
+
+  String _appendPlatformTag(String text) {
+    final trimmed = text.trim();
+    if (trimmed.contains(_platformNoteTag)) {
+      return trimmed;
+    }
+    if (trimmed.isEmpty) {
+      return _platformNoteTag;
+    }
+    return '$trimmed | $_platformNoteTag';
+  }
+
+  String _removePlatformTag(String text) {
+    var updated = text.replaceAll(' | $_platformNoteTag', '');
+    updated = updated.replaceAll(_platformNoteTag, '');
+    updated = updated.replaceAll(RegExp(r'\s*\|\s*'), ' | ');
+    return updated.trim();
+  }
+
   String _permissionDescription(LocationPermission permission) {
     switch (permission) {
       case LocationPermission.always:
@@ -1050,23 +1093,37 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: OutlinedButton.icon(
-                        onPressed: _isAssigning ? null : _pickVehicle,
-                        icon: _isAssigning
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.swap_horiz),
-                        label: Text(
-                          _isAssigning ? 'Updating...' : 'Change Vehicle',
+                    Row(
+                      children: [
+                        TextButton.icon(
+                          onPressed: (!attendanceCompleted && !_isSubmitting)
+                      ? _togglePlatformAttendance
+                      : null,
+                  icon: Icon(
+                    _platformAttendanceSelected
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    size: 28,
+                  ),
+                  label: const Text('Rest'),
+                ),
+                        const Spacer(),
+                        OutlinedButton.icon(
+                          onPressed: _isAssigning ? null : _pickVehicle,
+                          icon: _isAssigning
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.swap_horiz),
+                          label: Text(
+                            _isAssigning ? 'Updating...' : 'Change Vehicle',
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                     if (widget.availableVehicles.isEmpty)
                       const Padding(
@@ -1132,7 +1189,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                         ],
                       ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 12),
                     FilledButton(
                       onPressed: isButtonEnabled ? _handleCheckInOut : null,
                       style: FilledButton.styleFrom(

@@ -93,6 +93,7 @@ try {
   $hasTripHelpers   = table_exists($db,'trip_helpers');  // future multi-helper
   $hasTripCustomers = table_exists($db,'trip_customers');
   $hasDrivers       = table_exists($db,'drivers');
+  $hasHelpersTable  = table_exists($db,'helpers');
 
   $hasTripsStatus   = has_col($db,'trips','status');
   $hasTripsDriversTx= has_col($db,'trips','drivers_text');
@@ -121,6 +122,16 @@ try {
   $F[] = $hasTripsStatus
         ? "t.status"
         : "(CASE WHEN t.end_km IS NULL THEN 'ongoing' ELSE 'ended' END) AS status";
+
+  // Helper name column (helpers table)
+  $helperNameCol = 'name';
+  if ($hasHelpersTable) {
+    foreach (['name','helper_name','full_name','display_name'] as $c) {
+      if (has_col($db,'helpers',$c)) { $helperNameCol = $c; break; }
+    }
+  } else {
+    $helperNameCol = null;
+  }
 
   // Drivers string
 // ------ Drivers string (robust fallbacks) ------
@@ -161,15 +172,27 @@ if ($hasTripDrivers && $hasDrivers) {
 }
 
   // Helpers string + ids csv (works with either trip_helpers or legacy trip_helper)
-  if ($hasTripHelpers && $hasDrivers) {
-    $F[] = "COALESCE((SELECT GROUP_CONCAT(DISTINCT d3.`$drvNameCol` ORDER BY d3.`$drvNameCol` SEPARATOR ', ')
-                      FROM trip_helpers th3 JOIN drivers d3 ON d3.id=th3.helper_id
+  $helperNameExprParts = [];
+  if ($hasDrivers) {
+    $helperNameExprParts[] = "(SELECT d_name.`$drvNameCol` FROM drivers d_name WHERE d_name.id=ALIAS.helper_id LIMIT 1)";
+  }
+  if ($hasHelpersTable && $helperNameCol) {
+    $helperNameExprParts[] = "(SELECT h_name.`$helperNameCol` FROM helpers h_name WHERE h_name.id=ALIAS.helper_id LIMIT 1)";
+  }
+  $helperNameExprParts[] = "CONCAT('Helper #', ALIAS.helper_id)";
+  $helperNameTemplate = 'COALESCE(' . implode(',', $helperNameExprParts) . ')';
+
+  if ($hasTripHelpers) {
+    $nameExpr = str_replace('ALIAS', 'th3', $helperNameTemplate);
+    $F[] = "COALESCE((SELECT GROUP_CONCAT(DISTINCT $nameExpr ORDER BY $nameExpr SEPARATOR ', ')
+                      FROM trip_helpers th3
                       WHERE th3.trip_id=t.id), '') AS helpers_csv";
     $F[] = "COALESCE((SELECT GROUP_CONCAT(DISTINCT th4.helper_id ORDER BY th4.helper_id SEPARATOR ',')
                       FROM trip_helpers th4 WHERE th4.trip_id=t.id), '') AS helper_ids_csv";
-  } elseif ($hasTripHelperTbl && $hasDrivers) {
-    $F[] = "COALESCE((SELECT d2.`$drvNameCol`
-                      FROM trip_helper th JOIN drivers d2 ON d2.id=th.helper_id
+  } elseif ($hasTripHelperTbl) {
+    $nameExprLegacy = str_replace('ALIAS', 'th', $helperNameTemplate);
+    $F[] = "COALESCE((SELECT $nameExprLegacy
+                      FROM trip_helper th
                       WHERE th.trip_id=t.id LIMIT 1), '') AS helpers_csv";
     $F[] = "COALESCE((SELECT th2.helper_id FROM trip_helper th2 WHERE th2.trip_id=t.id LIMIT 1), '') AS helper_ids_csv";
   } elseif ($hasTripsHelperTx) {

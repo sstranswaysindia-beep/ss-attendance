@@ -1924,12 +1924,35 @@ class _TripTile extends StatelessWidget {
               ],
             ),
 
-            // Drivers
-            _InfoRow(
-              icon: Icons.person,
-              label: 'Drivers',
-              value: trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
-            ),
+            // Drivers & Helpers
+            if (trip.helper?.isNotEmpty == true)
+              Row(
+                children: [
+                  Expanded(
+                    child: _InfoRow(
+                      icon: Icons.person,
+                      label: 'Drivers',
+                      value:
+                          trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: _InfoRow(
+                      icon: Icons.groups,
+                      label: 'Helpers',
+                      value: trip.helper!,
+                    ),
+                  ),
+                ],
+              )
+            else
+              _InfoRow(
+                icon: Icons.person,
+                label: 'Drivers',
+                value:
+                    trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
+              ),
 
             // Customers
             if (trip.customers?.isNotEmpty == true)

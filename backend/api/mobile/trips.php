@@ -18,6 +18,28 @@ if (!isset($conn) || !($conn instanceof mysqli)) {
 }
 $conn->set_charset('utf8mb4');
 
+if (!function_exists('table_exists')) {
+  function table_exists(mysqli $db, string $table): bool {
+    $table = $db->real_escape_string($table);
+    $res = $db->query("SHOW TABLES LIKE '{$table}'");
+    return $res && $res->num_rows > 0;
+  }
+}
+
+if (!function_exists('column_exists')) {
+  function column_exists(mysqli $db, string $table, string $column): bool {
+    $table = $db->real_escape_string($table);
+    $column = $db->real_escape_string($column);
+    $sql = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = '{$table}'
+              AND COLUMN_NAME = '{$column}'
+            LIMIT 1";
+    $res = $db->query($sql);
+    return $res && $res->num_rows > 0;
+  }
+}
+
 function h($s){ return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 function dmy($ymd){ return $ymd ? date('d-m-Y', strtotime($ymd)) : ''; }
 function days_between($from, $to){
@@ -49,6 +71,61 @@ $types  = '';
 $where[]  = "t.start_date BETWEEN ? AND ?";
 $params[] = $from; $params[] = $to; $types .= 'ss';
 
+$hasDriversTable = table_exists($conn, 'drivers');
+$driverNameColumn = 'name';
+if ($hasDriversTable) {
+  foreach (['name','driver_name','full_name'] as $candidate) {
+    if (column_exists($conn, 'drivers', $candidate)) {
+      $driverNameColumn = $candidate;
+      break;
+    }
+  }
+}
+
+$hasHelpersTable = table_exists($conn, 'helpers');
+$helperNameColumn = 'name';
+if ($hasHelpersTable) {
+  foreach (['name','helper_name','full_name','display_name'] as $candidate) {
+    if (column_exists($conn, 'helpers', $candidate)) {
+      $helperNameColumn = $candidate;
+      break;
+    }
+  }
+}
+
+$helperSources = [];
+if (table_exists($conn, 'trip_helpers') && column_exists($conn, 'trip_helpers', 'helper_id')) {
+  $helperSources[] = 'SELECT trip_id, helper_id FROM trip_helpers';
+}
+if (table_exists($conn, 'trip_helper') && column_exists($conn, 'trip_helper', 'helper_id')) {
+  $helperSources[] = 'SELECT trip_id, helper_id FROM trip_helper';
+}
+
+$helperJoinSql = '';
+$helperSelectSql = "'' AS helper";
+if (!empty($helperSources)) {
+  $unionSql = implode(' UNION ALL ', $helperSources);
+  $joinDriversSql = $hasDriversTable ? "LEFT JOIN drivers driver_map ON driver_map.id = src.helper_id" : '';
+  $driverNameExpr = $hasDriversTable ? "driver_map.`{$driverNameColumn}`" : "NULL";
+
+  $joinHelpersSql = $hasHelpersTable ? "LEFT JOIN helpers helper_map ON helper_map.id = src.helper_id" : '';
+  $helperNameExpr = $hasHelpersTable ? "helper_map.`{$helperNameColumn}`" : "NULL";
+
+  $nameExpr = "COALESCE({$driverNameExpr}, {$helperNameExpr}, CONCAT('Helper #', src.helper_id))";
+
+  $helperJoinSql = "
+    LEFT JOIN (
+      SELECT src.trip_id,
+             GROUP_CONCAT(DISTINCT {$nameExpr} ORDER BY {$nameExpr} SEPARATOR ', ') AS helper_names
+      FROM ({$unionSql}) src
+      {$joinDriversSql}
+      {$joinHelpersSql}
+      GROUP BY src.trip_id
+    ) helper_map ON helper_map.trip_id = t.id
+  ";
+  $helperSelectSql = "COALESCE(helper_map.helper_names, '') AS helper";
+}
+
 $sql = "
   SELECT
     t.*,
@@ -57,15 +134,14 @@ $sql = "
     p.id AS plant_id,
     GROUP_CONCAT(DISTINCT d.name ORDER BY d.name SEPARATOR ', ') AS drivers,
     GROUP_CONCAT(DISTINCT c.customer_name SEPARATOR ', ') AS customers,
-    h.name AS helper
+    {$helperSelectSql}
   FROM trips t
   JOIN vehicles v ON v.id = t.vehicle_id
   JOIN plants p   ON p.id = v.plant_id
   LEFT JOIN trip_drivers td ON td.trip_id = t.id
   LEFT JOIN drivers d       ON d.id = td.driver_id
   LEFT JOIN trip_customers c ON c.trip_id = t.id
-  LEFT JOIN trip_helper th ON th.trip_id = t.id
-  LEFT JOIN drivers h      ON h.id = th.helper_id
+  {$helperJoinSql}
   " . (count($where) ? (" WHERE " . implode(" AND ", $where)) : "") . "
   GROUP BY t.id
   ORDER BY t.start_date DESC, t.id DESC
