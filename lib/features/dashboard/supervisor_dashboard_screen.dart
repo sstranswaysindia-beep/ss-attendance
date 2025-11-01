@@ -36,7 +36,9 @@ import '../profile/supervisor_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
+import '../watch_ads/watch_ads_screen.dart';
 import '../documents/documents_hub_screen.dart';
+import '../safety/safety_hub_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
 
@@ -741,6 +743,18 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.play_circle_fill_outlined),
+                title: const Text('Watch Ads & Earn'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => WatchAdsScreen(user: user),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.logout),
                 title: const Text('Logout'),
                 onTap: () {
@@ -1040,13 +1054,28 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                               _loadSupervisorTodayAttendance(silent: true);
                             }),
                       ),
-                      // Show Average Calculator for all supervisors
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.calculate),
-                        title: const Text('Average Calculator'),
-                        onTap: () => _openAverageCalculator(),
-                      ),
+                      if (widget.user.role == UserRole.driver ||
+                          widget.user.role == UserRole.supervisor) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.health_and_safety),
+                          title: const Text('Safety'),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  SafetyHubScreen(user: widget.user),
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (widget.user.canViewDocuments) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.calculate),
+                          title: const Text('Average Calculator'),
+                          onTap: () => _openAverageCalculator(),
+                        ),
+                      ],
                     ],
                   ),
                 ),

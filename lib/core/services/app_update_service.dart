@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:in_app_update/in_app_update.dart';
 
 class AppUpdateStatus {
@@ -16,7 +17,7 @@ class AppUpdateService {
   static const String androidPackageName = 'com.sstranswaysindia.app';
 
   Future<AppUpdateStatus> checkForUpdate() async {
-    if (!Platform.isAndroid) {
+    if (kIsWeb || !Platform.isAndroid) {
       return const AppUpdateStatus(isUpdateAvailable: false);
     }
 

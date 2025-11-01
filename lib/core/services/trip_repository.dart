@@ -199,6 +199,8 @@ class TripRepository {
       'status': status,
       if (plantId != null && plantId.isNotEmpty) 'plantId': plantId,
       if (vehicleId != null && vehicleId.isNotEmpty) 'vehicleId': vehicleId,
+      // Add a cache-busting token so CDN/intermediate caches always fetch fresh data
+      'ts': DateTime.now().millisecondsSinceEpoch.toString(),
     };
 
     final uri = _endpoint.replace(queryParameters: queryParams);
@@ -243,6 +245,7 @@ class TripRepository {
   }
 
   Future<int> createTrip({
+    required AppUser user,
     required int vehicleId,
     required String startDate,
     required int startKm,
@@ -255,6 +258,10 @@ class TripRepository {
   }) async {
     final uri = Uri.parse('${_mobileBase}trips_create.php');
     final payload = <String, dynamic>{
+      'role': _roleToString(user.role),
+      if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+      if (_tryParseInt(user.driverId) != null)
+        'driverId': _tryParseInt(user.driverId),
       'vehicle_id': vehicleId,
       'start_date': startDate,
       'start_km': startKm,
@@ -609,11 +616,20 @@ class TripRepository {
         }
       }
 
-      // For drivers or when supervisor vehicles are not available, use API
-      final uri = Uri.parse(
-        'https://sstranswaysindia.com/TripDetails/api/get_vehicles.php?plant_id=${Uri.encodeComponent(plantId)}&cb=${DateTime.now().millisecondsSinceEpoch}',
+      final uri = Uri.parse('${_mobileBase}vehicles.php');
+      final requestBody = <String, dynamic>{
+        'role': _roleToString(user.role),
+        if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+        if (_tryParseInt(user.driverId) != null)
+          'driverId': _tryParseInt(user.driverId),
+        'plantId': _tryParseInt(plantId) ?? plantId,
+      };
+
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
       );
-      final response = await _client.get(uri);
 
       if (response.statusCode >= 300) {
         debugPrint(
@@ -636,7 +652,9 @@ class TripRepository {
         throw TripFailure('Unable to load vehicles.');
       }
 
-      if (payload['ok'] != true) {
+      final status = payload['status']?.toString().toLowerCase();
+      final okFlag = payload['ok'] == true;
+      if (!(okFlag || status == 'ok')) {
         debugPrint(
           'TripRepository.fetchVehiclesForPlant: server error ${payload['error']}',
         );

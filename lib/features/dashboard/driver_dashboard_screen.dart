@@ -31,6 +31,7 @@ import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
+import '../watch_ads/watch_ads_screen.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({
@@ -797,6 +798,14 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 onTap: () {
                   Navigator.of(context).pop();
                   _openScreen(const NotificationSettingsScreen());
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.play_circle_fill_outlined),
+                title: const Text('Watch Ads & Earn'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _openScreen(WatchAdsScreen(user: widget.user));
                 },
               ),
               ListTile(

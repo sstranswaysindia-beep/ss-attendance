@@ -1,312 +1,318 @@
 <?php
 declare(strict_types=1);
 
+/**
+ * Mobile Trips Create API (FAST + IDEMPOTENT + CONSISTENT RESPONSE)
+ * - Success == HTTP 200 with { ok:true, success:true, status:"ok", duplicate:<bool>, trip_id:<int> }
+ * - Idempotent on (vehicle_id, start_km)
+ * - Multi-helper (trip_helpers) + legacy mirror (trip_helper)
+ * - Helper by ID or Name (resolved via drivers)
+ * - Column-safe insert; Plant mirror + assignments
+ * - NO post-commit hydration (avoid false "failed" in client)
+ */
+
 require __DIR__ . '/bootstrap.php';
 
-if (!function_exists('td_json')) {
-    function td_json(array $payload, int $status = 200): void
-    {
-        if (function_exists('ob_get_level')) {
-            while (ob_get_level() > 0) {
-                @ob_end_clean();
-            }
-        }
-        if (!headers_sent()) {
-            http_response_code($status);
-            header('Content-Type: application/json; charset=utf-8');
-            header('Cache-Control: no-store, no-cache, must-revalidate, private');
-        }
-        echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        exit;
+/* ---------- json out ---------- */
+function m_json_out(array $payload, int $status = 200): void {
+    if (function_exists('ob_get_level')) { while (ob_get_level() > 0) { @ob_end_clean(); } }
+    if (!headers_sent()) {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, private');
+        header('Connection: close');
     }
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
 }
 
-/** @var mysqli|null $conn */
-/** @var mysqli|null $mysqli */
-/** @var mysqli|null $con */
-$db = $conn instanceof mysqli ? $conn : ($mysqli instanceof mysqli ? $mysqli : ($con instanceof mysqli ? $con : null));
-if (!$db || $db->connect_errno) {
-    td_json(['status' => 'error', 'error' => 'Database connection not available'], 500);
-}
+/* ---------- DB handle ---------- */
+$db = null;
+if (isset($conn) && $conn instanceof mysqli) $db = $conn;
+elseif (isset($mysqli) && $mysqli instanceof mysqli) $db = $mysqli;
+elseif (isset($con) && $con instanceof mysqli) $db = $con;
+if (!$db || $db->connect_errno) m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Database connection not available'], 500);
 @$db->set_charset('utf8mb4');
 
-if (!function_exists('td_table_exists')) {
-    function td_table_exists(mysqli $db, string $table): bool
-    {
-        $table = $db->real_escape_string($table);
-        $res = $db->query("SHOW TABLES LIKE '{$table}'");
-        return $res && $res->num_rows > 0;
+/* ---------- parse request ---------- */
+$ct  = strtolower($_SERVER['CONTENT_TYPE'] ?? '');
+$raw = file_get_contents('php://input') ?: '';
+$body = (strpos($ct, 'application/json') !== false) ? json_decode($raw, true) : null;
+if (!is_array($body)) { $body = $_POST ?? []; if (!is_array($body)) $body = []; }
+
+/* ---------- tolerant auth ---------- */
+$roleBoot   = defined('TD_MOBILE_ROLE') ? TD_MOBILE_ROLE : '';
+$role       = $roleBoot !== '' ? $roleBoot : 'driver';
+$driverBoot = defined('TD_MOBILE_DRIVER_ID') ? TD_MOBILE_DRIVER_ID : null;
+
+$auth = $_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['Authorization'] ?? '';
+$driverFromAuth = null;
+if ($auth && preg_match('/Bearer\s+dev:(\d+)/i', $auth, $m)) $driverFromAuth = (int)$m[1];
+
+$driverFromPayload = null;
+if (!empty($body['driver_ids']) && is_array($body['driver_ids'])) {
+    foreach ($body['driver_ids'] as $v) {
+        if (is_numeric($v) && (int)$v > 0) { $driverFromPayload = (int)$v; break; }
     }
 }
+$driverId = $driverBoot ?: $driverFromAuth ?: $driverFromPayload ?: null;
+if (!$driverId) m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Driver ID required'], 401);
 
-if (!function_exists('td_has_col')) {
-    function td_has_col(mysqli $db, string $table, string $column): bool
-    {
-        $table = $db->real_escape_string($table);
-        $column = $db->real_escape_string($column);
-        $sql = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-                 WHERE TABLE_SCHEMA = DATABASE()
-                   AND TABLE_NAME = '{$table}'
-                   AND COLUMN_NAME = '{$column}'
-                 LIMIT 1";
-        $res = $db->query($sql);
-        return $res && $res->num_rows > 0;
+/* ---------- helpers ---------- */
+function m_table_exists(mysqli $db, string $t): bool {
+    $t = $db->real_escape_string($t);
+    $r = $db->query("SHOW TABLES LIKE '{$t}'");
+    return $r && $r->num_rows > 0;
+}
+function m_has_col(mysqli $db, string $t, string $c): bool {
+    $t = $db->real_escape_string($t);
+    $c = $db->real_escape_string($c);
+    $r = $db->query(
+        "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME='{$t}' AND COLUMN_NAME='{$c}' LIMIT 1"
+    );
+    return $r && $r->num_rows > 0;
+}
+function get_vehicle_plant(mysqli $db, int $vehicle_id): ?int {
+    $st = $db->prepare("SELECT plant_id FROM vehicles WHERE id=? LIMIT 1");
+    $st->bind_param('i', $vehicle_id);
+    $st->execute();
+    $st->bind_result($pid);
+    $ok = $st->fetch();
+    $st->close();
+    return $ok ? (int)$pid : null;
+}
+function upsert_assignment(mysqli $db, int $driver_id, int $vehicle_id, int $plant_id): void {
+    if (!m_table_exists($db, 'assignments')) return;
+    $sql = "
+      INSERT INTO assignments (driver_id, plant_id, vehicle_id, assigned_date)
+      VALUES (?, ?, ?, CURDATE())
+      ON DUPLICATE KEY UPDATE
+        plant_id      = VALUES(plant_id),
+        vehicle_id    = VALUES(vehicle_id),
+        assigned_date = VALUES(assigned_date)
+    ";
+    $st = $db->prepare($sql);
+    $st->bind_param('iii', $driver_id, $plant_id, $vehicle_id);
+    $st->execute();
+    $st->close();
+}
+function norm_list($v): array {
+    if (is_array($v)) return array_values(array_filter(array_map(fn($x)=>trim((string)$x), $v), fn($s)=>$s!==''));
+    if (is_string($v)) return array_values(array_filter(array_map('trim', preg_split('/[,\|]/', $v)), fn($s)=>$s!==''));
+    return [];
+}
+function find_helpers_by_labels(mysqli $db, array $labels, int $limitPer = 5): array {
+    if (empty($labels)) return [];
+    $out = [];
+    $sql = "SELECT id FROM drivers
+            WHERE (LOWER(name) LIKE ? OR REPLACE(COALESCE(contact,''),' ','') LIKE REPLACE(?, ' ', ''))
+            LIMIT ?";
+    $st = $db->prepare($sql);
+    foreach ($labels as $lab) {
+        $lab = trim((string)$lab);
+        if ($lab === '') continue;
+        $like = '%'.mb_strtolower($lab).'%';
+        $st->bind_param('ssi', $like, $lab, $limitPer);
+        $st->execute();
+        $rs = $st->get_result();
+        while ($r = $rs->fetch_assoc()) $out[(int)$r['id']] = true;
     }
+    $st->close();
+    return array_map('intval', array_keys($out));
 }
 
-function td_read_body(): array
-{
-    $payload = $GLOBALS['TD_MOBILE_REQUEST'] ?? [];
-    if (!is_array($payload) || empty($payload)) {
-        $raw = file_get_contents('php://input') ?: '';
-        if ($raw !== '') {
-            $json = json_decode($raw, true);
-            if (is_array($json)) {
-                $payload = $json;
-            }
-        }
-    }
-    if (!is_array($payload)) {
-        $payload = [];
-    }
-    return $payload;
+/* ---------- inputs ---------- */
+$vehicle_id = isset($body['vehicle_id']) ? (int)$body['vehicle_id'] : 0;
+$start_date = trim((string)($body['start_date'] ?? ''));
+$start_km   = array_key_exists('start_km', $body) ? (int)$body['start_km'] : null;
+
+$driver_ids = array_values(array_unique(array_filter(
+    array_map('intval', (array)($body['driver_ids'] ?? [])), fn($v)=>$v>0
+)));
+if ($role === 'driver' && $driverId && !in_array((int)$driverId, $driver_ids, true)) {
+    $driver_ids[] = (int)$driverId;
 }
 
-function td_vehicle_plant(mysqli $db, int $vehicleId): ?int
-{
-    $stmt = $db->prepare('SELECT plant_id FROM vehicles WHERE id = ? LIMIT 1');
-    $stmt->bind_param('i', $vehicleId);
-    $stmt->execute();
-    $stmt->bind_result($plantId);
-    $found = $stmt->fetch();
-    $stmt->close();
-    return $found ? (int)$plantId : null;
+$customer_names = array_values(array_filter(
+    array_map('trim', (array)($body['customer_names'] ?? [])), fn($s)=>$s!==''
+));
+$note = trim((string)($body['note'] ?? ''));
+
+$gps_lat = (isset($body['gps_lat']) && $body['gps_lat'] !== '') ? (float)$body['gps_lat'] : null;
+$gps_lng = (isset($body['gps_lng']) && $body['gps_lng'] !== '') ? (float)$body['gps_lng'] : null;
+
+/* helpers by ID (modern + legacy) */
+$helper_ids = array_values(array_filter(array_map('intval', (array)($body['helper_ids'] ?? []))));
+if (isset($body['helper_id']) && $body['helper_id'] !== '' && $body['helper_id'] !== null) {
+    $hid = (int)$body['helper_id'];
+    if ($hid > 0 && !in_array($hid, $helper_ids, true)) $helper_ids[] = $hid;
+}
+/* resolve by names if provided */
+$helper_labels = array_merge(norm_list($body['helper_names'] ?? []), norm_list($body['helper_name'] ?? []));
+if (!empty($helper_labels)) {
+    $resolved = find_helpers_by_labels($db, $helper_labels);
+    $helper_ids = array_merge($helper_ids, $resolved);
+}
+$helper_ids = array_values(array_unique(array_filter($helper_ids, fn($x)=>$x>0)));
+
+/* ---------- validate ---------- */
+if ($vehicle_id <= 0 || $start_date === '' || $start_km === null || empty($driver_ids) || empty($customer_names)) {
+    m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Required fields missing','fields'=>[
+        'vehicle_id'=>$vehicle_id, 'start_date'=>$start_date, 'start_km'=>$start_km,
+        'driver_ids_cnt'=>count($driver_ids), 'customer_cnt'=>count($customer_names),
+    ]], 400);
 }
 
-function td_upsert_assignment(mysqli $db, int $driverId, int $vehicleId, int $plantId): void
-{
-    if (!td_table_exists($db, 'assignments')) {
-        return;
-    }
-    $sql = "INSERT INTO assignments (driver_id, plant_id, vehicle_id, assigned_date)
-            VALUES (?, ?, ?, CURDATE())
-            ON DUPLICATE KEY UPDATE
-              plant_id = VALUES(plant_id),
-              vehicle_id = VALUES(vehicle_id),
-              assigned_date = VALUES(assigned_date)";
-    $stmt = $db->prepare($sql);
-    $stmt->bind_param('iii', $driverId, $plantId, $vehicleId);
-    $stmt->execute();
-    $stmt->close();
+/* ---------- column guards ---------- */
+$has_note           = m_has_col($db, 'trips', 'note');
+$has_started_at     = m_has_col($db, 'trips', 'started_at');
+$has_gps_lat        = m_has_col($db, 'trips', 'gps_lat');
+$has_gps_lng        = m_has_col($db, 'trips', 'gps_lng');
+$has_drivers_plant  = m_has_col($db, 'drivers', 'plant_id');
+
+/* ---------- IDEMPOTENCY: duplicate check returns ok:true ---------- */
+$dup = $db->prepare("SELECT id FROM trips WHERE vehicle_id=? AND start_km=? LIMIT 1");
+$dup->bind_param('ii', $vehicle_id, $start_km);
+$dup->execute();
+$dupr = $dup->get_result();
+if ($dupr && $dupr->num_rows) {
+    $row = $dupr->fetch_assoc();
+    $dup->close();
+    m_json_out([
+        'ok'=>true, 'success'=>true, 'status'=>'ok',
+        'duplicate'=>true, 'trip_id'=>(int)$row['id']
+    ], 200);
 }
+$dup->close();
 
-if (!td_table_exists($db, 'trips')) {
-    td_json(['status' => 'error', 'error' => 'trips table missing'], 500);
-}
-
-$data = td_read_body();
-
-$vehicleId = isset($data['vehicle_id']) ? (int)$data['vehicle_id'] : 0;
-$startDate = trim((string)($data['start_date'] ?? ''));
-$startKm = array_key_exists('start_km', $data) ? (int)$data['start_km'] : null;
-$driverIds = array_values(array_filter(array_map('intval', (array)($data['driver_ids'] ?? []))));
-
-$legacyHelper = (isset($data['helper_id']) && $data['helper_id'] !== '' && $data['helper_id'] !== null)
-    ? (int)$data['helper_id'] : null;
-$helperIds = array_values(array_filter(array_map('intval', (array)($data['helper_ids'] ?? []))));
-if ($legacyHelper && !in_array($legacyHelper, $helperIds, true)) {
-    $helperIds[] = $legacyHelper;
-}
-$helperIds = array_values(array_unique(array_filter($helperIds, fn($id) => (int)$id > 0)));
-
-$customerNames = array_values(array_filter(array_map('trim', (array)($data['customer_names'] ?? [])), fn($name) => $name !== ''));
-$note = trim((string)($data['note'] ?? ''));
-$gpsLat = isset($data['gps_lat']) && $data['gps_lat'] !== '' ? (float)$data['gps_lat'] : null;
-$gpsLng = isset($data['gps_lng']) && $data['gps_lng'] !== '' ? (float)$data['gps_lng'] : null;
-
-if ($vehicleId <= 0 || $startDate === '' || $startKm === null || empty($driverIds) || empty($customerNames)) {
-    td_json([
-        'status' => 'error',
-        'error' => 'Required fields missing',
-        'fields' => [
-            'vehicle_id' => $vehicleId,
-            'start_date' => $startDate,
-            'start_km' => $startKm,
-            'driver_ids_count' => count($driverIds),
-            'customers_count' => count($customerNames),
-        ],
-    ], 400);
-}
-
+/* ============================ TRANSACTION ============================ */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 try {
     $db->begin_transaction();
 
-    $lastEndKm = null;
-    $check = $db->prepare('SELECT end_km FROM trips WHERE vehicle_id = ? AND end_km IS NOT NULL ORDER BY id DESC LIMIT 1');
-    $check->bind_param('i', $vehicleId);
-    $check->execute();
-    $res = $check->get_result();
-    if ($res && $res->num_rows) {
-        $lastEndKm = (int)$res->fetch_assoc()['end_km'];
-    }
-    $check->close();
+    // INSERT trip
+    $cols   = ['vehicle_id','start_date','start_km','status'];
+    $marks  = ['?','?','?','?'];
+    $types  =  'isis';
+    $params = [$vehicle_id, $start_date, $start_km, 'ongoing'];
 
-    if ($lastEndKm !== null && $startKm < $lastEndKm) {
-        td_json([
-            'status' => 'error',
-            'error' => 'Start KM must be greater than or equal to last ended KM',
-            'last_end_km' => $lastEndKm,
-        ], 422);
-    }
+    if ($has_note)       { $cols[]='note';       $marks[]='?';     $types.='s'; $params[]=$note; }
+    if ($has_started_at) { $cols[]='started_at'; $marks[]='NOW()'; }
+    if ($has_gps_lat && $gps_lat !== null) { $cols[]='gps_lat'; $marks[]='?'; $types.='d'; $params[]=$gps_lat; }
+    if ($has_gps_lng && $gps_lng !== null) { $cols[]='gps_lng'; $marks[]='?'; $types.='d'; $params[]=$gps_lng; }
 
-    $cols = ['vehicle_id', 'start_date', 'start_km', 'status', 'note', 'started_at'];
-    $marks = ['?', '?', '?', '?', '?', 'NOW()'];
-    $types = 'isiss';
-    $params = [$vehicleId, $startDate, $startKm, 'ongoing', $note];
+    $sql = "INSERT INTO trips (".implode(',', $cols).") VALUES (".implode(',', $marks).")";
+    $stmt = $db->prepare($sql);
+    $bind = [$types]; foreach ($params as $k=>&$v) { $bind[] = &$v; }
+    call_user_func_array([$stmt,'bind_param'],$bind);
+    $stmt->execute();
+    $trip_id = $stmt->insert_id ?: $db->insert_id;
+    $stmt->close();
 
-    if ($gpsLat !== null) {
-        $cols[] = 'gps_lat';
-        $marks[] = '?';
-        $types .= 'd';
-        $params[] = $gpsLat;
-    }
-    if ($gpsLng !== null) {
-        $cols[] = 'gps_lng';
-        $marks[] = '?';
-        $types .= 'd';
-        $params[] = $gpsLng;
+    // trip_drivers
+    if (!empty($driver_ids) && m_table_exists($db, 'trip_drivers')) {
+        $ins = $db->prepare("INSERT IGNORE INTO trip_drivers (trip_id, driver_id) VALUES (?, ?)");
+        foreach ($driver_ids as $did) { $ins->bind_param('ii',$trip_id,$did); $ins->execute(); }
+        $ins->close();
     }
 
-    $insertSql = 'INSERT INTO trips (' . implode(',', $cols) . ') VALUES (' . implode(',', $marks) . ')';
-    $insertStmt = $db->prepare($insertSql);
-    $bindParams = [$types];
-    foreach ($params as $index => &$value) {
-        $bindParams[] = &$value;
-    }
-    call_user_func_array([$insertStmt, 'bind_param'], $bindParams);
-    $insertStmt->execute();
-    $tripId = $insertStmt->insert_id ?: $db->insert_id;
-    $insertStmt->close();
-
-    if (!empty($driverIds) && td_table_exists($db, 'trip_drivers')) {
-        $driverStmt = $db->prepare('INSERT IGNORE INTO trip_drivers (trip_id, driver_id) VALUES (?, ?)');
-        foreach ($driverIds as $driverId) {
-            $driverStmt->bind_param('ii', $tripId, $driverId);
-            $driverStmt->execute();
+    // trip_customers
+    if (!empty($customer_names) && m_table_exists($db, 'trip_customers')) {
+        $ic = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)");
+        foreach ($customer_names as $nm) {
+            if ($nm === '') continue;
+            $ic->bind_param('is',$trip_id,$nm); $ic->execute();
         }
-        $driverStmt->close();
+        $ic->close();
     }
 
-    if (!empty($customerNames) && td_table_exists($db, 'trip_customers')) {
-        $customerStmt = $db->prepare('INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)');
-        foreach ($customerNames as $customer) {
-            $customerStmt->bind_param('is', $tripId, $customer);
-            $customerStmt->execute();
-        }
-        $customerStmt->close();
-    }
+    // helpers (plural preferred) + legacy mirror
+    $has_plural_helpers = m_table_exists($db, 'trip_helpers');
+    $has_legacy_helper  = m_table_exists($db, 'trip_helper');
 
-    $hasPluralHelpers = td_table_exists($db, 'trip_helpers');
-    $hasLegacyHelper = td_table_exists($db, 'trip_helper');
-    $hasHelperTextCol = td_has_column('trips', 'helper_text');
+    if (!empty($helper_ids)) {
+        if ($has_plural_helpers) {
+            $ih = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
+            foreach ($helper_ids as $hid) { $ih->bind_param('ii',$trip_id,$hid); $ih->execute(); }
+            $ih->close();
 
-    if (!empty($helperIds) && $hasPluralHelpers) {
-        $helperStmt = $db->prepare('INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)');
-        foreach ($helperIds as $helperId) {
-            $helperStmt->bind_param('ii', $tripId, $helperId);
-            $helperStmt->execute();
-        }
-        $helperStmt->close();
-    } elseif (!empty($helperIds) && !$hasPluralHelpers && $hasHelperTextCol) {
-        // legacy installs may rely on helper_text column
-        $textValue = implode(',', array_map('intval', $helperIds));
-        $upd = $db->prepare('UPDATE trips SET helper_text=? WHERE id=?');
-        $upd->bind_param('si', $textValue, $tripId);
-        $upd->execute();
-        $upd->close();
-    }
-
-    if ($hasLegacyHelper) {
-        $primaryHelper = 0;
-        foreach ($helperIds as $hid) {
-            if ((int)$hid > 0) {
-                $primaryHelper = (int)$hid;
-                break;
+            if ($has_legacy_helper) {
+                $first = (int)$helper_ids[0];
+                if ($first > 0) {
+                    $ih2 = $db->prepare("
+                      INSERT INTO trip_helper (trip_id, helper_id)
+                      VALUES (?, ?)
+                      ON DUPLICATE KEY UPDATE helper_id = VALUES(helper_id)
+                    ");
+                    $ih2->bind_param('ii',$trip_id,$first);
+                    $ih2->execute();
+                    $ih2->close();
+                }
+            }
+        } elseif ($has_legacy_helper) {
+            $first = (int)$helper_ids[0];
+            if ($first > 0) {
+                $ih = $db->prepare("
+                  INSERT INTO trip_helper (trip_id, helper_id)
+                  VALUES (?, ?)
+                  ON DUPLICATE KEY UPDATE helper_id = VALUES(helper_id)
+                ");
+                $ih->bind_param('ii',$trip_id,$first);
+                $ih->execute();
+                $ih->close();
             }
         }
+    }
 
-        if ($primaryHelper > 0) {
-            $legacyStmt = $db->prepare('REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)');
-            $legacyStmt->bind_param('ii', $tripId, $primaryHelper);
-            $legacyStmt->execute();
-            $legacyStmt->close();
+    // plant mirror & assignments
+    $plant_id = get_vehicle_plant($db, $vehicle_id);
+    if ($plant_id === null) throw new RuntimeException('Vehicle plant not found');
+
+    if ($has_drivers_plant) {
+        if (!empty($helper_ids)) {
+            $u = $db->prepare("UPDATE drivers SET plant_id=? WHERE id=?");
+            foreach ($helper_ids as $hid) { $u->bind_param('ii',$plant_id,$hid); $u->execute(); }
+            $u->close();
         }
-    } elseif ($hasHelperTextCol && empty($helperIds)) {
-        // Ensure helper_text cleared when no helpers selected
-        $upd = $db->prepare('UPDATE trips SET helper_text = NULL WHERE id=?');
-        $upd->bind_param('i', $tripId);
-        $upd->execute();
-        $upd->close();
+        $u = $db->prepare("UPDATE drivers SET plant_id=? WHERE id=?");
+        foreach ($driver_ids as $did) { $u->bind_param('ii',$plant_id,$did); $u->execute(); }
+        $u->close();
     }
 
-    if (empty($helperIds) && $hasPluralHelpers) {
-        // No helpers supplied: ensure no stale multi records
-        $del = $db->prepare('DELETE FROM trip_helpers WHERE trip_id=?');
-        $del->bind_param('i', $tripId);
-        $del->execute();
-        $del->close();
-    }
-
-    $plantId = td_vehicle_plant($db, $vehicleId);
-    if ($plantId === null) {
-        throw new RuntimeException('Vehicle plant not found');
-    }
-
-    if (td_has_col($db, 'drivers', 'plant_id')) {
-        foreach ($driverIds as $driverId) {
-            $update = $db->prepare('UPDATE drivers SET plant_id = ? WHERE id = ?');
-            $update->bind_param('ii', $plantId, $driverId);
-            $update->execute();
-            $update->close();
-        }
-        foreach ($helperIds as $helperId) {
-            $update = $db->prepare('UPDATE drivers SET plant_id = ? WHERE id = ?');
-            $update->bind_param('ii', $plantId, $helperId);
-            $update->execute();
-            $update->close();
-        }
-    }
-
-    if (!empty($helperIds)) {
-        foreach ($helperIds as $helperId) {
-            td_upsert_assignment($db, $helperId, $vehicleId, $plantId);
-        }
-    }
-
-    foreach ($driverIds as $driverId) {
-        td_upsert_assignment($db, $driverId, $vehicleId, $plantId);
-    }
+    if (!empty($helper_ids)) foreach ($helper_ids as $hid) upsert_assignment($db, $hid, $vehicle_id, $plant_id);
+    foreach ($driver_ids as $did) upsert_assignment($db, $did, $vehicle_id, $plant_id);
 
     $db->commit();
 
-    td_json([
-        'status' => 'ok',
-        'trip_id' => $tripId,
-    ]);
-} catch (mysqli_sql_exception $exception) {
-    $db->rollback();
-    td_json([
-        'status' => 'error',
-        'error' => 'Database error',
-        'code' => (int)$exception->getCode(),
-        'detail' => $exception->getMessage(),
-    ], 500);
-} catch (Throwable $exception) {
-    $db->rollback();
-    td_json([
-        'status' => 'error',
-        'error' => $exception->getMessage(),
-    ], 500);
+} catch (mysqli_sql_exception $e) {
+    @$db->rollback();
+    if ((int)$e->getCode() === 1062) {
+        // treat as idempotent success (double-submit)
+        try {
+            $q = $db->prepare("SELECT id FROM trips WHERE vehicle_id=? AND start_km=? LIMIT 1");
+            $q->bind_param('ii', $vehicle_id, $start_km);
+            $q->execute();
+            $qr = $q->get_result();
+            $row = $qr ? $qr->fetch_assoc() : null;
+            $q->close();
+            if ($row) m_json_out(['ok'=>true,'success'=>true,'status'=>'ok','duplicate'=>true,'trip_id'=>(int)$row['id']], 200);
+        } catch (Throwable $ignore) {}
+        m_json_out(['ok'=>true,'success'=>true,'status'=>'ok','duplicate'=>true], 200);
+    }
+    m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Insert failed','code'=>(int)$e->getCode(),'detail'=>$e->getMessage()], 500);
+} catch (Throwable $e) {
+    @$db->rollback();
+    m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Unexpected server error','detail'=>$e->getMessage()], 500);
 }
+
+/* ---------- SUCCESS (no hydration) ---------- */
+m_json_out([
+    'ok'        => true,
+    'success'   => true,
+    'status'    => 'ok',
+    'duplicate' => false,
+    'trip_id'   => $trip_id,
+    'helper_ids'=> $helper_ids
+], 200);

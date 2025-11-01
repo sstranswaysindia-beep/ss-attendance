@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'core/models/app_user.dart';
 import 'core/services/auth_storage_service.dart';
@@ -23,6 +25,10 @@ Future<void> main() async {
 
   await initializeDateFormatting('en_IN', null);
   Intl.defaultLocale = 'en_IN';
+
+  if (!kIsWeb) {
+    await MobileAds.instance.initialize();
+  }
 
   // Set system UI overlay style globally
   SystemChrome.setSystemUIOverlayStyle(

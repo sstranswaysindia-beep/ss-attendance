@@ -127,19 +127,41 @@ class _MeterReadingSheetState extends State<MeterReadingSheet> {
   }
 
   Future<void> _pickPhoto() async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera),
+              title: const Text('Take photo'),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('Choose from gallery'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
     try {
       final picture = await _picker.pickImage(
-        source: ImageSource.camera,
+        source: source,
         imageQuality: 85,
       );
       if (picture != null) {
+        if (!mounted) return;
         setState(() {
           _photo = picture;
         });
       }
     } catch (error) {
       if (!mounted) return;
-      showAppToast(context, 'Unable to capture photo: $error', isError: true);
+      showAppToast(context, 'Unable to select photo: $error', isError: true);
     }
   }
 

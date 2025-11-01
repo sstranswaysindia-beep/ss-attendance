@@ -12,6 +12,21 @@ if (!function_exists('td_table_exists')) {
     }
 }
 
+if (!function_exists('td_has_column')) {
+    function td_has_column(mysqli $db, string $table, string $column): bool
+    {
+        $table = $db->real_escape_string($table);
+        $column = $db->real_escape_string($column);
+        $sql = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = '{$table}'
+                  AND COLUMN_NAME = '{$column}'
+                LIMIT 1";
+        $res = $db->query($sql);
+        return $res && $res->num_rows > 0;
+    }
+}
+
 $role = TD_MOBILE_ROLE;
 $userId = TD_MOBILE_USER_ID;
 $driverId = TD_MOBILE_DRIVER_ID;
@@ -60,13 +75,13 @@ try {
     if ($role === 'driver') {
         if ($driverId) {
             $selectColumns = [];
-            if (td_has_column('drivers', 'plant_id')) {
+            if (td_has_column($conn, 'drivers', 'plant_id')) {
                 $selectColumns[] = 'plant_id AS plant_id';
             }
-            if (td_has_column('drivers', 'default_plant_id')) {
+            if (td_has_column($conn, 'drivers', 'default_plant_id')) {
                 $selectColumns[] = 'default_plant_id AS default_plant_id';
             }
-            if (td_has_column('drivers', 'supervisor_of_plant_id')) {
+            if (td_has_column($conn, 'drivers', 'supervisor_of_plant_id')) {
                 $selectColumns[] = 'supervisor_of_plant_id AS supervisor_of_plant_id';
             }
 

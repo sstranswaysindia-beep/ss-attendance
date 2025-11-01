@@ -113,39 +113,34 @@ if ($vehicle_id <= 0 || $start_date === '' || $start_km === null || empty($drive
   ]], 400);
 }
 
-/* ---------- extra validation: start_km ≥ last ended end_km (allow equality) ---------- */
+/* ---------- ONLY check: prevent duplicate start_km for the same vehicle ---------- */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 
 try {
-  // Make sure the last ended trip (if any) has an odometer not greater than current start
-  $last_end_km = null;
-  $q = $db->prepare("
-      SELECT end_km
-      FROM trips
-      WHERE vehicle_id = ? AND end_km IS NOT NULL
-      ORDER BY id DESC
-      LIMIT 1
+  // Block if a trip (ongoing or ended) already uses this exact start_km for this vehicle
+  $dup = $db->prepare("
+    SELECT id FROM trips
+    WHERE vehicle_id = ? AND start_km = ?
+    LIMIT 1
   ");
-  $q->bind_param('i', $vehicle_id);
-  $q->execute();
-  $qr = $q->get_result();
-  if ($qr && $qr->num_rows) {
-    $last_end_km = (int)$qr->fetch_assoc()['end_km'];
-  }
-  $q->close();
-
-  // ONLY block if start_km is LOWER; equality is allowed now
-  if ($last_end_km !== null && $start_km < $last_end_km) {
+  $dup->bind_param('ii', $vehicle_id, $start_km);
+  $dup->execute();
+  $dupr = $dup->get_result();
+  if ($dupr && $dupr->num_rows) {
+    $row = $dupr->fetch_assoc();
+    $dup->close();
     json_out([
       'ok'    => false,
-      'error' => "Start KM must be ≥ last End KM (".$last_end_km.")."
-    ], 422);
+      'error' => 'Duplicate Start KM not allowed for this vehicle.',
+      'detail'=> "A trip (#{$row['id']}) with Start KM {$start_km} already exists for this vehicle."
+    ], 409);
   }
+  $dup->close();
 
   /* ---------- main tx ---------- */
   $db->begin_transaction();
 
-  // Insert trip (UNIQUE (vehicle_id, ongoing_flag) will protect duplicates)
+  // Insert trip (UNIQUE (vehicle_id, ongoing_flag) will protect duplicates of ongoing)
   $cols   = ['vehicle_id','start_date','start_km','status','note','started_at'];
   $marks  = ['?','?','?','?','?','NOW()'];
   $types  =  'isiss';
@@ -187,46 +182,25 @@ try {
   // helpers (plural table preferred; fallback to legacy)
   $has_plural_helpers  = table_exists($db,'trip_helpers');
   $has_legacy_helper   = table_exists($db,'trip_helper');
-  $has_helper_text_col = has_col($db,'trips','helper_text');
 
-  if (!empty($helper_ids) && $has_plural_helpers) {
-    $ih = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
-    foreach ($helper_ids as $hid) {
-      $ih->bind_param('ii', $trip_id, $hid);
-      $ih->execute();
-    }
-    $ih->close();
-  } elseif (!empty($helper_ids) && !$has_plural_helpers && $has_helper_text_col) {
-    $textValue = implode(',', array_map('intval', $helper_ids));
-    $upd = $db->prepare("UPDATE trips SET helper_text=? WHERE id=?");
-    $upd->bind_param('si', $textValue, $trip_id);
-    $upd->execute();
-    $upd->close();
-  }
-
-  if ($has_legacy_helper) {
-    $first = 0;
-    foreach ($helper_ids as $hid) {
-      if ((int)$hid > 0) { $first = (int)$hid; break; }
-    }
-    if ($first > 0) {
-      $ih = $db->prepare("REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)");
-      $ih->bind_param('ii', $trip_id, $first);
-      $ih->execute();
+  if (!empty($helper_ids)) {
+    if ($has_plural_helpers) {
+      $ih = $db->prepare("INSERT IGNORE INTO trip_helpers (trip_id, helper_id) VALUES (?, ?)");
+      foreach ($helper_ids as $hid) {
+        $ih->bind_param('ii', $trip_id, $hid);
+        $ih->execute();
+      }
       $ih->close();
+    } elseif ($has_legacy_helper) {
+      // legacy: only first helper can be stored
+      $first = (int)$helper_ids[0];
+      if ($first > 0) {
+        $ih = $db->prepare("REPLACE INTO trip_helper (trip_id, helper_id) VALUES (?, ?)");
+        $ih->bind_param('ii', $trip_id, $first);
+        $ih->execute();
+        $ih->close();
+      }
     }
-  } elseif ($has_helper_text_col && empty($helper_ids)) {
-    $upd = $db->prepare("UPDATE trips SET helper_text = NULL WHERE id=?");
-    $upd->bind_param('i', $trip_id);
-    $upd->execute();
-    $upd->close();
-  }
-
-  if (empty($helper_ids) && $has_plural_helpers) {
-    $del = $db->prepare("DELETE FROM trip_helpers WHERE trip_id=?");
-    $del->bind_param('i', $trip_id);
-    $del->execute();
-    $del->close();
   }
 
   // Resolve plant_id from vehicle
@@ -267,7 +241,6 @@ try {
 
   $db->commit();
 
-  // return both for compatibility
   json_out([
     'ok'         => true,
     'trip_id'    => $trip_id,

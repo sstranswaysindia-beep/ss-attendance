@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -234,7 +235,19 @@ class _ProfilePhotoWithUploadState extends State<ProfilePhotoWithUpload> {
       );
 
       if (xFile != null) {
+        if (kIsWeb || xFile.path.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Photo upload is not supported on web.'),
+              ),
+            );
+          }
+          return;
+        }
+
         final file = File(xFile.path);
+        if (!mounted) return;
         widget.onPhotoSelected(file);
       }
     } catch (e) {

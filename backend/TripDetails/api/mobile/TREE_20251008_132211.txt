@@ -1,0 +1,9 @@
+TripDetails/api/mobile
+├── bootstrap.php
+├── helpers.php
+├── meta.php
+├── plants.php
+├── TREE_20251007_190556.txt
+├── trips_create.php
+├── trips_overview.php
+└── vehicles.php

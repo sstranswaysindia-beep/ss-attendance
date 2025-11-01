@@ -27,7 +27,7 @@ class TripScreen extends StatefulWidget {
 }
 
 class _TripScreenState extends State<TripScreen> {
-  final TripRepository _repository = TripRepository();
+  late final TripRepository _repository;
   final GpsService _gpsService = GpsService();
   final LocalStorageService _localStorage = LocalStorageService();
   final FocusNode _driverFocusNode = FocusNode();
@@ -37,6 +37,8 @@ class _TripScreenState extends State<TripScreen> {
   TripOverviewResponse? _overview;
   bool _isLoading = false;
   String? _error;
+  int _loadTripsRequestId = 0;
+  final Map<int, TripRecord> _optimisticTripOverrides = <int, TripRecord>{};
 
   bool _isLoadingPlants = false;
   bool _isLoadingVehicles = false;
@@ -83,6 +85,8 @@ class _TripScreenState extends State<TripScreen> {
   void initState() {
     super.initState();
 
+    _repository = TripRepository();
+
     _selectedPlantId =
         widget.user.plantId ??
         widget.user.assignmentPlantId ??
@@ -123,6 +127,7 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   Future<void> _loadTrips() async {
+    final currentRequestId = ++_loadTripsRequestId;
     setState(() {
       _isLoading = true;
       _error = null;
@@ -136,23 +141,89 @@ class _TripScreenState extends State<TripScreen> {
         plantId: _selectedPlantId,
         vehicleId: _selectedVehicle?.id.toString(),
       );
-      if (!mounted) return;
-      setState(() => _overview = response);
+      if (!mounted || currentRequestId != _loadTripsRequestId) {
+        return;
+      }
+      final overridesToRemove = <int>[];
+      var completedDelta = 0;
+      var openDelta = 0;
+      var runDelta = 0.0;
+      final adjustedTrips = <TripRecord>[];
+
+      for (final trip in response.trips) {
+        final override = _optimisticTripOverrides[trip.id];
+        if (override == null) {
+          adjustedTrips.add(trip);
+          continue;
+        }
+
+        final overrideEnded = _isEndedStatus(override.status);
+        final tripEnded = _isEndedStatus(trip.status);
+
+        if (overrideEnded && !tripEnded) {
+          adjustedTrips.add(override);
+          completedDelta += 1;
+          if (trip.status.toLowerCase() == 'ongoing') {
+            openDelta -= 1;
+          }
+          runDelta += _runKmValue(override) - _runKmValue(trip);
+        } else {
+          overridesToRemove.add(trip.id);
+          adjustedTrips.add(trip);
+        }
+      }
+
+      for (final id in overridesToRemove) {
+        _optimisticTripOverrides.remove(id);
+      }
+
+      final baseSummary = response.summary;
+      final rawCompleted = baseSummary.completedTrips + completedDelta;
+      final rawOpen = baseSummary.openTrips + openDelta;
+      final rawRun = baseSummary.totalRunKm + runDelta;
+
+      int clampInt(int value, int min, int max) =>
+          value < min ? min : (value > max ? max : value);
+      double clampDouble(double value, double min, double max) =>
+          value < min ? min : (value > max ? max : value);
+
+      final adjustedSummary = TripSummary(
+        totalTrips: baseSummary.totalTrips,
+        completedTrips:
+            clampInt(rawCompleted, 0, baseSummary.totalTrips),
+        openTrips:
+            clampInt(rawOpen, 0, baseSummary.totalTrips),
+        totalRunKm:
+            clampDouble(rawRun, 0, double.maxFinite),
+      );
+
+      setState(() {
+        _overview = TripOverviewResponse(
+          summary: adjustedSummary,
+          trips: adjustedTrips,
+          plants: response.plants,
+        );
+      });
     } on TripFailure catch (error) {
-      if (!mounted) return;
+      if (!mounted || currentRequestId != _loadTripsRequestId) {
+        return;
+      }
       setState(() => _error = error.message);
       showAppToast(context, error.message, isError: true);
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted || currentRequestId != _loadTripsRequestId) {
+        return;
+      }
       const fallback = 'Unable to load trips.';
       setState(() => _error = fallback);
       showAppToast(context, fallback, isError: true);
     } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        // Check for ongoing trip after loading trips
-        _findOngoingTrip();
+      if (!mounted || currentRequestId != _loadTripsRequestId) {
+        return;
       }
+      setState(() => _isLoading = false);
+      // Check for ongoing trip after loading trips
+      _findOngoingTrip();
     }
   }
 
@@ -224,6 +295,38 @@ class _TripScreenState extends State<TripScreen> {
       final key = name.toLowerCase();
       if (seen.add(key)) {
         results.add(name);
+      }
+    }
+
+    if (vehicle != null && _overview != null) {
+      final prioritized = <String>[];
+      final prioritizedSeen = <String>{};
+
+      for (final trip in _overview!.trips) {
+        if (trip.vehicleNumber != vehicle.number) {
+          continue;
+        }
+        final raw = trip.customers ?? '';
+        if (raw.isEmpty) {
+          continue;
+        }
+        for (final part in raw.split(',')) {
+          final name = part.trim();
+          if (name.isEmpty) {
+            continue;
+          }
+          final key = name.toLowerCase();
+          if (prioritizedSeen.add(key)) {
+            prioritized.add(name);
+          }
+        }
+        if (prioritized.length >= 7) {
+          break;
+        }
+      }
+
+      for (final name in prioritized) {
+        addName(name);
       }
     }
 
@@ -718,11 +821,110 @@ class _TripScreenState extends State<TripScreen> {
 
   Future<void> _performEndTrip(int endKm, String endDate) async {
     try {
-      await _repository.endTrip(
+      final result = await _repository.endTrip(
         tripId: _ongoingTrip!.id,
         endDate: endDate,
         endKm: endKm,
       );
+
+      TripRecord? endedTrip = _ongoingTrip;
+      final endKmDouble = endKm.toDouble();
+      double? runKm;
+      if (endedTrip?.startKm != null) {
+        runKm = endKmDouble - endedTrip!.startKm!;
+        if (runKm < 0) {
+          runKm = 0;
+        }
+      } else if (result.totalKm > 0) {
+        runKm = result.totalKm.toDouble();
+      }
+
+      if (endedTrip != null && _overview != null) {
+        final updatedTrip = TripRecord(
+          id: endedTrip.id,
+          startDate: endedTrip.startDate,
+          endDate: endDate,
+          vehicleNumber: endedTrip.vehicleNumber,
+          status: 'ended',
+          plantId: endedTrip.plantId,
+          plantName: endedTrip.plantName,
+          drivers: endedTrip.drivers,
+          helper: endedTrip.helper,
+          customers: endedTrip.customers,
+          startKm: endedTrip.startKm,
+          endKm: endKmDouble,
+          runKm: runKm ?? endedTrip.runKm,
+          note: endedTrip.note,
+          gpsLat: endedTrip.gpsLat,
+          gpsLng: endedTrip.gpsLng,
+          canCurrentUserDelete: endedTrip.canCurrentUserDelete,
+        );
+
+        final updatedTrips = _overview!.trips
+            .map((trip) => trip.id == updatedTrip.id ? updatedTrip : trip)
+            .toList(growable: false);
+
+        final previousStatus = endedTrip.status.toLowerCase();
+        final summary = _overview!.summary;
+        final plants = _overview!.plants;
+        final completedTrips =
+            previousStatus == 'ended' || previousStatus == 'completed'
+                ? summary.completedTrips
+                : summary.completedTrips + 1;
+        final openTrips =
+            previousStatus == 'ongoing' && summary.openTrips > 0
+                ? summary.openTrips - 1
+                : summary.openTrips;
+        final totalRunKm = summary.totalRunKm -
+            (endedTrip.runKm ?? 0) +
+            (updatedTrip.runKm ?? 0);
+
+        setState(() {
+          _overview = TripOverviewResponse(
+            summary: TripSummary(
+              totalTrips: summary.totalTrips,
+              completedTrips: completedTrips,
+              openTrips: openTrips,
+              totalRunKm: totalRunKm,
+            ),
+            trips: updatedTrips,
+            plants: plants,
+          );
+          _hasOngoingTrip = false;
+          _ongoingTrip = null;
+        });
+
+        _optimisticTripOverrides[updatedTrip.id] = updatedTrip;
+      } else {
+        setState(() {
+          _hasOngoingTrip = false;
+          _ongoingTrip = null;
+        });
+
+        if (endedTrip != null) {
+          final fallbackTrip = TripRecord(
+            id: endedTrip.id,
+            startDate: endedTrip.startDate,
+            endDate: endDate,
+            vehicleNumber: endedTrip.vehicleNumber,
+            status: 'ended',
+            plantId: endedTrip.plantId,
+            plantName: endedTrip.plantName,
+            drivers: endedTrip.drivers,
+            helper: endedTrip.helper,
+            customers: endedTrip.customers,
+            startKm: endedTrip.startKm,
+            endKm: endKmDouble,
+            runKm: runKm ?? endedTrip.runKm,
+            note: endedTrip.note,
+            gpsLat: endedTrip.gpsLat,
+            gpsLng: endedTrip.gpsLng,
+            canCurrentUserDelete: endedTrip.canCurrentUserDelete,
+          );
+          _optimisticTripOverrides[fallbackTrip.id] = fallbackTrip;
+        }
+      }
+
       showAppToast(context, 'Trip ended successfully');
 
       // Clear form and refresh data
@@ -733,17 +935,12 @@ class _TripScreenState extends State<TripScreen> {
       _selectedHelpers = const <TripHelper>[];
       _selectedDrivers = const <TripDriver>[];
 
-      // Clear plant and vehicle selections
-      _selectedPlant = null;
-      _selectedVehicle = null;
-
       // Reset start date to today
       _selectedStartDate = DateTime.now();
       _startDateController.text = _formatDate(_selectedStartDate);
 
       // Refresh the data
       await _loadTrips();
-      _findOngoingTrip();
     } catch (e) {
       showAppToast(context, 'Failed to end trip: $e', isError: true);
     }
@@ -1239,6 +1436,7 @@ class _TripScreenState extends State<TripScreen> {
       final gpsLocation = await _gpsService.getLocationWithPrompt();
 
       await _repository.createTrip(
+        user: widget.user,
         vehicleId: vehicle.id,
         startDate: startDate,
         startKm: startKm,
@@ -1313,6 +1511,25 @@ class _TripScreenState extends State<TripScreen> {
 
   String _formatDate(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+
+  bool _isEndedStatus(String status) {
+    final normalized = status.toLowerCase();
+    return normalized == 'ended' || normalized == 'completed';
+  }
+
+  double _runKmValue(TripRecord trip) {
+    double? run = trip.runKm;
+    if (run == null &&
+        trip.startKm != null &&
+        trip.endKm != null &&
+        trip.endKm! >= trip.startKm!) {
+      run = trip.endKm! - trip.startKm!;
+    }
+    if (run == null || run.isNaN) {
+      return 0;
+    }
+    return run > 0 ? run : 0;
+  }
 
   @override
   Widget build(BuildContext context) {

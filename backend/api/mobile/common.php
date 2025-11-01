@@ -22,7 +22,15 @@ if (!$configLoaded) {
 }
 
 function apiRespond(int $status, array $payload): void {
-    http_response_code($status);
+    if (!headers_sent()) {
+        http_response_code($status);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, private');
+        header('Pragma: no-cache');
+        header('Expires: 0');
+    } else {
+        http_response_code($status);
+    }
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
