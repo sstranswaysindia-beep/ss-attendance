@@ -23,6 +23,7 @@ class _AdminDriverMasterScreenState extends State<AdminDriverMasterScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   List<AdminDriver> _drivers = const [];
+  final Set<int> _updatingDriverIds = <int>{};
   String? _errorMessage;
   String _activeSearch = '';
   bool _isLoading = false;
@@ -102,6 +103,75 @@ class _AdminDriverMasterScreenState extends State<AdminDriverMasterScreen> {
 
   Future<void> _handleRefresh() {
     return _loadDrivers(search: _activeSearch, showSpinner: false);
+  }
+
+  Future<void> _toggleDriverStatus(AdminDriver driver, bool isActive) async {
+    final driverId = driver.id;
+    final previousStatus = driver.status;
+    final nextStatus = isActive ? 'Active' : 'In-Active';
+
+    setState(() {
+      _updatingDriverIds.add(driverId);
+      _drivers = _drivers
+          .map(
+            (entry) => entry.id == driverId ? entry.copyWith(status: nextStatus) : entry,
+          )
+          .toList();
+    });
+
+    try {
+      final confirmedStatus = await _repository.updateDriverStatus(
+        driverId: driverId,
+        active: isActive,
+      );
+      if (!mounted) return;
+      setState(() {
+        _drivers = _drivers
+            .map(
+              (entry) => entry.id == driverId
+                  ? entry.copyWith(status: confirmedStatus)
+                  : entry,
+            )
+            .toList();
+      });
+      final message = confirmedStatus.toLowerCase() == 'active'
+          ? 'Driver enabled for attendance.'
+          : 'Driver marked as inactive.';
+      showAppToast(context, message);
+    } on AdminMasterFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _drivers = _drivers
+            .map(
+              (entry) => entry.id == driverId
+                  ? entry.copyWith(status: previousStatus)
+                  : entry,
+            )
+            .toList();
+      });
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _drivers = _drivers
+            .map(
+              (entry) => entry.id == driverId
+                  ? entry.copyWith(status: previousStatus)
+                  : entry,
+            )
+            .toList();
+      });
+      showAppToast(
+        context,
+        'Unable to update driver status. Please try again.',
+        isError: true,
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _updatingDriverIds.remove(driverId);
+      });
+    }
   }
 
   @override
@@ -238,7 +308,12 @@ class _AdminDriverMasterScreenState extends State<AdminDriverMasterScreen> {
         separatorBuilder: (_, __) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final driver = _drivers[index];
-          return _DriverMasterCard(driver: driver);
+          final isUpdating = _updatingDriverIds.contains(driver.id);
+          return _DriverMasterCard(
+            driver: driver,
+            isUpdating: isUpdating,
+            onStatusToggle: (value) => _toggleDriverStatus(driver, value),
+          );
         },
       ),
     );
@@ -246,9 +321,15 @@ class _AdminDriverMasterScreenState extends State<AdminDriverMasterScreen> {
 }
 
 class _DriverMasterCard extends StatelessWidget {
-  const _DriverMasterCard({required this.driver});
+  const _DriverMasterCard({
+    required this.driver,
+    required this.onStatusToggle,
+    required this.isUpdating,
+  });
 
   final AdminDriver driver;
+  final ValueChanged<bool> onStatusToggle;
+  final bool isUpdating;
 
   @override
   Widget build(BuildContext context) {
@@ -280,6 +361,12 @@ class _DriverMasterCard extends StatelessWidget {
           );
 
     final statusColor = driver.isActive ? Colors.green : Colors.red;
+    final switchWidget = Switch.adaptive(
+      value: driver.isActive,
+      onChanged: isUpdating ? null : onStatusToggle,
+      activeColor: const Color(0xFF1ABC9C),
+      activeTrackColor: const Color(0xFF8DE3C5),
+    );
 
     return Container(
       decoration: BoxDecoration(
@@ -367,6 +454,24 @@ class _DriverMasterCard extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    switchWidget,
+                    if (isUpdating) ...[
+                      const SizedBox(width: 6),
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _adminPrimaryColor,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 6),
                 Chip(
                   label: Text(
                     driver.status,

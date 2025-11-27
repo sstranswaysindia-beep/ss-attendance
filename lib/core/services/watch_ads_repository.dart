@@ -54,13 +54,58 @@ class WatchAdsRepository {
     return params;
   }
 
+  Map<String, dynamic> _decodeJsonMap(String body, String action) {
+    final trimmed = body.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('$action failed: empty response body');
+    }
+    if (_isLikelyHtml(trimmed)) {
+      throw Exception(
+        '$action failed: expected JSON but received HTML. '
+        'Body preview: ${_truncate(trimmed)}',
+      );
+    }
+    try {
+      final parsed = json.decode(trimmed);
+      if (parsed is Map<String, dynamic>) {
+        return parsed;
+      }
+      throw Exception(
+        '$action failed: unexpected payload type ${parsed.runtimeType}. '
+        'Body preview: ${_truncate(trimmed)}',
+      );
+    } on FormatException catch (err) {
+      throw Exception(
+        '$action failed: invalid JSON (${err.message}). '
+        'Body preview: ${_truncate(trimmed)}',
+      );
+    }
+  }
+
+  bool _isLikelyHtml(String value) {
+    final lower = value.toLowerCase();
+    return lower.startsWith('<!doctype') ||
+        lower.startsWith('<html') ||
+        lower.startsWith('<head') ||
+        lower.startsWith('<body') ||
+        lower.startsWith('<br') ||
+        lower.contains('<html') ||
+        lower.contains('<body') ||
+        lower.contains('<br');
+  }
+
+  String _truncate(String value, [int maxLength = 160]) {
+    if (value.length <= maxLength) return value;
+    return '${value.substring(0, maxLength)}…';
+  }
+
   Future<WatchAdsStatus> fetchStatus({AppUser? user}) async {
     final uri = _resolve('watch/status.php', _authQuery(user));
     final response = await _client.get(uri);
     if (response.statusCode >= 300) {
       throw Exception('Failed to load watch ads status (${response.statusCode})');
     }
-    final decoded = json.decode(response.body) as Map<String, dynamic>;
+    final decoded = _decodeJsonMap(response.body, 'Watch ads status fetch');
     if (decoded['ok'] != true) {
       throw Exception(decoded['error']?.toString() ?? 'Failed to load status');
     }
@@ -71,10 +116,9 @@ class WatchAdsRepository {
     AppUser? user,
     String adNetwork = 'admob',
   }) async {
-    final uri = _resolve('watch/start.php');
+    final uri = _resolve('watch/start.php', _authQuery(user));
     final body = json.encode({
       'ad_network': adNetwork,
-      ..._authQuery(user),
     });
     final response = await _client.post(
       uri,
@@ -86,7 +130,7 @@ class WatchAdsRepository {
         'Unable to start watch session (${response.statusCode})',
       );
     }
-    final decoded = json.decode(response.body) as Map<String, dynamic>;
+    final decoded = _decodeJsonMap(response.body, 'Watch ads session start');
     if (decoded['ok'] != true) {
       throw Exception(decoded['error']?.toString() ?? 'Unable to start session');
     }
@@ -99,10 +143,9 @@ class WatchAdsRepository {
     required String sessionToken,
     AppUser? user,
   }) async {
-    final uri = _resolve('watch/confirm.php');
+    final uri = _resolve('watch/confirm.php', _authQuery(user));
     final body = json.encode({
       'session_token': sessionToken,
-      ..._authQuery(user),
     });
     final response = await _client.post(
       uri,
@@ -114,7 +157,7 @@ class WatchAdsRepository {
         'Unable to confirm reward (${response.statusCode})',
       );
     }
-    final decoded = json.decode(response.body) as Map<String, dynamic>;
+    final decoded = _decodeJsonMap(response.body, 'Watch ads reward confirm');
     if (decoded['ok'] != true) {
       throw Exception(decoded['error']?.toString() ?? 'Unable to confirm reward');
     }

@@ -68,6 +68,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   bool _isUploadingPhoto = false;
   String? _shiftSummary;
   bool _isAttendanceLockedToday = false;
+  bool _isCheckingAbsence = false;
 
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
@@ -668,12 +669,80 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   void _openScreen(Widget screen) {
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen)).then((
-      _,
-    ) {
+    Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => screen))
+        .then((_) {
       _loadActiveShift();
       _loadNotifications();
     });
+  }
+
+  Future<void> _handleAttendanceButtonTap() async {
+    if (_isAttendanceLockedToday && !_hasOpenShift) {
+      showAppToast(
+        context,
+        'Attendance already marked for today.',
+        isError: false,
+      );
+      return;
+    }
+    if (_isCheckingAbsence) {
+      return;
+    }
+
+    final driverIdValue = (widget.user.driverId ?? widget.user.id).toString().trim();
+    final plantIdValue = widget.user.plantId?.trim();
+
+    if (driverIdValue.isEmpty) {
+      _openScreen(
+        CheckInOutScreen(
+          user: widget.user,
+          availableVehicles: widget.user.availableVehicles,
+          selectedVehicleId: _selectedVehicleId,
+          onVehicleAssigned: _handleVehicleUpdated,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isCheckingAbsence = true);
+    try {
+      final status = await _attendanceRepository.fetchDriverAbsenceStatus(
+        driverId: driverIdValue,
+        plantId: plantIdValue,
+      );
+      if (status.isAbsent) {
+        showAppToast(
+          context,
+          'Attendance disabled for today. Please contact your supervisor.',
+          isError: true,
+        );
+        return;
+      }
+    } on AttendanceFailure catch (error) {
+      showAppToast(context, error.message, isError: true);
+      return;
+    } catch (_) {
+      showAppToast(
+        context,
+        'Unable to verify attendance eligibility. Try again shortly.',
+        isError: true,
+      );
+      return;
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingAbsence = false);
+      }
+    }
+
+    _openScreen(
+      CheckInOutScreen(
+        user: widget.user,
+        availableVehicles: widget.user.availableVehicles,
+        selectedVehicleId: _selectedVehicleId,
+        onVehicleAssigned: _handleVehicleUpdated,
+      ),
+    );
   }
 
   String? _tenureText() {
@@ -914,24 +983,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 const SizedBox(height: 16),
                 GlowingAttendanceButton(
                   animation: _glowAnimation,
-                  onTap: () {
-                    if (_isAttendanceLockedToday && !_hasOpenShift) {
-                      showAppToast(
-                        context,
-                        'Attendance already marked for today.',
-                        isError: false,
-                      );
-                      return;
-                    }
-                    _openScreen(
-                      CheckInOutScreen(
-                        user: widget.user,
-                        availableVehicles: widget.user.availableVehicles,
-                        selectedVehicleId: _selectedVehicleId,
-                        onVehicleAssigned: _handleVehicleUpdated,
-                      ),
-                    );
-                  },
+                  onTap: _handleAttendanceButtonTap,
+                  isLoading: _isCheckingAbsence,
                   label: _attendanceButtonLabel,
                   gradient: _hasOpenShift
                       ? const LinearGradient(
@@ -1038,29 +1091,73 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 8),
-                ...notifications.map((item) {
-                  final hasTitle =
-                      item.title != null && item.title!.trim().isNotEmpty;
-                  final timeLabel = _formatNotificationTime(item.timestamp);
-                  return Card(
-                    child: ListTile(
-                      leading: Icon(item.type.icon, color: item.type.color),
-                      title: Text(hasTitle ? item.title!.trim() : item.message),
-                      subtitle: hasTitle ? Text(item.message) : null,
-                      trailing: timeLabel != null
-                          ? Text(
-                              timeLabel,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.outline,
-                              ),
-                            )
-                          : null,
-                      onTap: item.isPlaceholder
-                          ? null
-                          : () => _showNotificationDetails(item),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xFFE3F2FD),
+                        Colors.white,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  );
-                }),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      for (int index = 0;
+                          index < notifications.length;
+                          index++) ...[
+                        Builder(
+                          builder: (context) {
+                            final item = notifications[index];
+                            final hasTitle = item.title != null &&
+                                item.title!.trim().isNotEmpty;
+                            final timeLabel =
+                                _formatNotificationTime(item.timestamp);
+                            return Card(
+                              margin: EdgeInsets.zero,
+                              elevation: 2,
+                              color: Colors.white,
+                              surfaceTintColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: ListTile(
+                                leading: Icon(
+                                  item.type.icon,
+                                  color: item.type.color,
+                                ),
+                                title: Text(
+                                  hasTitle
+                                      ? item.title!.trim()
+                                      : item.message,
+                                ),
+                                subtitle: hasTitle ? Text(item.message) : null,
+                                trailing: timeLabel != null
+                                    ? Text(
+                                        timeLabel,
+                                        style:
+                                            theme.textTheme.labelSmall?.copyWith(
+                                          color:
+                                              theme.colorScheme.outline,
+                                        ),
+                                      )
+                                    : null,
+                                onTap: item.isPlaceholder
+                                    ? null
+                                    : () => _showNotificationDetails(item),
+                              ),
+                            );
+                          },
+                        ),
+                        if (index < notifications.length - 1)
+                          const SizedBox(height: 8),
+                      ],
+                    ],
+                  ),
+                ),
                 const SizedBox(height: 16),
                 Text(
                   'Plant & Vehicle',
@@ -1176,6 +1273,7 @@ class GlowingAttendanceButton extends StatelessWidget {
     this.icon = Icons.check_circle,
     this.iconColor,
     this.textColor,
+    this.isLoading = false,
   });
 
   final Animation<double> animation;
@@ -1185,6 +1283,7 @@ class GlowingAttendanceButton extends StatelessWidget {
   final IconData icon;
   final Color? iconColor;
   final Color? textColor;
+  final bool isLoading;
 
   @override
   Widget build(BuildContext context) {
@@ -1202,7 +1301,7 @@ class GlowingAttendanceButton extends StatelessWidget {
             );
         final baseColor = gradientValue.colors.first;
         return GestureDetector(
-          onTap: onTap,
+          onTap: isLoading ? null : onTap,
           child: Container(
             decoration: BoxDecoration(
               gradient: gradientValue,
@@ -1232,6 +1331,17 @@ class GlowingAttendanceButton extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (isLoading) ...[
+                  const SizedBox(width: 12),
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

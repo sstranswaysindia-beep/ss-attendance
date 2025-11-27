@@ -73,8 +73,8 @@ function rewards_fetch_limits(mysqli $conn): array
 
     return [
         'reward_amount' => 1.0,
-        'daily_view_limit' => 10,
-        'cooldown_minutes' => 30,
+        'daily_view_limit' => 0,
+        'cooldown_minutes' => 0,
     ];
 }
 
@@ -102,7 +102,7 @@ function rewards_usage_today(mysqli $conn, int $userId, string $role, int $coold
     $lastRewardedAt = $row['last_rewarded_at'] ?? null;
     $nextAvailableAt = null;
 
-    if ($lastRewardedAt) {
+    if ($cooldownMinutes > 0 && $lastRewardedAt) {
         try {
             $last = new DateTime($lastRewardedAt);
             $last->modify('+' . max(0, $cooldownMinutes) . ' minutes');

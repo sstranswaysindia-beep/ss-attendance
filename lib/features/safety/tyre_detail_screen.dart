@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter/material.dart';
@@ -40,6 +41,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
   late final List<TextEditingController> _remarkControllers;
   late final List<TyreCheckpointResult?> _selectedResults;
   XFile? _photoFile;
+  Uint8List? _photoBytes;
   bool _isSaving = false;
   bool _showPsiWarning = false;
   final DateFormat _timestampFormat = DateFormat('yyyy-MM-dd HH:mm:ss');
@@ -204,7 +206,12 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
     final file = await _picker.pickImage(source: source, imageQuality: 70);
     if (file != null) {
       final stamped = await _stampPhoto(file);
-      setState(() => _photoFile = stamped);
+      final target = stamped ?? file;
+      final bytes = await target.readAsBytes();
+      setState(() {
+        _photoFile = target;
+        _photoBytes = bytes;
+      });
     }
   }
 
@@ -230,6 +237,12 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
       return;
     }
 
+    final hasPhoto = _photoFile != null || ((_existingPhotoUrl ?? '').isNotEmpty);
+    if (!hasPhoto) {
+      showAppToast(context, 'Photo is required for ${widget.position}', isError: true);
+      return;
+    }
+
     setState(() => _showPsiWarning = psiValue < widget.instructions.psiMin || psiValue > widget.instructions.psiMax);
 
     final answers = <TyreAnswer>[];
@@ -247,7 +260,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
 
     String? photoBase64;
     if (_photoFile != null) {
-      final bytes = await _photoFile!.readAsBytes();
+      final bytes = _photoBytes ?? await _photoFile!.readAsBytes();
       photoBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
     }
 
@@ -403,6 +416,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                         onChanged: (result) {
                           setState(() => _selectedResults[index] = result);
                         },
+                        showLegend: index == 0,
                       );
                     }
 
@@ -422,6 +436,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                       return _PhotoPickerCard(
                         onPickPhoto: _pickPhoto,
                         photoFile: _photoFile,
+                        photoBytes: _photoBytes,
                         hasExistingPhoto: hasExistingPhoto,
                         existingPhotoUrl: _existingPhotoUrl,
                       );
@@ -453,6 +468,9 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                     style: FilledButton.styleFrom(
                       minimumSize: const Size.fromHeight(52),
                       shape: const StadiumBorder(),
+                      backgroundColor: const Color(0xFF00D100),
+                      disabledBackgroundColor: const Color(0xFF9BE79B),
+                      foregroundColor: Colors.white,
                     ),
                     child: _isSaving
                         ? const SizedBox(
@@ -489,12 +507,14 @@ class _CheckpointRow extends StatelessWidget {
     required this.result,
     required this.remarkController,
     required this.onChanged,
+    this.showLegend = false,
   });
 
   final TyreCheckpoint checkpoint;
   final TyreCheckpointResult? result;
   final TextEditingController remarkController;
   final ValueChanged<TyreCheckpointResult?> onChanged;
+  final bool showLegend;
 
   @override
   Widget build(BuildContext context) {
@@ -507,112 +527,225 @@ class _CheckpointRow extends StatelessWidget {
       _ => theme.colorScheme.primary,
     };
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: accentColor.withOpacity(0.25),
-          width: result == null ? 1 : 1.6,
+    return Column(
+      children: [
+        if (showLegend) ...[
+          const _SelectionLegend(),
+          const SizedBox(height: 8),
+        ],
+        Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: accentColor.withOpacity(0.25),
+              width: result == null ? 1 : 1.6,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${checkpoint.number}. ${checkpoint.textHi}',
+                style: GoogleFonts.josefinSans(
+                  textStyle: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                checkpoint.textEn,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _SelectionButton(
+                    icon: Icons.check_circle,
+                    label: 'स्वीकार्य\nAcceptable',
+                    color: Colors.green.shade700,
+                    selected: result == TyreCheckpointResult.acceptable,
+                    onTap: () => onChanged(TyreCheckpointResult.acceptable),
+                  ),
+                  _SelectionButton(
+                    icon: Icons.warning_amber_rounded,
+                    label: 'सावधान\nCaution',
+                    color: Colors.orange.shade700,
+                    selected: result == TyreCheckpointResult.caution,
+                    onTap: () => onChanged(TyreCheckpointResult.caution),
+                  ),
+                  _SelectionButton(
+                    icon: Icons.close_rounded,
+                    label: 'अस्वीकार्य\nNot OK',
+                    color: Colors.red.shade700,
+                    selected: result == TyreCheckpointResult.nonAcceptable,
+                    onTap: () => onChanged(TyreCheckpointResult.nonAcceptable),
+                  ),
+                ],
+              ),
+              if (showRemark) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: remarkController,
+                  decoration: InputDecoration(
+                    hintText: 'Please describe the issue',
+                    prefixIcon: const Icon(Icons.note_alt_outlined),
+                    border: OutlineInputBorder(
+                      borderSide: BorderSide(color: Colors.red.shade400),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  maxLines: 2,
+                ),
+              ],
+            ],
+          ),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+      ],
+    );
+  }
+}
+
+class _SelectionLegend extends StatelessWidget {
+  const _SelectionLegend();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFEFF6FF), Color(0xFFDDEAFE)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Wrap(
+        spacing: 16,
+        runSpacing: 8,
+        children: const [
+          _LegendItem(
+            icon: Icons.check_circle,
+            color: Color(0xFF15803D),
+            label: '✔ Acceptable',
+          ),
+          _LegendItem(
+            icon: Icons.warning_amber_rounded,
+            color: Color(0xFFB45309),
+            label: '⚠ Caution',
+          ),
+          _LegendItem(
+            icon: Icons.close_rounded,
+            color: Color(0xFFB91C1C),
+            label: '✖ Not OK',
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '${checkpoint.number}. ${checkpoint.textHi}',
-            style: GoogleFonts.josefinSans(
-              textStyle: theme.textTheme.bodyMedium?.copyWith(
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  const _LegendItem({
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 18),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: color,
                 fontWeight: FontWeight.w600,
               ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SelectionButton extends StatelessWidget {
+  const _SelectionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(14),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+            decoration: BoxDecoration(
+              color: selected ? color.withOpacity(0.12) : const Color(0xFFF5F7FB),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected ? color : color.withOpacity(0.35),
+                width: selected ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  icon,
+                  color: selected ? color : color.withOpacity(0.8),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: selected
+                        ? color
+                        : theme.colorScheme.onSurface.withOpacity(0.7),
+                    fontWeight: FontWeight.w600,
+                    height: 1.15,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            checkpoint.textEn,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.outline,
-            ),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<TyreCheckpointResult>(
-            key: ValueKey('checkpoint_${checkpoint.number}_${result?.apiValue ?? 'empty'}'),
-            value: result,
-            items: [
-              DropdownMenuItem(
-                value: TyreCheckpointResult.acceptable,
-                child: _DropdownLabel(
-                  label: 'वीकाय / Acceptable - ✔',
-                  color: Colors.green.shade700,
-                ),
-              ),
-              DropdownMenuItem(
-                value: TyreCheckpointResult.caution,
-                child: _DropdownLabel(
-                  label: 'खबरदार / Caution - C',
-                  color: Colors.orange.shade700,
-                ),
-              ),
-              DropdownMenuItem(
-                value: TyreCheckpointResult.nonAcceptable,
-                child: _DropdownLabel(
-                  label: 'अवीकरणीय / Not Acceptable - ✖',
-                  color: Colors.red.shade700,
-                ),
-              ),
-            ],
-            onChanged: onChanged,
-            dropdownColor: Colors.white,
-            iconEnabledColor: accentColor,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: accentColor,
-              fontWeight: FontWeight.w600,
-            ),
-            decoration: InputDecoration(
-              labelText: 'Select result',
-              labelStyle: theme.textTheme.bodySmall?.copyWith(
-                color: accentColor,
-                fontWeight: FontWeight.w600,
-              ),
-              border: OutlineInputBorder(
-                borderSide: BorderSide(color: accentColor.withOpacity(0.4)),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: accentColor.withOpacity(0.4)),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderSide: BorderSide(color: accentColor, width: 2),
-                borderRadius: BorderRadius.circular(14),
-              ),
-            ),
-          ),
-          if (showRemark) ...[
-            const SizedBox(height: 12),
-            TextField(
-              controller: remarkController,
-              decoration: InputDecoration(
-                hintText: 'Add remark (optional)',
-                prefixIcon: const Icon(Icons.note_alt_outlined),
-                border: OutlineInputBorder(
-                  borderSide: BorderSide(color: accentColor),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              maxLines: 2,
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -688,12 +821,14 @@ class _PhotoPickerCard extends StatelessWidget {
     required this.photoFile,
     required this.hasExistingPhoto,
     this.existingPhotoUrl,
+    this.photoBytes,
   });
 
   final VoidCallback onPickPhoto;
   final XFile? photoFile;
   final bool hasExistingPhoto;
   final String? existingPhotoUrl;
+  final Uint8List? photoBytes;
 
   @override
   Widget build(BuildContext context) {
@@ -716,7 +851,7 @@ class _PhotoPickerCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Photo (optional)',
+            'Photo (required)',
             style: GoogleFonts.josefinSans(
               textStyle: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
@@ -739,9 +874,36 @@ class _PhotoPickerCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (photoFile != null)
-            Text(
-              photoFile!.name,
-              style: theme.textTheme.bodySmall,
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: photoBytes != null
+                      ? Image.memory(
+                          photoBytes!,
+                          height: 140,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        )
+                      : const SizedBox.shrink(),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 18),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        photoFile!.name,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             )
           else if (hasExistingPhoto) ...[
             Text(
@@ -763,9 +925,9 @@ class _PhotoPickerCard extends StatelessWidget {
           ]
           else
             Text(
-              'Attach photo when an issue is found for better traceability.',
+              'Attach photo before saving. This helps supervisors validate inspections.',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
+                color: Colors.redAccent,
               ),
             ),
         ],
@@ -914,37 +1076,6 @@ class _DebugRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _DropdownLabel extends StatelessWidget {
-  const _DropdownLabel({
-    required this.label,
-    required this.color,
-  });
-
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.circle, size: 10, color: color),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Text(
-            label,
-            softWrap: true,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: color,
-                  fontWeight: FontWeight.w600,
-                ),
-          ),
-        ),
-      ],
     );
   }
 }

@@ -1,0 +1,79 @@
+[
+    {
+        "id": "400",
+        "inspection_id": "65",
+        "position_code": "L1",
+        "psi": "120.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/L1_093851.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:38:51"
+    },
+    {
+        "id": "401",
+        "inspection_id": "65",
+        "position_code": "R1",
+        "psi": "120.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/R1_093940.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:39:40"
+    },
+    {
+        "id": "402",
+        "inspection_id": "65",
+        "position_code": "L21",
+        "psi": "150.0",
+        "photo_url": null,
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:40:47"
+    },
+    {
+        "id": "403",
+        "inspection_id": "65",
+        "position_code": "L22",
+        "psi": "120.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/L22_094141.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:41:41"
+    },
+    {
+        "id": "404",
+        "inspection_id": "65",
+        "position_code": "R21",
+        "psi": "150.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/R21_094256.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:42:56"
+    },
+    {
+        "id": "405",
+        "inspection_id": "65",
+        "position_code": "R22",
+        "psi": "120.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/R22_094336.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:43:36"
+    },
+    {
+        "id": "406",
+        "inspection_id": "65",
+        "position_code": "S",
+        "psi": "120.0",
+        "photo_url": "\/DriverDocs\/uploads\/tyre\/17\/2025-11-01\/S_094436.jpg",
+        "note": null,
+        "status": "ok",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:44:36"
+    }
+]

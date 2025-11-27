@@ -101,6 +101,14 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
   }
 
   Future<void> _handleVehicleSelected(SafetyVehicle vehicle) async {
+    if (vehicle.isInspectionLocked) {
+      final remaining = vehicle.inspectionUnlockDays ?? 0;
+      final message = remaining > 0
+          ? 'Inspection already submitted. Check back in $remaining day${remaining == 1 ? '' : 's'}.'
+          : 'Inspection already submitted. Unlocks soon.';
+      showAppToast(context, message);
+      return;
+    }
     if (_isStarting) return;
     setState(() {
       _isStarting = true;
@@ -131,7 +139,8 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
     } catch (error, stackTrace) {
       debugPrint('TyreVehiclePicker start error: $error\n$stackTrace');
       if (mounted) {
-        showAppToast(context, 'Unable to start inspection: $error', isError: true);
+        final message = error.toString().replaceFirst('Exception: ', '');
+        showAppToast(context, message.isNotEmpty ? message : 'Unable to start inspection', isError: true);
       }
     } finally {
       if (mounted) {
@@ -227,17 +236,26 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
                               itemBuilder: (context, index) {
                                 final vehicle = _filteredVehicles[index];
                                 final isBusy = _busyVehicleId == vehicle.id;
+                                final isLocked = vehicle.isInspectionLocked;
+                                final daysRemaining = vehicle.inspectionUnlockDays ?? 0;
+                                final gradient = isLocked
+                                    ? const LinearGradient(
+                                        colors: [Color(0xFFE8F9EF), Color(0xFFCFFADE)],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      )
+                                    : const LinearGradient(
+                                        colors: [Color(0xFFFFFFFF), Color(0xFFE6F3FF)],
+                                        begin: Alignment.topLeft,
+                                        end: Alignment.bottomRight,
+                                      );
                                 return AnimatedOpacity(
                                   duration: const Duration(milliseconds: 200),
                                   opacity: isBusy ? 0.6 : 1,
                                   child: Container(
                                     margin: const EdgeInsets.symmetric(vertical: 6),
                                     decoration: BoxDecoration(
-                                      gradient: const LinearGradient(
-                                        colors: [Color(0xFFFFFFFF), Color(0xFFE6F3FF)],
-                                        begin: Alignment.topLeft,
-                                        end: Alignment.bottomRight,
-                                      ),
+                                      gradient: gradient,
                                       borderRadius: BorderRadius.circular(22),
                                       boxShadow: const [
                                         BoxShadow(
@@ -253,11 +271,16 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
                                       ),
                                       leading: CircleAvatar(
                                         radius: 22,
-                                        backgroundColor: const Color(0xFF1C7ED6).withOpacity(0.12),
+                                        backgroundColor: (isLocked
+                                                ? const Color(0xFF16A34A)
+                                                : const Color(0xFF1C7ED6))
+                                            .withOpacity(0.18),
                                         child: Text(
                                           vehicle.tyreCount.toString(),
                                           style: theme.textTheme.labelLarge?.copyWith(
-                                            color: const Color(0xFF1C7ED6),
+                                            color: isLocked
+                                                ? const Color(0xFF0F5132)
+                                                : const Color(0xFF1C7ED6),
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
@@ -271,13 +294,39 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
                                           ),
                                         ),
                                       ),
-                                      subtitle: Text(
-                                        vehicle.plantName != null
-                                            ? 'Plant: ${vehicle.plantName}'
-                                            : 'Tyres: ${vehicle.tyreCount}',
-                                        style: theme.textTheme.bodySmall?.copyWith(
-                                          color: const Color(0xFF3A5A84),
+                                      subtitle: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            vehicle.plantName != null
+                                                ? 'Plant: ${vehicle.plantName}'
+                                                : 'Tyres: ${vehicle.tyreCount}',
+                                            style: theme.textTheme.bodySmall?.copyWith(
+                                              color: const Color(0xFF3A5A84),
+                                          ),
                                         ),
+                                          if (isLocked)
+                                            Container(
+                                              margin: const EdgeInsets.only(top: 6),
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 10,
+                                                vertical: 4,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFDCFCE7),
+                                                borderRadius: BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                daysRemaining > 0
+                                                    ? 'Inspection submitted · $daysRemaining day${daysRemaining == 1 ? '' : 's'} left'
+                                                    : 'Inspection submitted · unlocks soon',
+                                                style: theme.textTheme.labelSmall?.copyWith(
+                                                  color: const Color(0xFF166534),
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
                                       ),
                                       trailing: isBusy
                                           ? const SizedBox(
@@ -285,7 +334,7 @@ class _TyreVehiclePickerScreenState extends State<TyreVehiclePickerScreen> {
                                               height: 24,
                                               child: CircularProgressIndicator(strokeWidth: 2),
                                             )
-                                          : const Icon(Icons.chevron_right),
+                                          : Icon(isLocked ? Icons.lock : Icons.chevron_right),
                                       onTap: () => _handleVehicleSelected(vehicle),
                                     ),
                                   ),

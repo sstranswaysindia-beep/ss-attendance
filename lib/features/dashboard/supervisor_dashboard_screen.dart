@@ -92,6 +92,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   bool _isLoadingTodayAttendance = false;
   String? _todayAttendanceError;
   List<SupervisorTodayAttendancePlant> _todayAttendance = const [];
+  final Set<int> _absenceUpdatingDriverIds = <int>{};
 
   @override
   void initState() {
@@ -409,6 +410,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       setState(() {
         _todayAttendance = response;
         _todayAttendanceError = null;
+        _absenceUpdatingDriverIds.clear();
       });
     } on AttendanceFailure catch (error) {
       if (!mounted) return;
@@ -478,6 +480,96 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
           _isLoadingDocumentsOverview = false;
         });
       }
+    }
+  }
+
+  List<SupervisorTodayAttendancePlant> _updateDriverAbsenceState({
+    required int plantId,
+    required int driverId,
+    required bool isAbsent,
+  }) {
+    return _todayAttendance
+        .map(
+          (plant) => plant.plantId != plantId
+              ? plant
+              : plant.copyWith(
+                  drivers: plant.drivers
+                      .map(
+                        (driver) => driver.driverId == driverId
+                            ? driver.copyWith(isAbsent: isAbsent)
+                            : driver,
+                      )
+                      .toList(growable: false),
+                ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> _toggleDriverAbsence({
+    required SupervisorTodayAttendancePlant plant,
+    required SupervisorTodayAttendanceDriver driver,
+    required bool markAbsent,
+  }) async {
+    final driverId = driver.driverId;
+    setState(() {
+      _absenceUpdatingDriverIds.add(driverId);
+      _todayAttendance = _updateDriverAbsenceState(
+        plantId: plant.plantId,
+        driverId: driverId,
+        isAbsent: markAbsent,
+      );
+    });
+
+    try {
+      final confirmed = await _attendanceRepository.updateSupervisorAbsent(
+        supervisorUserId: widget.user.id,
+        driverId: driverId,
+        plantId: plant.plantId,
+        isAbsent: markAbsent,
+      );
+      if (!mounted) return;
+      setState(() {
+        _todayAttendance = _updateDriverAbsenceState(
+          plantId: plant.plantId,
+          driverId: driverId,
+          isAbsent: confirmed,
+        );
+      });
+      showAppToast(
+        context,
+        confirmed
+            ? 'Marked ${driver.driverName} absent for today.'
+            : 'Cleared absence for ${driver.driverName}.',
+      );
+    } on AttendanceFailure catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _todayAttendance = _updateDriverAbsenceState(
+          plantId: plant.plantId,
+          driverId: driverId,
+          isAbsent: !markAbsent,
+        );
+      });
+      showAppToast(context, error.message, isError: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _todayAttendance = _updateDriverAbsenceState(
+          plantId: plant.plantId,
+          driverId: driverId,
+          isAbsent: !markAbsent,
+        );
+      });
+      showAppToast(
+        context,
+        'Unable to update absence status. Please try again.',
+        isError: true,
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _absenceUpdatingDriverIds.remove(driverId);
+      });
     }
   }
 
@@ -1098,32 +1190,73 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 const SizedBox(height: 16),
                 Text('Notifications', style: textTheme.titleMedium),
                 const SizedBox(height: 8),
-                ...notifications.map((item) {
-                  final hasTitle =
-                      item.title != null && item.title!.trim().isNotEmpty;
-                  final timeLabel = _formatNotificationTime(item.timestamp);
-                  return Card(
-                    child: ListTile(
-                      leading: Icon(
-                        _notificationIcon(item.type),
-                        color: _notificationColor(item.type),
-                      ),
-                      title: Text(hasTitle ? item.title!.trim() : item.message),
-                      subtitle: hasTitle ? Text(item.message) : null,
-                      trailing: timeLabel != null
-                          ? Text(
-                              timeLabel,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.outline,
-                              ),
-                            )
-                          : null,
-                      onTap: item.isPlaceholder
-                          ? null
-                          : () => _showNotificationDetails(item),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [
+                        Color(0xFFE3F2FD),
+                        Colors.white,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  );
-                }),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    children: [
+                      for (int index = 0;
+                          index < notifications.length;
+                          index++) ...[
+                        Builder(
+                          builder: (context) {
+                            final item = notifications[index];
+                            final hasTitle = item.title != null &&
+                                item.title!.trim().isNotEmpty;
+                            final timeLabel =
+                                _formatNotificationTime(item.timestamp);
+                            return Card(
+                              margin: EdgeInsets.zero,
+                              elevation: 2,
+                              color: Colors.white,
+                              surfaceTintColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: ListTile(
+                                leading: Icon(
+                                  _notificationIcon(item.type),
+                                  color: _notificationColor(item.type),
+                                ),
+                                title: Text(
+                                  hasTitle
+                                      ? item.title!.trim()
+                                      : item.message,
+                                ),
+                                subtitle: hasTitle ? Text(item.message) : null,
+                                trailing: timeLabel != null
+                                    ? Text(
+                                        timeLabel,
+                                        style:
+                                            theme.textTheme.labelSmall?.copyWith(
+                                          color:
+                                              theme.colorScheme.outline,
+                                        ),
+                                      )
+                                    : null,
+                                onTap: item.isPlaceholder
+                                    ? null
+                                    : () => _showNotificationDetails(item),
+                              ),
+                            );
+                          },
+                        ),
+                        if (index < notifications.length - 1)
+                          const SizedBox(height: 8),
+                      ],
+                    ],
+                  ),
+                ),
                 // All supervisors show supervised plants (no vehicles)
                 const SizedBox(height: 16),
                 Text('Supervised Plants', style: textTheme.titleMedium),
@@ -1301,7 +1434,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
             const SizedBox(height: 12),
             Column(
               children: plant.drivers
-                  .map((driver) => _buildDriverAttendanceTile(theme, driver))
+                  .map(
+                    (driver) =>
+                        _buildDriverAttendanceTile(theme, plant, driver),
+                  )
                   .toList(growable: false),
             ),
           ],
@@ -1312,6 +1448,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
   Widget _buildDriverAttendanceTile(
     ThemeData theme,
+    SupervisorTodayAttendancePlant plant,
     SupervisorTodayAttendanceDriver driver,
   ) {
     final hasCheckIn = driver.hasCheckIn;
@@ -1319,15 +1456,19 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     final hasAny = hasCheckIn || hasCheckOut;
     final isComplete = hasCheckIn && hasCheckOut;
     final isPartial = hasAny && !isComplete;
+    final isAbsent = driver.isAbsent;
 
-    final gradientColors = isComplete
-        ? const [Color(0xFF00D100), Color(0xFF00AA00)]
-        : isPartial
-        ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
-        : const [Color(0xFFED1C24), Color(0xFFB3121B)];
+    final gradientColors = isAbsent
+        ? const [Color(0xFF9E9E9E), Color(0xFF757575)]
+        : isComplete
+            ? const [Color(0xFF00D100), Color(0xFF00AA00)]
+            : isPartial
+                ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
+                : const [Color(0xFFED1C24), Color(0xFFB3121B)];
 
     const primaryTextColor = Colors.black87;
     const subtleTextColor = Colors.black54;
+    final isBusy = _absenceUpdatingDriverIds.contains(driver.driverId);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -1357,13 +1498,13 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Status: ${hasAny ? 'Done' : 'Not Done'}',
+                  'Status: ${isAbsent ? 'Absent' : hasAny ? 'Done' : 'Not Done'}',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: primaryTextColor,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                if (isPartial)
+                if (!isAbsent && isPartial)
                   Text(
                     'Check-out pending',
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -1371,8 +1512,41 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       fontWeight: FontWeight.w500,
                     ),
                   ),
+                if (isAbsent)
+                  Text(
+                    'Marked absent by supervisor',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: subtleTextColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
               ],
             ),
+          ),
+          Column(
+            children: [
+              Switch.adaptive(
+                value: isAbsent,
+                onChanged: isBusy
+                    ? null
+                    : (value) => _toggleDriverAbsence(
+                          plant: plant,
+                          driver: driver,
+                          markAbsent: value,
+                        ),
+                activeColor: const Color(0xFF1ABC9C),
+                activeTrackColor: const Color(0xFF8DE3C5),
+              ),
+              if (isBusy)
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                ),
+            ],
           ),
         ],
       ),

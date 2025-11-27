@@ -9,6 +9,7 @@ class TripRecord {
     this.plantName,
     this.drivers,
     this.helper,
+    this.helperNames = const <String>[],
     this.customers,
     this.startKm,
     this.endKm,
@@ -34,6 +35,28 @@ class TripRecord {
       return stringValue == 'true' || stringValue == '1';
     }
 
+    List<String> _parseHelperNames() {
+      final rawSources = <String>[
+        json['helper']?.toString() ?? '',
+        json['helpers']?.toString() ?? '',
+      ];
+      final seen = <String>{};
+      final parts = <String>[];
+      for (final raw in rawSources) {
+        if (raw.isEmpty) continue;
+        for (final entry in raw.split(',')) {
+          final name = entry.trim();
+          if (name.isEmpty) continue;
+          final key = name.toLowerCase();
+          if (seen.add(key)) {
+            parts.add(name);
+          }
+        }
+      }
+      return parts;
+    }
+
+    final helperParts = _parseHelperNames();
     return TripRecord(
       id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
       startDate: json['startDate']?.toString() ?? '',
@@ -45,7 +68,8 @@ class TripRecord {
           : null,
       plantName: json['plantName']?.toString(),
       drivers: json['drivers']?.toString(),
-      helper: json['helper']?.toString(),
+      helper: helperParts.isEmpty ? null : helperParts.join(', '),
+      helperNames: helperParts,
       customers: json['customers']?.toString(),
       startKm: _doubleOrNull(json['startKm']),
       endKm: _doubleOrNull(json['endKm']),
@@ -66,6 +90,7 @@ class TripRecord {
   final String status;
   final String? drivers;
   final String? helper;
+  final List<String> helperNames;
   final String? customers;
   final double? startKm;
   final double? endKm;

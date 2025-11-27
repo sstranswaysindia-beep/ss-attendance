@@ -144,6 +144,23 @@ $gps_lng = (isset($body['gps_lng']) && $body['gps_lng'] !== '') ? (float)$body['
 
 /* helpers by ID (modern + legacy) */
 $helper_ids = array_values(array_filter(array_map('intval', (array)($body['helper_ids'] ?? []))));
+$logDir = __DIR__ . '/logs';
+if (!is_dir($logDir)) {
+    @mkdir($logDir, 0775, true);
+}
+$logFile = $logDir . '/trips_create.log';
+$logPayload = [
+    'timestamp' => gmdate('c'),
+    'helper_ids_raw' => $body['helper_ids'] ?? [],
+    'helper_ids_normalized' => $helper_ids,
+    'vehicle_id' => $body['vehicle_id'] ?? null,
+    'driver_ids' => $body['driver_ids'] ?? [],
+];
+@file_put_contents(
+    $logFile,
+    json_encode($logPayload, JSON_UNESCAPED_UNICODE) . PHP_EOL,
+    FILE_APPEND
+);
 if (isset($body['helper_id']) && $body['helper_id'] !== '' && $body['helper_id'] !== null) {
     $hid = (int)$body['helper_id'];
     if ($hid > 0 && !in_array($hid, $helper_ids, true)) $helper_ids[] = $hid;

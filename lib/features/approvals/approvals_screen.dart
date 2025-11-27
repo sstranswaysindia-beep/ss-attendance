@@ -164,7 +164,6 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       return false;
     }
 
-
     setState(() => _processingApprovals.add(approval.attendanceId));
 
     try {
@@ -275,6 +274,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                     child: DropdownButtonFormField<String>(
                       value: _plantFilter,
                       decoration: const InputDecoration(labelText: 'Plant'),
+                      dropdownColor: Colors.white,
                       items: [
                         const DropdownMenuItem(
                           value: null,
@@ -298,6 +298,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                     child: DropdownButtonFormField<String>(
                       value: _rangeSelection,
                       decoration: const InputDecoration(labelText: 'Range'),
+                      dropdownColor: Colors.white,
                       items: rangeOptions.entries
                           .map(
                             (entry) => DropdownMenuItem<String>(
@@ -344,6 +345,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
               DropdownButtonFormField<String>(
                 value: _statusFilter,
                 decoration: const InputDecoration(labelText: 'Status'),
+                dropdownColor: Colors.white,
                 items: statusOptions
                     .map(
                       (status) =>
@@ -432,14 +434,18 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                                 approval.status?.isNotEmpty == true
                                 ? approval.status!
                                 : 'Pending';
-                            final isPending =
-                                statusLabel.toLowerCase() == 'pending';
+                            final normalizedStatus = statusLabel.toLowerCase();
+                            final isPending = normalizedStatus == 'pending';
+                            final isRejected = normalizedStatus == 'rejected';
+                            final isApproved = normalizedStatus == 'approved';
                             final isProcessing = _processingApprovals.contains(
                               approval.attendanceId,
                             );
 
                             final rawOut = approval.outTime?.trim() ?? '';
-                            final outDisplay = rawOut.isEmpty ? 'Pending' : rawOut;
+                            final outDisplay = rawOut.isEmpty
+                                ? 'Pending'
+                                : rawOut;
 
                             final subtitleLines = <String>[
                               'Plant: ${approval.plantName}',
@@ -515,28 +521,55 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                               );
                             }
 
-                            if (!isPending) {
+                            if (!isPending && !isRejected && !isApproved) {
                               return content;
+                            }
+
+                            DismissDirection dismissDirection;
+                            Widget leadingBackground = const SizedBox.shrink();
+                            Widget trailingBackground = const SizedBox.shrink();
+
+                            if (isPending) {
+                              dismissDirection = DismissDirection.horizontal;
+                              leadingBackground =
+                                  const _ApprovalSwipeBackground(
+                                    alignment: Alignment.centerLeft,
+                                    color: Color(0xFFFFE5E5),
+                                    icon: Icons.close,
+                                    label: 'Reject',
+                                  );
+                              trailingBackground = _ApprovalSwipeBackground(
+                                alignment: Alignment.centerRight,
+                                color: const Color(0xFFE5F6E5),
+                                icon: Icons.check,
+                                label: 'Approve',
+                              );
+                            } else if (isRejected) {
+                              dismissDirection = DismissDirection.endToStart;
+                              trailingBackground = _ApprovalSwipeBackground(
+                                alignment: Alignment.centerRight,
+                                color: const Color(0xFFE5F6E5),
+                                icon: Icons.check,
+                                label: 'Re-Approve',
+                              );
+                            } else {
+                              dismissDirection = DismissDirection.startToEnd;
+                              leadingBackground =
+                                  const _ApprovalSwipeBackground(
+                                    alignment: Alignment.centerLeft,
+                                    color: Color(0xFFFFE5E5),
+                                    icon: Icons.close,
+                                    label: 'Reject',
+                                  );
                             }
 
                             return Dismissible(
                               key: ValueKey(
                                 'approval_${approval.attendanceId}',
                               ),
-                              direction: DismissDirection.horizontal,
-                              background: const _ApprovalSwipeBackground(
-                                alignment: Alignment.centerLeft,
-                                color: Color(0xFFFFE5E5),
-                                icon: Icons.close,
-                                label: 'Reject',
-                              ),
-                              secondaryBackground:
-                                  const _ApprovalSwipeBackground(
-                                    alignment: Alignment.centerRight,
-                                    color: Color(0xFFE5F6E5),
-                                    icon: Icons.check,
-                                    label: 'Approve',
-                                  ),
+                              direction: dismissDirection,
+                              background: leadingBackground,
+                              secondaryBackground: trailingBackground,
                               confirmDismiss: (direction) =>
                                   _handleApprovalDismiss(
                                     approval,

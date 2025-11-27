@@ -36,8 +36,15 @@ class WatchAdsLimits {
   final int cooldownMinutes;
   final DateTime? nextAvailableAt;
 
-  int get remainingViews =>
-      dailyViewLimit > rewardedToday ? dailyViewLimit - rewardedToday : 0;
+  bool get hasUnlimitedViews => dailyViewLimit <= 0;
+
+  int get remainingViews {
+    if (hasUnlimitedViews) {
+      return 999999;
+    }
+    final remaining = dailyViewLimit - rewardedToday;
+    return remaining > 0 ? remaining : 0;
+  }
 }
 
 class WatchAdsHistoryEntry {

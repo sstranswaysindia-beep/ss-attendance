@@ -19,6 +19,8 @@ Future<void> showNotificationDetailDialog(
   return showDialog<void>(
     context: context,
     builder: (context) => AlertDialog(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
       title: Text(
         title?.trim().isEmpty == true
             ? 'Notification'
@@ -69,9 +71,11 @@ class _InAppNotificationBannerHostState
     extends State<InAppNotificationBannerHost> {
   StreamSubscription<InAppNotificationData>? _subscription;
   StreamSubscription<List<InAppNotificationData>>? _listSubscription;
+  StreamSubscription<bool>? _bellVisibilitySubscription;
   InAppNotificationData? _currentNotification;
   List<InAppNotificationData> _inboxNotifications =
       NotificationService().recentInAppNotifications;
+  bool _isBellForcedHidden = NotificationService().isBellHidden;
   Timer? _hideTimer;
 
   @override
@@ -90,12 +94,22 @@ class _InAppNotificationBannerHostState
         _inboxNotifications = notifications;
       });
     });
+    _bellVisibilitySubscription =
+        NotificationService().bellVisibilityChanges.listen((hidden) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isBellForcedHidden = hidden;
+      });
+    });
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
     _listSubscription?.cancel();
+    _bellVisibilitySubscription?.cancel();
     _hideTimer?.cancel();
     super.dispose();
   }
@@ -108,6 +122,7 @@ class _InAppNotificationBannerHostState
         setState(() => _currentNotification = null);
       }
     });
+    _showNotificationTicker(notification);
   }
 
   void _dismissBanner() {
@@ -141,40 +156,54 @@ class _InAppNotificationBannerHostState
   }
 
   void _openNotificationCenter() {
-    final navigator =
-        Navigator.maybeOf(context, rootNavigator: true) ??
-            Navigator.maybeOf(context);
-    if (navigator == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final fallback =
-            Navigator.maybeOf(context) ??
-                Navigator.maybeOf(context, rootNavigator: true);
-        if (fallback != null) {
-          showModalBottomSheet<void>(
-            context: fallback.context,
-            isScrollControlled: true,
-            useSafeArea: true,
-            showDragHandle: true,
-            builder: (ctx) => _NotificationCenterSheet(
-              initialNotifications: _inboxNotifications,
-            ),
-          );
-        } else {
-          debugPrint(
-            'InAppNotificationBanner: Unable to open notification center - no Navigator available even after retry.',
-          );
-        }
-      });
+    _showNotificationTicker();
+  }
+
+  void _showNotificationTicker([InAppNotificationData? notification]) {
+    final scaffoldMessenger = ScaffoldMessenger.maybeOf(context);
+    if (scaffoldMessenger == null) {
       return;
     }
 
-    showModalBottomSheet<void>(
-      context: navigator.context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (context) =>
-          _NotificationCenterSheet(initialNotifications: _inboxNotifications),
+    final notifications = notification != null
+        ? [notification]
+        : _inboxNotifications;
+
+    if (notifications.isEmpty) {
+      scaffoldMessenger.showSnackBar(
+        const SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: Text('No notifications yet'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    final preview = notifications.take(3).map((entry) {
+      final title = entry.title?.trim().isNotEmpty == true
+          ? entry.title!.trim()
+          : 'Notification';
+      final message = entry.body.trim().isNotEmpty
+          ? entry.body.trim()
+          : (entry.data['body']?.toString() ??
+              entry.data['message']?.toString() ??
+              'Received');
+      return '$title: $message';
+    }).join('   •   ');
+
+    scaffoldMessenger.clearSnackBars();
+    scaffoldMessenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        duration: Duration(seconds: 4 + (preview.length ~/ 20)),
+        content: Text(
+          preview,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
     );
   }
 
@@ -229,7 +258,8 @@ class _InAppNotificationBannerHostState
     );
   }
 
-  bool _shouldHideBell(int inboxCount) => widget.hideBell;
+  bool _shouldHideBell(int inboxCount) =>
+      widget.hideBell || _isBellForcedHidden;
 }
 
 class _InAppBannerCard extends StatelessWidget {
@@ -337,12 +367,10 @@ class _NotificationBellButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hasNotifications = count > 0;
-    final background = hasNotifications
-        ? theme.colorScheme.primary
-        : theme.colorScheme.surfaceVariant;
+    final background = Colors.white;
     final foreground = hasNotifications
-        ? theme.colorScheme.onPrimary
-        : theme.colorScheme.onSurfaceVariant;
+        ? theme.colorScheme.primary
+        : theme.colorScheme.outline;
     final badgeText = count > 99 ? '99+' : count.toString();
 
     return SizedBox(
@@ -385,185 +413,6 @@ class _NotificationBellButton extends StatelessWidget {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NotificationCenterSheet extends StatefulWidget {
-  const _NotificationCenterSheet({required this.initialNotifications});
-
-  final List<InAppNotificationData> initialNotifications;
-
-  @override
-  State<_NotificationCenterSheet> createState() =>
-      _NotificationCenterSheetState();
-}
-
-class _NotificationCenterSheetState extends State<_NotificationCenterSheet> {
-  late List<InAppNotificationData> _notifications;
-  StreamSubscription<List<InAppNotificationData>>? _subscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _notifications = widget.initialNotifications;
-    _subscription = NotificationService().inAppNotificationList.listen((
-      notifications,
-    ) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _notifications = notifications;
-      });
-    });
-  }
-
-  @override
-  void dispose() {
-    _subscription?.cancel();
-    super.dispose();
-  }
-
-  void _handleDelete(String id) {
-    NotificationService().removeInAppNotification(id);
-  }
-
-  void _handleClearAll() {
-    NotificationService().clearInAppNotifications();
-  }
-
-  void _handleOpenDetail(InAppNotificationData notification) {
-    showNotificationDetailDialog(
-      context,
-      title: notification.title,
-      message: notification.body.isNotEmpty
-          ? notification.body
-          : (notification.data['body']?.toString() ??
-                notification.data['message']?.toString() ??
-                'Notification received.'),
-      timestamp: notification.receivedAt,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final hasNotifications = _notifications.isNotEmpty;
-
-    return FractionallySizedBox(
-      heightFactor: 0.7,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text(
-                  'Notifications',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const Spacer(),
-                if (hasNotifications)
-                  TextButton.icon(
-                    onPressed: _handleClearAll,
-                    icon: const Icon(Icons.clear_all),
-                    label: const Text('Clear all'),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (!hasNotifications)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.notifications_none,
-                        size: 48,
-                        color: theme.colorScheme.outline,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'No notifications yet',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Stay tuned! Incoming alerts will show up here.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline.withOpacity(0.8),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _notifications.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final notification = _notifications[index];
-                    final resolvedMessage = notification.body.isNotEmpty
-                        ? notification.body
-                        : (notification.data['body']?.toString() ??
-                              notification.data['message']?.toString() ??
-                              'Notification received.');
-                    final timestamp = DateFormat(
-                      'dd MMM • hh:mm a',
-                    ).format(notification.receivedAt);
-
-                    return ListTile(
-                      onTap: () => _handleOpenDetail(notification),
-                      leading: CircleAvatar(
-                        backgroundColor: theme.colorScheme.primary.withOpacity(
-                          0.15,
-                        ),
-                        foregroundColor: theme.colorScheme.primary,
-                        child: const Icon(Icons.notifications),
-                      ),
-                      title: Text(
-                        notification.title.trim().isEmpty
-                            ? 'Notification'
-                            : notification.title.trim(),
-                        style: theme.textTheme.titleMedium,
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const SizedBox(height: 4),
-                          Text(resolvedMessage),
-                          const SizedBox(height: 6),
-                          Text(
-                            timestamp,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.outline,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
-                      trailing: IconButton(
-                        tooltip: 'Delete',
-                        icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _handleDelete(notification.id),
-                      ),
-                    );
-                  },
                 ),
               ),
           ],

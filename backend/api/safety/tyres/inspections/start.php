@@ -135,6 +135,47 @@ try {
         // if existing inspection found but positions missing, fall through to create new inspection
     }
 
+    $cooldownStmt = $conn->prepare(
+        "SELECT submitted_at
+           FROM tyre_inspections
+          WHERE vehicle_id = ?
+            AND submitted_at IS NOT NULL
+          ORDER BY submitted_at DESC
+          LIMIT 1"
+    );
+    if ($cooldownStmt) {
+        $cooldownStmt->bind_param('i', $vehicleId);
+        $cooldownStmt->execute();
+        $cooldownRes = $cooldownStmt->get_result();
+        if ($row = $cooldownRes->fetch_assoc()) {
+            $submittedAtRaw = $row['submitted_at'];
+            if (!empty($submittedAtRaw)) {
+                $submittedAt = new DateTimeImmutable($submittedAtRaw);
+                $unlockAt = $submittedAt->modify('+15 days');
+                $now = new DateTimeImmutable('now');
+                if ($unlockAt > $now) {
+                    $remainingSeconds = $unlockAt->getTimestamp() - $now->getTimestamp();
+                    $remainingDays = (int)ceil($remainingSeconds / 86400);
+                    if ($remainingDays < 1) {
+                        $remainingDays = 1;
+                    }
+                    $cooldownStmt->close();
+                    apiRespond(409, [
+                        'ok' => false,
+                        'error' => sprintf(
+                            'Inspection recently submitted. Please try again in %d day%s.',
+                            $remainingDays,
+                            $remainingDays === 1 ? '' : 's'
+                        ),
+                        'cooldown_days' => $remainingDays,
+                        'submitted_at' => $submittedAtRaw,
+                    ]);
+                }
+            }
+        }
+        $cooldownStmt->close();
+    }
+
     $tyreCount = (int)$vehicle['tyre_count'];
     $positions = safety_generate_positions($tyreCount);
     if (!in_array('S', $positions, true)) {

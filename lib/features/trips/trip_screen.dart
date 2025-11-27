@@ -16,6 +16,7 @@ import '../../core/services/trip_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/glowing_badge.dart';
+import '../../core/services/notification_service.dart';
 
 class TripScreen extends StatefulWidget {
   const TripScreen({required this.user, super.key});
@@ -27,6 +28,8 @@ class TripScreen extends StatefulWidget {
 }
 
 class _TripScreenState extends State<TripScreen> {
+  static const int _maxBackDateDays = 90;
+
   late final TripRepository _repository;
   final GpsService _gpsService = GpsService();
   final LocalStorageService _localStorage = LocalStorageService();
@@ -62,6 +65,9 @@ class _TripScreenState extends State<TripScreen> {
   final TextEditingController _startKmController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
   final TextEditingController _customerController = TextEditingController();
+  final TextEditingController _gatePassController = TextEditingController();
+  final TextEditingController _cylInController = TextEditingController();
+  final TextEditingController _cylOutController = TextEditingController();
   DateTime _selectedStartDate = DateTime.now();
 
   // Ongoing trip variables
@@ -74,16 +80,19 @@ class _TripScreenState extends State<TripScreen> {
   final GlobalKey<FormFieldState<int?>> _helperDropdownKey =
       GlobalKey<FormFieldState<int?>>();
 
-  DateTime _from = DateTime.now().subtract(const Duration(days: 30));
+  DateTime _from = DateTime.now().subtract(const Duration(days: _maxBackDateDays));
   DateTime _to = DateTime.now();
   String _status = 'All';
   String? _selectedPlantId;
   int? _lastSuggestedStartKm;
   String? _savedVehicleId;
+  bool _requestedBellHide = false;
 
   @override
   void initState() {
     super.initState();
+    NotificationService().requestBellHide();
+    _requestedBellHide = true;
 
     _repository = TripRepository();
 
@@ -115,15 +124,30 @@ class _TripScreenState extends State<TripScreen> {
 
   @override
   void dispose() {
+    if (_requestedBellHide) {
+      NotificationService().releaseBellHide();
+      _requestedBellHide = false;
+    }
     _startKmController.removeListener(_handleStartKmChanged);
     _startDateController.dispose();
     _startKmController.dispose();
     _noteController.dispose();
     _customerController.dispose();
+    _gatePassController.dispose();
+    _cylInController.dispose();
+    _cylOutController.dispose();
     _driverFocusNode.dispose();
     _helperFocusNode.dispose();
     _autoSaveTimer?.cancel();
     super.dispose();
+  }
+
+  bool _isPlantInox(TripPlant? plant) {
+    final name = plant?.name.trim().toLowerCase();
+    if (name == null || name.isEmpty) {
+      return false;
+    }
+    return name.contains('inox');
   }
 
   Future<void> _loadTrips() async {
@@ -189,12 +213,9 @@ class _TripScreenState extends State<TripScreen> {
 
       final adjustedSummary = TripSummary(
         totalTrips: baseSummary.totalTrips,
-        completedTrips:
-            clampInt(rawCompleted, 0, baseSummary.totalTrips),
-        openTrips:
-            clampInt(rawOpen, 0, baseSummary.totalTrips),
-        totalRunKm:
-            clampDouble(rawRun, 0, double.maxFinite),
+        completedTrips: clampInt(rawCompleted, 0, baseSummary.totalTrips),
+        openTrips: clampInt(rawOpen, 0, baseSummary.totalTrips),
+        totalRunKm: clampDouble(rawRun, 0, double.maxFinite),
       );
 
       setState(() {
@@ -493,6 +514,7 @@ class _TripScreenState extends State<TripScreen> {
         endDate: '',
         vehicleNumber: '',
         status: '',
+        helperNames: const <String>[],
       ),
     );
 
@@ -537,6 +559,7 @@ class _TripScreenState extends State<TripScreen> {
           endDate: '',
           vehicleNumber: '',
           status: '',
+          helperNames: const <String>[],
         ),
       );
 
@@ -609,6 +632,7 @@ class _TripScreenState extends State<TripScreen> {
         note: '',
         drivers: '',
         helper: '',
+        helperNames: const <String>[],
         customers: '',
       ),
     );
@@ -663,15 +687,32 @@ class _TripScreenState extends State<TripScreen> {
       _customerNames = trip.customers!.split(',').map((c) => c.trim()).toList();
     }
 
-    // Load helper
-    if (trip.helper != null && trip.helper!.isNotEmpty) {
-      // Find helper in the loaded helpers list
-      final helper = _metaHelpers.firstWhere(
-        (h) => h.name == trip.helper,
-        orElse: () => TripHelper(id: 0, name: trip.helper!, plantId: 0),
-      );
-      if (helper.id > 0) {
-        _selectedHelpers = [helper];
+    // Load helpers (support multiple)
+    if (trip.helperNames.isNotEmpty) {
+      final resolvedHelpers = <TripHelper>[];
+      for (final name in trip.helperNames) {
+        final match = _metaHelpers.firstWhere(
+          (candidate) => candidate.name.toLowerCase() == name.toLowerCase(),
+          orElse: () => TripHelper(
+            id: 0,
+            name: name,
+            plantId: trip.plantId ?? _selectedPlant?.id,
+          ),
+        );
+        final alreadyExists = resolvedHelpers.any((helper) {
+          if (match.id != 0 && helper.id == match.id) {
+            return true;
+          }
+          return helper.name.toLowerCase() == match.name.toLowerCase();
+        });
+        if (alreadyExists) {
+          continue;
+        }
+        resolvedHelpers.add(match);
+      }
+
+      if (resolvedHelpers.isNotEmpty) {
+        _selectedHelpers = resolvedHelpers;
       }
     }
 
@@ -706,7 +747,7 @@ class _TripScreenState extends State<TripScreen> {
         user: widget.user,
         tripId: _ongoingTrip!.id,
         setDriverIds: driverIds,
-        helperId: helperIds.isNotEmpty ? helperIds.first : null,
+        helperIds: helperIds.isNotEmpty ? helperIds : null,
         setCustomerNames: customerNames,
         note: note.isNotEmpty ? note : null,
       );
@@ -759,7 +800,7 @@ class _TripScreenState extends State<TripScreen> {
                     context: context,
                     initialDate: DateTime.now(),
                     firstDate: DateTime.now().subtract(
-                      const Duration(days: 30),
+                      const Duration(days: _maxBackDateDays),
                     ),
                     lastDate: DateTime.now().add(const Duration(days: 1)),
                   );
@@ -850,6 +891,7 @@ class _TripScreenState extends State<TripScreen> {
           plantName: endedTrip.plantName,
           drivers: endedTrip.drivers,
           helper: endedTrip.helper,
+          helperNames: endedTrip.helperNames,
           customers: endedTrip.customers,
           startKm: endedTrip.startKm,
           endKm: endKmDouble,
@@ -869,13 +911,13 @@ class _TripScreenState extends State<TripScreen> {
         final plants = _overview!.plants;
         final completedTrips =
             previousStatus == 'ended' || previousStatus == 'completed'
-                ? summary.completedTrips
-                : summary.completedTrips + 1;
-        final openTrips =
-            previousStatus == 'ongoing' && summary.openTrips > 0
-                ? summary.openTrips - 1
-                : summary.openTrips;
-        final totalRunKm = summary.totalRunKm -
+            ? summary.completedTrips
+            : summary.completedTrips + 1;
+        final openTrips = previousStatus == 'ongoing' && summary.openTrips > 0
+            ? summary.openTrips - 1
+            : summary.openTrips;
+        final totalRunKm =
+            summary.totalRunKm -
             (endedTrip.runKm ?? 0) +
             (updatedTrip.runKm ?? 0);
 
@@ -912,6 +954,7 @@ class _TripScreenState extends State<TripScreen> {
             plantName: endedTrip.plantName,
             drivers: endedTrip.drivers,
             helper: endedTrip.helper,
+            helperNames: endedTrip.helperNames,
             customers: endedTrip.customers,
             startKm: endedTrip.startKm,
             endKm: endKmDouble,
@@ -1298,7 +1341,9 @@ class _TripScreenState extends State<TripScreen> {
         _helpersForPlant = helpers;
         _selectedHelpers = _selectedHelpers
             .where(
-              (helper) => helpers.any((candidate) => candidate.id == helper.id),
+              (helper) => helpers.any(
+                (candidate) => _helpersMatch(candidate, helper),
+              ),
             )
             .toList(growable: false);
       });
@@ -1334,8 +1379,20 @@ class _TripScreenState extends State<TripScreen> {
     });
   }
 
+  bool _helpersMatch(TripHelper a, TripHelper b) {
+    if (a.id > 0 && b.id > 0) {
+      return a.id == b.id;
+    }
+    final left = a.name.trim().toLowerCase();
+    final right = b.name.trim().toLowerCase();
+    if (left.isEmpty || right.isEmpty) {
+      return false;
+    }
+    return left == right;
+  }
+
   void _handleHelperAdded(TripHelper helper) {
-    if (_selectedHelpers.any((selected) => selected.id == helper.id)) {
+    if (_selectedHelpers.any((selected) => _helpersMatch(selected, helper))) {
       return;
     }
     setState(() {
@@ -1346,7 +1403,7 @@ class _TripScreenState extends State<TripScreen> {
   void _handleHelperRemoved(TripHelper helper) {
     setState(() {
       _selectedHelpers = _selectedHelpers
-          .where((selected) => selected.id != helper.id)
+          .where((selected) => !_helpersMatch(selected, helper))
           .toList(growable: false);
     });
   }
@@ -1385,7 +1442,7 @@ class _TripScreenState extends State<TripScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedStartDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      firstDate: DateTime.now().subtract(const Duration(days: _maxBackDateDays)),
       lastDate: DateTime.now().add(const Duration(days: 30)),
     );
     if (picked == null) {
@@ -1427,7 +1484,36 @@ class _TripScreenState extends State<TripScreen> {
       return;
     }
 
+    final isInoxPlant = _isPlantInox(_selectedPlant);
+    final baseNote = _noteController.text.trim();
+    String submissionNote = baseNote;
+    if (isInoxPlant) {
+      final gatePass = _gatePassController.text.trim();
+      final cylIn = _cylInController.text.trim();
+      final cylOut = _cylOutController.text.trim();
+
+      if (gatePass.isEmpty || cylIn.isEmpty || cylOut.isEmpty) {
+        showAppToast(
+          context,
+          'Enter Gate Pass No, Cyl In, and Cyl Out for INOX trips.',
+          isError: true,
+        );
+        return;
+      }
+
+      submissionNote =
+          'Gate Pass No $gatePass - Cyl In $cylIn - Cyl Out $cylOut';
+      if (baseNote.isNotEmpty) {
+        submissionNote = '$submissionNote - $baseNote';
+      }
+    }
+
     final newCustomers = List<String>.from(_customerNames);
+
+    final helperDebug = _selectedHelpers
+        .map((helper) => '${helper.id}:${helper.name}')
+        .join(', ');
+    print('DEBUG startTrip helpers => [$helperDebug]');
 
     setState(() => _isCreatingTrip = true);
 
@@ -1447,7 +1533,7 @@ class _TripScreenState extends State<TripScreen> {
             .map((helper) => helper.id)
             .toList(growable: false),
         customerNames: _customerNames,
-        note: _noteController.text.trim(),
+        note: submissionNote,
         gpsLat: gpsLocation?['lat'],
         gpsLng: gpsLocation?['lng'],
       );
@@ -1457,6 +1543,9 @@ class _TripScreenState extends State<TripScreen> {
       _customerController.clear();
       _noteController.clear();
       _startKmController.clear();
+      _gatePassController.clear();
+      _cylInController.clear();
+      _cylOutController.clear();
 
       setState(() {
         _customerNames = const <String>[];
@@ -1534,6 +1623,7 @@ class _TripScreenState extends State<TripScreen> {
   @override
   Widget build(BuildContext context) {
     final overview = _overview;
+    final bool showOngoingCard = _hasOngoingTrip && _ongoingTrip != null;
 
     return KeyboardListener(
       focusNode: FocusNode(),
@@ -1560,9 +1650,7 @@ class _TripScreenState extends State<TripScreen> {
                       left: 16,
                       right: 16,
                       top: 16,
-                      bottom: _hasOngoingTrip && _ongoingTrip != null
-                          ? 120
-                          : 16,
+                      bottom: showOngoingCard ? 120 : 16,
                     ),
                     children: [
                       _PlantVehicleCard(
@@ -1579,6 +1667,9 @@ class _TripScreenState extends State<TripScreen> {
                                   _selectedPlant = plant;
                                   _selectedPlantId = plant.id.toString();
                                   _selectedVehicle = null;
+                                  _gatePassController.clear();
+                                  _cylInController.clear();
+                                  _cylOutController.clear();
                                 });
                                 // Save plant selection to local storage
                                 _localStorage.savePlantId(plant.id.toString());
@@ -1639,6 +1730,9 @@ class _TripScreenState extends State<TripScreen> {
                         onPickStartDate: _pickStartDate,
                         startKmController: _startKmController,
                         noteController: _noteController,
+                        gatePassController: _gatePassController,
+                        cylInController: _cylInController,
+                        cylOutController: _cylOutController,
                         customerController: _customerController,
                         customerSuggestions: _customerSuggestions,
                         selectedCustomers: _customerNames,
@@ -1650,6 +1744,7 @@ class _TripScreenState extends State<TripScreen> {
                         hasVehicle: _selectedVehicle != null,
                         selectedDrivers: _selectedDrivers,
                         hasOngoingTrip: _hasOngoingTrip,
+                        selectedPlant: _selectedPlant,
                       ),
                       const SizedBox(height: 12),
 
@@ -1663,8 +1758,7 @@ class _TripScreenState extends State<TripScreen> {
                         _TripsList(
                           trips: overview.trips,
                           onDeleteTrip: _handleDeleteTrip,
-                          canDeleteAll:
-                              widget.user.role != UserRole.driver,
+                          canDeleteAll: widget.user.role != UserRole.driver,
                         ),
                       ] else
                         const SizedBox.shrink(),
@@ -1673,7 +1767,7 @@ class _TripScreenState extends State<TripScreen> {
                 ),
 
                 // Sticky ON-GOING TRIP CARD at the bottom
-                if (_hasOngoingTrip && _ongoingTrip != null)
+                if (showOngoingCard)
                   Positioned(
                     left: 16,
                     right: 16,
@@ -2142,15 +2236,16 @@ class _TripTile extends StatelessWidget {
             ),
 
             // Drivers & Helpers
-            if (trip.helper?.isNotEmpty == true)
+            if (trip.helperNames.isNotEmpty)
               Row(
                 children: [
                   Expanded(
                     child: _InfoRow(
                       icon: Icons.person,
                       label: 'Drivers',
-                      value:
-                          trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
+                      value: trip.drivers?.isNotEmpty == true
+                          ? trip.drivers!
+                          : '—',
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -2158,7 +2253,7 @@ class _TripTile extends StatelessWidget {
                     child: _InfoRow(
                       icon: Icons.groups,
                       label: 'Helpers',
-                      value: trip.helper!,
+                      value: trip.helperNames.join(', '),
                     ),
                   ),
                 ],
@@ -2167,8 +2262,7 @@ class _TripTile extends StatelessWidget {
               _InfoRow(
                 icon: Icons.person,
                 label: 'Drivers',
-                value:
-                    trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
+                value: trip.drivers?.isNotEmpty == true ? trip.drivers! : '—',
               ),
 
             // Customers
@@ -2804,6 +2898,9 @@ class _TripStartCard extends StatefulWidget {
     required this.onPickStartDate,
     required this.startKmController,
     required this.noteController,
+    required this.gatePassController,
+    required this.cylInController,
+    required this.cylOutController,
     required this.customerController,
     required this.customerSuggestions,
     required this.selectedCustomers,
@@ -2815,12 +2912,16 @@ class _TripStartCard extends StatefulWidget {
     required this.hasVehicle,
     required this.selectedDrivers,
     this.hasOngoingTrip = false,
+    this.selectedPlant,
   });
 
   final TextEditingController startDateController;
   final VoidCallback onPickStartDate;
   final TextEditingController startKmController;
   final TextEditingController noteController;
+  final TextEditingController gatePassController;
+  final TextEditingController cylInController;
+  final TextEditingController cylOutController;
   final TextEditingController customerController;
   final List<String> customerSuggestions;
   final List<String> selectedCustomers;
@@ -2832,6 +2933,7 @@ class _TripStartCard extends StatefulWidget {
   final bool hasVehicle;
   final List<TripDriver> selectedDrivers;
   final bool hasOngoingTrip;
+  final TripPlant? selectedPlant;
 
   @override
   State<_TripStartCard> createState() => _TripStartCardState();
@@ -2853,6 +2955,15 @@ class _TripStartCardState extends State<_TripStartCard> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final isInoxPlant = () {
+      final name = widget.selectedPlant?.name.trim().toLowerCase();
+      return name != null && name.contains('inox');
+    }();
+    final inoxFieldsReady =
+        !isInoxPlant ||
+        (widget.gatePassController.text.trim().isNotEmpty &&
+            widget.cylInController.text.trim().isNotEmpty &&
+            widget.cylOutController.text.trim().isNotEmpty);
     final canStart =
         !widget.isCreating &&
         widget.hasVehicle &&
@@ -2860,7 +2971,8 @@ class _TripStartCardState extends State<_TripStartCard> {
         widget.selectedCustomers.isNotEmpty &&
         (widget.hasOngoingTrip ||
             (widget.startKmController.text.trim().isNotEmpty &&
-                widget.startDateController.text.trim().isNotEmpty));
+                widget.startDateController.text.trim().isNotEmpty)) &&
+        inoxFieldsReady;
     final selectedChipColor = Colors.teal.shade100;
     final selectedChipTextColor = Colors.teal.shade900;
     final suggestionChipColor = Colors.orange.shade100;
@@ -3015,6 +3127,44 @@ class _TripStartCardState extends State<_TripStartCard> {
               ),
             ],
             const SizedBox(height: 12),
+            if (isInoxPlant) ...[
+              Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: TextField(
+                      controller: widget.gatePassController,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: buildFieldDecoration('Gate Pass No'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: widget.cylOutController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: buildFieldDecoration('Cyl Out'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: widget.cylInController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: buildFieldDecoration('Cyl In'),
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
             TextField(
               controller: widget.noteController,
               maxLines: 2,

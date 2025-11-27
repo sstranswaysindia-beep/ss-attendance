@@ -19,6 +19,7 @@ try {
             id INT(11) NOT NULL AUTO_INCREMENT,
             label VARCHAR(100) NOT NULL UNIQUE,
             sort_order INT(11) NOT NULL DEFAULT 0,
+            vehicle_mandatory CHAR(1) NOT NULL DEFAULT 'N',
             is_active TINYINT(1) NOT NULL DEFAULT 1,
             created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -28,6 +29,13 @@ try {
 
     if (!$conn->query($createTableSql)) {
         throw new RuntimeException('Unable to ensure transaction_descriptions table exists.');
+    }
+
+    $columnCheck = $conn->query("SHOW COLUMNS FROM transaction_descriptions LIKE 'vehicle_mandatory'");
+    if (!$columnCheck || $columnCheck->num_rows === 0) {
+        $conn->query("ALTER TABLE transaction_descriptions ADD COLUMN vehicle_mandatory CHAR(1) NOT NULL DEFAULT 'N' AFTER sort_order");
+    } else {
+        $columnCheck->free();
     }
 
     $defaultLabels = [
@@ -72,13 +80,16 @@ try {
     $insertStmt->close();
 
     $result = $conn->query(
-        'SELECT label FROM transaction_descriptions WHERE is_active = 1 ORDER BY sort_order ASC, label ASC'
+        'SELECT label, vehicle_mandatory FROM transaction_descriptions WHERE is_active = 1 ORDER BY sort_order ASC, label ASC'
     );
 
     $descriptions = [];
     if ($result) {
         while ($row = $result->fetch_assoc()) {
-            $descriptions[] = $row['label'];
+            $descriptions[] = [
+                'label' => $row['label'],
+                'vehicleMandatory' => strtoupper((string)($row['vehicle_mandatory'] ?? 'N')) === 'Y',
+            ];
         }
         $result->free();
     }

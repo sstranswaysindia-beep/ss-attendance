@@ -167,7 +167,16 @@ class SafetyRepository {
     );
 
     if (response.statusCode >= 300) {
-      throw Exception('Failed to start inspection (${response.statusCode})');
+      String? message;
+      try {
+        final decodedError = jsonDecode(response.body);
+        if (decodedError is Map<String, dynamic>) {
+          message = decodedError['error']?.toString();
+        }
+      } catch (_) {
+        // ignore parse errors
+      }
+      throw Exception(message ?? 'Failed to start inspection (${response.statusCode})');
     }
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;

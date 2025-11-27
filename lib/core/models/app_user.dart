@@ -7,6 +7,7 @@ class AppUser {
     required this.id,
     required this.displayName,
     required this.role,
+    this.username,
     this.employeeId,
     this.driverId,
     this.plantId,
@@ -44,6 +45,7 @@ class AppUser {
   final String id;
   final String displayName;
   final UserRole role;
+  final String? username;
   final String? employeeId;
   final String? driverId;
   final String? plantId;
@@ -82,6 +84,7 @@ class AppUser {
       'id': id,
       'displayName': displayName,
       'role': role.name,
+      'username': username,
       'employeeId': employeeId,
       'driverId': driverId,
       'plantId': plantId,
@@ -122,6 +125,7 @@ class AppUser {
       id: json['id'] as String,
       displayName: json['displayName'] as String,
       role: UserRole.values.firstWhere((e) => e.name == json['role']),
+      username: json['username'] as String?,
       employeeId: json['employeeId'] as String?,
       driverId: json['driverId'] as String?,
       plantId: json['plantId'] as String?,

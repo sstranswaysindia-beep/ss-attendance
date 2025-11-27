@@ -35,18 +35,41 @@ class NotificationService {
   final StreamController<InAppNotificationData> _inAppNotificationController =
       StreamController<InAppNotificationData>.broadcast();
   final StreamController<List<InAppNotificationData>>
-  _inAppNotificationListController =
+      _inAppNotificationListController =
       StreamController<List<InAppNotificationData>>.broadcast();
   final List<InAppNotificationData> _recentInAppNotifications = [];
+  final StreamController<bool> _bellVisibilityController =
+      StreamController<bool>.broadcast();
   bool _isInitialized = false;
   String? _fcmToken;
   int _notificationCounter = 0;
+  int _bellHideRequests = 0;
 
   void _emitNotificationState() {
     if (!_inAppNotificationListController.isClosed) {
       _inAppNotificationListController.add(
         List.unmodifiable(_recentInAppNotifications),
       );
+    }
+  }
+
+  Stream<bool> get bellVisibilityChanges => _bellVisibilityController.stream;
+  bool get isBellHidden => _bellHideRequests > 0;
+
+  void requestBellHide() {
+    _bellHideRequests++;
+    _emitBellVisibility();
+  }
+
+  void releaseBellHide() {
+    if (_bellHideRequests == 0) return;
+    _bellHideRequests--;
+    _emitBellVisibility();
+  }
+
+  void _emitBellVisibility() {
+    if (!_bellVisibilityController.isClosed) {
+      _bellVisibilityController.add(isBellHidden);
     }
   }
 

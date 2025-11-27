@@ -12,6 +12,7 @@ class LoginScreen extends StatefulWidget {
     this.appTitle = 'SS Transways India',
     this.appSubtitle = 'Your Reliable Logistic Partner',
     this.screenTitle = 'Login',
+    this.appVariant = 'driver',
     super.key,
   });
 
@@ -19,6 +20,7 @@ class LoginScreen extends StatefulWidget {
   final String appTitle;
   final String appSubtitle;
   final String screenTitle;
+  final String appVariant;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -58,6 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final user = await _authRepository.login(
         username: username,
         password: _passwordController.text,
+        appVariant: widget.appVariant,
       );
 
       if (!mounted) return;

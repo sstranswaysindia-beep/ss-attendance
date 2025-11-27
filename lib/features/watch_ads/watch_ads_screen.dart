@@ -119,8 +119,13 @@ class _WatchAdsScreenState extends State<WatchAdsScreen> {
     final status = _status;
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: theme.colorScheme.primary,
         title: const Text('Watch Ads & Earn'),
+        centerTitle: true,
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -132,6 +137,7 @@ class _WatchAdsScreenState extends State<WatchAdsScreen> {
               : RefreshIndicator(
                   onRefresh: () => _loadStatus(silent: true),
                   child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
                     padding: const EdgeInsets.all(20),
                     children: [
                       _SummaryCard(status: status),
@@ -181,17 +187,31 @@ class _SummaryCard extends StatelessWidget {
     final limits = status.limits;
     final nextAvailable = limits.nextAvailableAt;
     final formatter = DateFormat('dd MMM • HH:mm');
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    return Container(
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF6A5AE0), Color(0xFF1FB8D1)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x216A5AE0),
+            blurRadius: 26,
+            offset: Offset(0, 18),
+          ),
+        ],
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Current balance',
               style: theme.textTheme.labelLarge?.copyWith(
-                color: theme.colorScheme.primary,
+                color: Colors.white.withOpacity(0.85),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -200,6 +220,7 @@ class _SummaryCard extends StatelessWidget {
               '₹${status.balance.toStringAsFixed(2)}',
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w700,
+                color: Colors.white,
               ),
             ),
             const SizedBox(height: 16),
@@ -210,20 +231,24 @@ class _SummaryCard extends StatelessWidget {
                     title: 'Reward per ad',
                     value: '₹${limits.rewardAmount.toStringAsFixed(2)}',
                     icon: Icons.monetization_on_outlined,
+                    onDarkBackground: true,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _SummaryChip(
                     title: 'Remaining today',
-                    value: '${limits.remainingViews}',
+                    value: limits.hasUnlimitedViews
+                        ? '∞'
+                        : '${limits.remainingViews}',
                     icon: Icons.timelapse_outlined,
                     color: limits.remainingViews > 0
-                        ? Colors.green.shade50
-                        : Colors.orange.shade50,
+                        ? Colors.white.withOpacity(0.18)
+                        : const Color(0x33FFB74D),
                     iconColor: limits.remainingViews > 0
-                        ? Colors.green.shade700
-                        : Colors.orange.shade700,
+                        ? Colors.white
+                        : const Color(0xFFFFF3E0),
+                    onDarkBackground: true,
                   ),
                 ),
               ],
@@ -235,7 +260,7 @@ class _SummaryCard extends StatelessWidget {
                   Icon(
                     Icons.watch_later_outlined,
                     size: 18,
-                    color: theme.colorScheme.outline,
+                    color: Colors.white.withOpacity(0.85),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -244,7 +269,7 @@ class _SummaryCard extends StatelessWidget {
                           ? 'Next ad available at ${formatter.format(nextAvailable.toLocal())}'
                           : 'You can watch another ad now.',
                       style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.outline,
+                        color: Colors.white.withOpacity(0.85),
                       ),
                     ),
                   ),
@@ -264,6 +289,7 @@ class _SummaryChip extends StatelessWidget {
     required this.icon,
     this.color,
     this.iconColor,
+    this.onDarkBackground = false,
   });
 
   final String title;
@@ -271,19 +297,35 @@ class _SummaryChip extends StatelessWidget {
   final IconData icon;
   final Color? color;
   final Color? iconColor;
+  final bool onDarkBackground;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final foregroundColor =
+        onDarkBackground ? Colors.white : theme.colorScheme.onSurface;
+    final subtitleColor = onDarkBackground
+        ? Colors.white.withOpacity(0.72)
+        : theme.colorScheme.outline;
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color ?? theme.colorScheme.surfaceVariant.withOpacity(0.6),
+        color: color ??
+            (onDarkBackground
+                ? Colors.white.withOpacity(0.15)
+                : theme.colorScheme.surfaceVariant.withOpacity(0.6)),
         borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: iconColor ?? theme.colorScheme.primary),
+          Icon(
+            icon,
+            size: 20,
+            color: iconColor ??
+                (onDarkBackground
+                    ? Colors.white
+                    : theme.colorScheme.primary),
+          ),
           const SizedBox(width: 10),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,7 +333,7 @@ class _SummaryChip extends StatelessWidget {
               Text(
                 title,
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.outline,
+                  color: subtitleColor,
                 ),
               ),
               const SizedBox(height: 4),
@@ -299,6 +341,7 @@ class _SummaryChip extends StatelessWidget {
                 value,
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.w600,
+                  color: foregroundColor,
                 ),
               ),
             ],
@@ -328,30 +371,87 @@ class _WatchButton extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        ElevatedButton.icon(
-          onPressed: isDisabled ? null : onPressed,
-          icon: isBusy
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.play_circle_outline),
-          label: Text(
-            isBusy
-                ? 'Preparing...'
-                : canWatch
-                    ? 'Watch Ad & Earn'
-                    : 'Limit reached',
+        DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(18),
+            gradient: isDisabled
+                ? null
+                : const LinearGradient(
+                    colors: [
+                      Color(0xFFFF8A80),
+                      Color(0xFFFF6E7F),
+                      Color(0xFFFF4081),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+            color: isDisabled ? Colors.grey.shade300 : null,
+            boxShadow: isDisabled
+                ? null
+                : const [
+                    BoxShadow(
+                      color: Color(0x33FF6E7F),
+                      blurRadius: 18,
+                      offset: Offset(0, 10),
+                    ),
+                  ],
           ),
-          style: ElevatedButton.styleFrom(
-            minimumSize: const Size.fromHeight(48),
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(18),
+              onTap: isDisabled ? null : onPressed,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isBusy)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    else
+                      Icon(
+                        Icons.play_circle_fill_rounded,
+                        color:
+                            isDisabled ? Colors.grey.shade600 : Colors.white,
+                        size: 22,
+                      ),
+                    const SizedBox(width: 10),
+                    Text(
+                      isBusy
+                          ? 'Preparing...'
+                          : canWatch
+                              ? 'Watch Ad & Earn'
+                              : 'Limit reached',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                            color: isDisabled
+                                ? Colors.grey.shade600
+                                : Colors.white,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: 8),
         Text(
-          'You can watch up to ${limits.dailyViewLimit} ads per day. '
-          'Cooldown: ${limits.cooldownMinutes} minutes between ads.',
+          limits.hasUnlimitedViews
+              ? 'You can watch unlimited ads today. '
+                'Cooldown: ${limits.cooldownMinutes} minute(s) between ads.'
+              : 'You can watch up to ${limits.dailyViewLimit} ads per day. '
+                'Cooldown: ${limits.cooldownMinutes} minute(s) between ads.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.outline,
               ),
@@ -369,40 +469,94 @@ class _HistoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final accentColor = entry.type == 'ad_reward'
+        ? const Color(0xFFFF6E7F)
+        : theme.colorScheme.primary;
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 6),
-      child: ListTile(
-        leading: CircleAvatar(
-          backgroundColor: theme.colorScheme.primary.withOpacity(0.12),
-          child: Icon(
-            entry.type == 'ad_reward'
-                ? Icons.play_circle_fill
-                : Icons.receipt_long,
-            color: theme.colorScheme.primary,
-          ),
-        ),
-        title: Text(
-          '₹${entry.amount.toStringAsFixed(2)} • ${entry.type.replaceAll('_', ' ')}',
-          style: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(entry.formatTimestamp()),
-            if (entry.note != null && entry.note!.isNotEmpty)
-              Text(entry.note!),
+      elevation: 0,
+      shadowColor: Colors.transparent,
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          color: Colors.white,
+          border: Border.all(color: accentColor.withOpacity(0.18)),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withOpacity(0.12),
+              blurRadius: 20,
+              offset: const Offset(0, 12),
+            ),
           ],
         ),
-        trailing: entry.referenceId != null
-            ? Text(
-                '#${entry.referenceId}',
+        child: ListTile(
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          leading: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [
+                  accentColor.withOpacity(0.85),
+                  accentColor,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Icon(
+              entry.type == 'ad_reward'
+                  ? Icons.play_circle_fill
+                  : Icons.receipt_long,
+              color: Colors.white,
+            ),
+          ),
+          title: Text(
+            '₹${entry.amount.toStringAsFixed(2)} • ${entry.type.replaceAll('_', ' ')}',
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: accentColor,
+            ),
+          ),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                entry.formatTimestamp(),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
-              )
-            : null,
+              ),
+              if (entry.note != null && entry.note!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  entry.note!,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+          trailing: entry.referenceId != null
+              ? Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: accentColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '#${entry.referenceId}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: accentColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                )
+              : null,
+        ),
       ),
     );
   }
@@ -413,14 +567,39 @@ class _EmptyHistory extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.4),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(18),
+        color: const Color(0xFFFFF9F9),
+        border: Border.all(color: const Color(0xFFFFCDD2).withOpacity(0.6)),
       ),
-      child: const Text(
-        'No rewards recorded yet. Watch your first ad to start earning!',
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color(0xFFFFEBEE),
+            ),
+            child: const Icon(
+              Icons.emoji_objects_outlined,
+              color: Color(0xFFFF6E7F),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Text(
+              'No rewards recorded yet. Watch your first ad to start earning!',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: const Color(0xFFAD1457),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

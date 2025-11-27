@@ -12,9 +12,11 @@ import '../statistics/admin_attendance_overview_screen.dart';
 import '../finance/advance_salary_screen.dart';
 import '../master/admin_driver_master_screen.dart';
 import '../master/admin_vehicle_master_screen.dart';
+import 'admin_geofencing_screen.dart';
+import 'admin_proxy_screen.dart';
 
 const Color _adminPrimaryColor = Color(0xFF00296B);
-const Color _adminCardTint = Color(0xFFE3F2FD);
+const Color _adminCardTint = Color(0xFFBBD7FF);
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({
@@ -31,11 +33,48 @@ class AdminDashboardScreen extends StatefulWidget {
 }
 
 class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  bool _matchesHrAttendance(AppUser user) {
+    final patterns = <String>[
+      'hrattendence',
+      'hrattendance',
+      'hr_attendence',
+      'hr_attendance',
+      'hr attendance',
+      'hr attendence',
+      'hr ss transways',
+      'hr ss transways india',
+    ];
+
+    bool check(String? raw) {
+      if (raw == null) return false;
+      final normalized = raw.trim().toLowerCase();
+      if (patterns.any(normalized.contains)) return true;
+
+      // Aggressive check: remove all non-word characters (spaces, underscores, punctuation)
+      final stripped = normalized.replaceAll(RegExp(r'[\s\W_]+'), '');
+      return stripped.contains('hrattendence') || stripped.contains('hrattendance');
+    }
+
+    return check(user.id) ||
+        check(user.displayName) ||
+        check(user.employeeId) ||
+        check(user.username);
+  }
+
+  bool _isHrAttendanceUser(AppUser user) => _matchesHrAttendance(user);
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final date = DateFormat('dd-MM-yyyy').format(now);
     final theme = Theme.of(context);
+    final isHrAttendanceUser = _isHrAttendanceUser(widget.user);
+    
+    print('DEBUG: AdminDashboard User Check');
+    print('DEBUG: ID: ${widget.user.id}');
+    print('DEBUG: Name: ${widget.user.displayName}');
+    print('DEBUG: Username: ${widget.user.username}');
+    print('DEBUG: Is HR User: $isHrAttendanceUser');
 
     return Scaffold(
       appBar: AppBar(
@@ -77,43 +116,44 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
               Wrap(
                 spacing: 12,
                 runSpacing: 12,
-              children: [
-                _AdminCard(
-                  title: 'Attendance Overview',
-                  icon: Icons.insights,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          AdminAttendanceOverviewScreen(user: widget.user),
-                    ),
-                  ),
-                ),
-                _AdminCard(
-                  title: 'Today Attendance',
-                  icon: Icons.fact_check,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          AdminTodayAttendanceScreen(user: widget.user),
-                    ),
-                  ),
-                ),
-                _AdminCard(
-                  title: 'Supervisor Approvals',
-                  icon: Icons.verified_user,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => ApprovalsScreen(
-                          user: widget.user,
-                          title: 'Supervisor Approvals',
-                          endpointOverride: Uri.parse(
-                            'https://sstranswaysindia.com/api/mobile/attendance_admin_supervisor_approvals.php',
-                          ),
-                          userIdParamKey: 'adminUserId',
-                        ),
+                children: [
+                  _AdminCard(
+                    title: 'Attendance Overview',
+                    icon: Icons.insights,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AdminAttendanceOverviewScreen(user: widget.user),
                       ),
                     ),
                   ),
+                  _AdminCard(
+                    title: 'Today Attendance',
+                    icon: Icons.fact_check,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AdminTodayAttendanceScreen(user: widget.user),
+                      ),
+                    ),
+                  ),
+                  if (!isHrAttendanceUser)
+                    _AdminCard(
+                      title: 'Supervisor Approvals',
+                      icon: Icons.verified_user,
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => ApprovalsScreen(
+                            user: widget.user,
+                            title: 'Supervisor Approvals',
+                            endpointOverride: Uri.parse(
+                              'https://sstranswaysindia.com/api/mobile/attendance_admin_supervisor_approvals.php',
+                            ),
+                            userIdParamKey: 'adminUserId',
+                          ),
+                        ),
+                      ),
+                    ),
                   _AdminCard(
                     title: 'Driver Master',
                     icon: Icons.person_search,
@@ -131,6 +171,26 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                       MaterialPageRoute(
                         builder: (_) =>
                             AdminVehicleMasterScreen(user: widget.user),
+                      ),
+                    ),
+                  ),
+                  _AdminCard(
+                    title: 'Geo Fencing',
+                    icon: Icons.my_location,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AdminGeofencingScreen(user: widget.user),
+                      ),
+                    ),
+                  ),
+                  _AdminCard(
+                    title: 'Proxy Attendance',
+                    icon: Icons.person_pin_circle,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            AdminProxyScreen(user: widget.user),
                       ),
                     ),
                   ),

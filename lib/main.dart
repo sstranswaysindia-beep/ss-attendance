@@ -8,6 +8,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import 'core/models/app_user.dart';
+import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
 import 'core/services/notification_service.dart';
 import 'firebase_options.dart';
@@ -57,6 +58,7 @@ class SSTranswaysApp extends StatefulWidget {
 class _SSTranswaysAppState extends State<SSTranswaysApp> {
   AppUser? _currentUser;
   bool _isLoading = true;
+  final AuthRepository _authRepository = AuthRepository();
 
   @override
   void initState() {
@@ -67,6 +69,12 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
   Future<void> _loadSavedUser() async {
     try {
       final savedUser = await AuthStorageService.getUser();
+      if (savedUser != null) {
+        await _authRepository.syncDeviceInfo(
+          user: savedUser,
+          appVariant: 'driver',
+        );
+      }
       if (mounted) {
         setState(() {
           _currentUser = savedUser;
@@ -84,6 +92,10 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
   }
 
   void _handleLogin(AppUser user) async {
+    await _authRepository.syncDeviceInfo(
+      user: user,
+      appVariant: 'driver',
+    );
     await AuthStorageService.saveUser(user);
     if (mounted) {
       setState(() => _currentUser = user);

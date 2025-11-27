@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-require __DIR__ . '/../../bootstrap.php';
+require dirname(__DIR__) . '/bootstrap.php';
 
 try {
     apiEnsurePost();
@@ -22,7 +22,8 @@ try {
     $limits = rewards_fetch_limits($conn);
     $usage = rewards_usage_today($conn, $userId, $role, $limits['cooldown_minutes']);
 
-    if ($usage['rewarded_today'] >= $limits['daily_view_limit']) {
+    $hasDailyLimit = (int)$limits['daily_view_limit'] > 0;
+    if ($hasDailyLimit && $usage['rewarded_today'] >= $limits['daily_view_limit']) {
         apiRespond(429, [
             'ok' => false,
             'error' => 'Daily limit reached',
@@ -33,7 +34,8 @@ try {
         ]);
     }
 
-    if (!empty($usage['next_available_at'])) {
+    $hasCooldown = (int)$limits['cooldown_minutes'] > 0;
+    if ($hasCooldown && !empty($usage['next_available_at'])) {
         $next = new DateTime($usage['next_available_at']);
         $now = new DateTime('now');
         if ($next > $now) {

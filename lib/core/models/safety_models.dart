@@ -88,6 +88,9 @@ class SafetyVehicle {
     required this.plantId,
     required this.tyreCount,
     this.plantName,
+    this.latestInspectionStatus,
+    this.latestInspectionUpdatedAt,
+    this.latestInspectionSubmittedAt,
   });
 
   factory SafetyVehicle.fromJson(Map<String, dynamic> json) {
@@ -97,6 +100,9 @@ class SafetyVehicle {
       plantId: int.tryParse(json['plant_id']?.toString() ?? '') ?? 0,
       tyreCount: int.tryParse(json['tyre_count']?.toString() ?? '') ?? 0,
       plantName: json['plant_name']?.toString(),
+      latestInspectionStatus: json['latest_status']?.toString(),
+      latestInspectionUpdatedAt: json['latest_updated_at']?.toString(),
+      latestInspectionSubmittedAt: json['latest_submitted_at']?.toString(),
     );
   }
 
@@ -105,6 +111,32 @@ class SafetyVehicle {
   final int plantId;
   final int tyreCount;
   final String? plantName;
+  final String? latestInspectionStatus;
+  final String? latestInspectionUpdatedAt;
+  final String? latestInspectionSubmittedAt;
+
+  DateTime? get _latestSubmittedDate => latestInspectionSubmittedAt == null
+      ? null
+      : DateTime.tryParse(latestInspectionSubmittedAt!);
+
+  bool get isInspectionLocked {
+    final submittedAt = _latestSubmittedDate;
+    if (submittedAt == null) return false;
+    final unlockAt = submittedAt.add(const Duration(days: 15));
+    return unlockAt.isAfter(DateTime.now());
+  }
+
+  int? get inspectionUnlockDays {
+    final submittedAt = _latestSubmittedDate;
+    if (submittedAt == null) return null;
+    final unlockAt = submittedAt.add(const Duration(days: 15));
+    final remaining = unlockAt.difference(DateTime.now());
+    if (remaining.isNegative) {
+      return 0;
+    }
+    final days = (remaining.inHours + 23) ~/ 24;
+    return days < 0 ? 0 : days;
+  }
 }
 
 class TyreInspectionStart {

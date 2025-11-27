@@ -21,6 +21,8 @@ class AdminMasterRepository {
       'https://sstranswaysindia.com/api/mobile/admin_driver_master.php';
   static const String _vehicleEndpoint =
       'https://sstranswaysindia.com/api/mobile/admin_vehicle_master.php';
+  static const String _driverStatusEndpoint =
+      'https://sstranswaysindia.com/api/mobile/admin_driver_status_update.php';
 
   final http.Client _client;
 
@@ -63,6 +65,38 @@ class AdminMasterRepository {
     return items
         .map((item) => AdminDriver.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
+  }
+
+  Future<String> updateDriverStatus({
+    required int driverId,
+    required bool active,
+  }) async {
+    final response = await _client.post(
+      Uri.parse(_driverStatusEndpoint),
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'driverId': driverId,
+        'status': active ? 'Active' : 'In-Active',
+      }),
+    );
+
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AdminMasterFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode != 200 || payload['status'] != 'ok') {
+      throw AdminMasterFailure(
+        payload['error']?.toString() ??
+            'Unable to update driver status.',
+      );
+    }
+
+    return payload['driverStatus']?.toString() ?? (active ? 'Active' : 'In-Active');
   }
 
   Future<List<AdminVehicle>> fetchVehicles({

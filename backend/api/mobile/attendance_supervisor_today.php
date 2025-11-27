@@ -103,7 +103,10 @@ try {
                in_data.first_check_in,
                in_data.last_check_in,
                in_data.last_check_out AS in_scope_last_checkout,
-               out_data.last_check_out
+               out_data.last_check_out,
+               am.marked_absent,
+               am.note AS absence_note,
+               am.supervisor_user_id AS absence_marked_by
           FROM drivers d
      LEFT JOIN plants p ON p.id = d.plant_id
      LEFT JOIN (
@@ -124,8 +127,12 @@ try {
              WHERE out_time IS NOT NULL
                AND DATE(out_time) = ?
                AND approval_status IN ('Pending', 'Approved')
-             GROUP BY driver_id
+            GROUP BY driver_id
         ) AS out_data ON out_data.driver_id = d.id
+     LEFT JOIN supervisor_absence_marks am
+            ON am.driver_id = d.id
+           AND am.plant_id = d.plant_id
+           AND am.absence_date = ?
          WHERE d.status = 'Active'
            AND d.plant_id IN ($placeholders)
       ORDER BY p.plant_name ASC, d.name ASC
@@ -136,8 +143,8 @@ try {
         throw new RuntimeException('Failed to prepare attendance query: ' . $conn->error);
     }
 
-    $types = 'ss' . str_repeat('i', count($plantIdList));
-    $params = [$todayDate, $todayDate, ...$plantIdList];
+    $types = 'sss' . str_repeat('i', count($plantIdList));
+    $params = [$todayDate, $todayDate, $todayDate, ...$plantIdList];
     apiBindParams($stmt, $types, $params);
 
     $stmt->execute();
@@ -176,6 +183,11 @@ try {
             'hasCheckOut' => $hasCheckOut,
             'checkInTime' => $firstCheckIn,
             'checkOutTime' => $lastCheckOut,
+            'isAbsent' => !empty($row['marked_absent']) && (int) $row['marked_absent'] === 1,
+            'absenceNote' => $row['absence_note'] ?? null,
+            'absenceMarkedBy' => isset($row['absence_marked_by'])
+                ? (int) $row['absence_marked_by']
+                : null,
         ];
     }
     $stmt->close();

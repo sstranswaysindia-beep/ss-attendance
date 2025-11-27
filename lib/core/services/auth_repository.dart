@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../models/app_user.dart';
 import '../models/driver_vehicle.dart';
@@ -16,30 +19,53 @@ class AuthFailure implements Exception {
 }
 
 class AuthRepository {
-  AuthRepository({http.Client? client, Uri? endpoint})
-    : _client = client ?? http.Client(),
-      _endpoint = endpoint ?? Uri.parse(_defaultEndpoint);
+  AuthRepository({
+    http.Client? client,
+    Uri? endpoint,
+    Uri? deviceEndpoint,
+  })  : _client = client ?? http.Client(),
+        _endpoint = endpoint ?? Uri.parse(_defaultEndpoint),
+        _deviceEndpoint =
+            deviceEndpoint ?? Uri.parse(_defaultDeviceEndpoint);
 
   static const String _defaultEndpoint =
       'https://sstranswaysindia.com/api/mobile/mobile_login.php';
+  static const String _defaultDeviceEndpoint =
+      'https://sstranswaysindia.com/api/mobile/user_device_sync.php';
 
   final http.Client _client;
   final Uri _endpoint;
+  final Uri _deviceEndpoint;
+
+  static final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
 
   Future<AppUser> login({
     required String username,
     required String password,
+    String appVariant = 'driver',
   }) async {
     try {
+      Map<String, String> devicePayload = {};
+      try {
+        devicePayload = await _collectDeviceInfo(appVariant: appVariant);
+      } catch (_) {
+        devicePayload = {};
+      }
+
+      final requestBody = <String, dynamic>{
+        'username': username,
+        'password': password,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      requestBody.addAll(devicePayload);
+      if (appVariant.isNotEmpty) {
+        requestBody['appVariant'] = appVariant;
+      }
+
       final response = await _client.post(
         _endpoint,
         headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'username': username,
-          'password': password,
-          'timestamp':
-              DateTime.now().millisecondsSinceEpoch, // Force fresh data
-        }),
+        body: jsonEncode(requestBody),
       );
 
       final statusCode = response.statusCode;
@@ -70,6 +96,16 @@ class AuthRepository {
 
       // Send FCM token to server after successful login
       await _sendFCMTokenToServer(userJson['id']?.toString() ?? username);
+
+      final userIdString = userJson['id']?.toString() ?? username;
+      final userNameString = userJson['username']?.toString() ?? username;
+      if (devicePayload.isNotEmpty) {
+        await _postDeviceInfo(
+          payload: devicePayload,
+          userId: userIdString,
+          username: userNameString,
+        );
+      }
 
       final role = _parseRole(userJson['role']?.toString());
       final bool canViewDocuments = _parseFlag(
@@ -314,6 +350,127 @@ class AuthRepository {
         normalized == 'yes' ||
         normalized == '1' ||
         normalized == 'true';
+  }
+
+  Future<Map<String, String>> _collectDeviceInfo(
+      {String appVariant = 'driver'}) async {
+    final packageInfo = await PackageInfo.fromPlatform();
+
+    String platform = 'unknown';
+    String deviceId = '';
+    String deviceModel = '';
+    String osVersion = '';
+    String deviceBrand = '';
+    String architecture = '';
+
+    try {
+      if (Platform.isAndroid) {
+        platform = 'android';
+        final info = await _deviceInfoPlugin.androidInfo;
+        deviceId = info.id;
+        deviceBrand = info.brand ?? '';
+        final manufacturer = info.manufacturer ?? '';
+        final model = info.model ?? '';
+        deviceModel =
+            (manufacturer.isNotEmpty ? '$manufacturer ' : '') + model;
+        osVersion = 'Android ${info.version.release ?? ''}'.trim();
+        architecture = info.supportedAbis?.join(', ') ?? '';
+        if (deviceId.isEmpty) {
+          deviceId = info.serialNumber;
+        }
+      } else if (Platform.isIOS) {
+        platform = 'ios';
+        final info = await _deviceInfoPlugin.iosInfo;
+        deviceId = info.identifierForVendor ?? '';
+        deviceModel = info.utsname.machine ?? info.model ?? '';
+        osVersion =
+            '${info.systemName ?? 'iOS'} ${info.systemVersion ?? ''}'.trim();
+      } else if (Platform.isMacOS) {
+        platform = 'macos';
+        final info = await _deviceInfoPlugin.macOsInfo;
+        deviceModel = info.model;
+        osVersion = 'macOS ${info.osRelease}'.trim();
+        architecture = info.arch;
+        deviceId = info.systemGUID ?? '';
+      } else if (Platform.isWindows) {
+        platform = 'windows';
+        final info = await _deviceInfoPlugin.windowsInfo;
+        deviceModel = info.computerName ?? '';
+        osVersion = info.displayVersion ?? Platform.operatingSystemVersion;
+        deviceId = info.deviceId ?? '';
+      } else if (Platform.isLinux) {
+        platform = 'linux';
+        final info = await _deviceInfoPlugin.linuxInfo;
+        deviceModel = info.name ?? Platform.operatingSystemVersion;
+        osVersion = info.version ?? Platform.operatingSystem;
+        deviceId = info.machineId ?? '';
+      }
+    } catch (_) {
+      // Best-effort only; fall back to defaults.
+    }
+
+    if (deviceId.isEmpty) {
+      deviceId =
+          '${platform}_${packageInfo.packageName}_${DateTime.now().millisecondsSinceEpoch}';
+    }
+
+    final payload = <String, String>{
+      'deviceId': deviceId,
+      'devicePlatform': platform,
+      'deviceModel': deviceModel,
+      'osVersion': osVersion,
+      'appVersion': packageInfo.version,
+      'appBuild': packageInfo.buildNumber,
+      'appIdentifier': packageInfo.packageName,
+    };
+
+    if (deviceBrand.isNotEmpty) {
+      payload['deviceBrand'] = deviceBrand;
+    }
+    if (architecture.isNotEmpty) {
+      payload['architecture'] = architecture;
+    }
+    if (appVariant.isNotEmpty) {
+      payload['appVariant'] = appVariant;
+    }
+
+    return payload;
+  }
+
+  Future<void> _postDeviceInfo({
+    required Map<String, String> payload,
+    required String userId,
+    String? username,
+  }) async {
+    final body = Map<String, String>.from(payload)..['userId'] = userId;
+    if (username != null && username.isNotEmpty) {
+      body['username'] = username;
+    }
+    try {
+      await _client.post(
+        _deviceEndpoint,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
+    } catch (_) {
+      // Ignore errors; device reporting is best-effort.
+    }
+  }
+
+  Future<void> syncDeviceInfo({
+    required AppUser user,
+    String appVariant = 'driver',
+  }) async {
+    try {
+      final payload = await _collectDeviceInfo(appVariant: appVariant);
+      await _postDeviceInfo(
+        payload: payload,
+        userId: user.id,
+        username: user.displayName,
+      );
+    } catch (_) {
+      // Ignore failures.
+    }
   }
 
   /// Send FCM token to server for push notifications

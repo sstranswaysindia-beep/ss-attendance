@@ -272,6 +272,9 @@ class TripRepository {
       if (gpsLat != null) 'gps_lat': gpsLat,
       if (gpsLng != null) 'gps_lng': gpsLng,
     };
+    debugPrint(
+      'TripRepository.createTrip payload: ${jsonEncode(payload)}',
+    );
 
     try {
       final response = await _client.post(
@@ -391,6 +394,7 @@ class TripRepository {
     List<String>? addCustomerNames,
     List<String>? setCustomerNames,
     int? helperId,
+    List<int>? helperIds,
     String? note,
     List<int>? setDriverIds,
   }) async {
@@ -411,7 +415,9 @@ class TripRepository {
       payload['set_customer_names'] = setCustomerNames;
     }
 
-    if (helperId != null) {
+    if (helperIds != null && helperIds.isNotEmpty) {
+      payload['helper_ids'] = helperIds;
+    } else if (helperId != null) {
       payload['helper_id'] = helperId;
     }
 

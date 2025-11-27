@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import '../models/admin_attendance_overview.dart';
 import '../models/attendance_record.dart';
 import '../models/daily_attendance_summary.dart';
+import '../models/driver_absence_status.dart';
 import '../models/monthly_stat.dart';
 import '../models/supervisor_today_attendance.dart';
 
@@ -56,6 +57,8 @@ class AttendanceRepository {
     Uri? adminOverviewEndpoint,
     Uri? supervisorTodayEndpoint,
     Uri? adminTodayEndpoint,
+    Uri? supervisorAbsentEndpoint,
+    Uri? driverAbsentStatusEndpoint,
   }) : _client = client ?? http.Client(),
        _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
        _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
@@ -68,7 +71,11 @@ class AttendanceRepository {
        _supervisorTodayEndpoint = supervisorTodayEndpoint ??
            Uri.parse(_defaultSupervisorTodayEndpoint),
        _adminTodayEndpoint =
-           adminTodayEndpoint ?? Uri.parse(_defaultAdminTodayEndpoint);
+           adminTodayEndpoint ?? Uri.parse(_defaultAdminTodayEndpoint),
+       _supervisorAbsentEndpoint = supervisorAbsentEndpoint ??
+           Uri.parse(_defaultSupervisorAbsentEndpoint),
+       _driverAbsentStatusEndpoint = driverAbsentStatusEndpoint ??
+           Uri.parse(_defaultDriverAbsentStatusEndpoint);
 
   static const String _defaultSubmitEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_submit.php';
@@ -86,6 +93,10 @@ class AttendanceRepository {
       'https://sstranswaysindia.com/api/mobile/attendance_supervisor_today.php';
   static const String _defaultAdminTodayEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_admin_today.php';
+  static const String _defaultSupervisorAbsentEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_supervisor_absent_toggle.php';
+  static const String _defaultDriverAbsentStatusEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_driver_absence_status.php';
 
 
   final http.Client _client;
@@ -97,6 +108,8 @@ class AttendanceRepository {
   final Uri _adminOverviewEndpoint;
   final Uri _supervisorTodayEndpoint;
   final Uri _adminTodayEndpoint;
+  final Uri _supervisorAbsentEndpoint;
+  final Uri _driverAbsentStatusEndpoint;
 
   Future<AttendanceSubmissionResult> submit({
     required String driverId,
@@ -398,6 +411,80 @@ class AttendanceRepository {
               item as Map<String, dynamic>,
             ))
         .toList(growable: false);
+  }
+
+  Future<bool> updateSupervisorAbsent({
+    required String supervisorUserId,
+    required int driverId,
+    required int plantId,
+    required bool isAbsent,
+    String? note,
+  }) async {
+    final response = await _client.post(
+      _supervisorAbsentEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'supervisorUserId': supervisorUserId,
+        'driverId': driverId,
+        'plantId': plantId,
+        'absent': isAbsent,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      }),
+    );
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
+    }
+
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ??
+            'Unable to update absence status. Please try again.',
+      );
+    }
+
+    return payload['isAbsent'] == true ||
+        payload['isAbsent']?.toString() == '1';
+  }
+
+  Future<DriverAbsenceStatus> fetchDriverAbsenceStatus({
+    required String driverId,
+    String? plantId,
+  }) async {
+    final body = {
+      'driverId': driverId,
+      if (plantId != null && plantId.trim().isNotEmpty) 'plantId': plantId.trim(),
+    };
+
+    final response = await _client.post(
+      _driverAbsentStatusEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: $statusCode).',
+      );
+    }
+
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ??
+            'Unable to fetch absence status. Please try again.',
+      );
+    }
+
+    return DriverAbsenceStatus.fromJson(payload);
   }
 
   Future<AdminAttendanceOverview> fetchAdminOverview({

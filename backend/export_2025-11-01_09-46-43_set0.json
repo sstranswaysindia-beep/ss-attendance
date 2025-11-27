@@ -1,0 +1,16 @@
+[
+    {
+        "id": "65",
+        "vehicle_id": "17",
+        "plant_id": "22",
+        "driver_id": "170",
+        "inspector_user_id": "208",
+        "assignment_id": null,
+        "started_at": "2025-11-01 09:37:44",
+        "submitted_at": "2025-11-01 09:44:53",
+        "status": "submitted",
+        "overall_note": "Good",
+        "created_at": "2025-11-01 09:37:44",
+        "updated_at": "2025-11-01 09:44:53"
+    }
+]

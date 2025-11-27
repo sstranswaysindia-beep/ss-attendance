@@ -67,7 +67,10 @@ try {
             p.plant_name,
             GROUP_CONCAT(DISTINCT d.name ORDER BY d.name SEPARATOR ', ') AS drivers,
             GROUP_CONCAT(DISTINCT c.customer_name SEPARATOR ', ') AS customers,
-            h.name AS helper
+            COALESCE(
+                NULLIF(GROUP_CONCAT(DISTINCT mh.name ORDER BY mh.name SEPARATOR ', '), ''),
+                GROUP_CONCAT(DISTINCT h.name ORDER BY h.name SEPARATOR ', ')
+            ) AS helpers
         FROM trips t
         JOIN vehicles v ON v.id = t.vehicle_id
         JOIN plants p ON p.id = v.plant_id
@@ -76,6 +79,8 @@ try {
         LEFT JOIN trip_customers c ON c.trip_id = t.id
         LEFT JOIN trip_helper th ON th.trip_id = t.id
         LEFT JOIN drivers h ON h.id = th.helper_id
+        LEFT JOIN trip_helpers thm ON thm.trip_id = t.id
+        LEFT JOIN drivers mh ON mh.id = thm.helper_id
         $whereClause
         GROUP BY t.id
         ORDER BY t.start_date DESC, t.id DESC
@@ -118,7 +123,8 @@ try {
             'plantName' => $row['plant_name'],
             'vehicleNumber' => $row['vehicle_no'],
             'drivers' => $row['drivers'] ?? '',
-            'helper' => $row['helper'],
+            'helper' => $row['helpers'] ?? '',
+            'helpers' => $row['helpers'] ?? '',
             'customers' => $row['customers'] ?? '',
             'startKm' => $startKm !== null ? (float)$startKm : null,
             'endKm' => $endKm !== null ? (float)$endKm : null,

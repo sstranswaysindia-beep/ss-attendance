@@ -28,6 +28,70 @@ function mobileLoginLog(string $message): void {
     @error_log($line, 3, $loginLogFile);
 }
 
+function mobileLoginSyncDeviceInfo(mysqli $conn, int $userId, array $payload): void {
+    $deviceId = trim((string)($payload['deviceId'] ?? $payload['device_id'] ?? ''));
+    $appIdentifier = trim((string)($payload['appIdentifier'] ?? $payload['packageName'] ?? ''));
+    $platform = strtolower(trim((string)($payload['devicePlatform'] ?? $payload['platform'] ?? '')));
+    if ($deviceId === '' || $appIdentifier === '') {
+        return;
+    }
+
+    $deviceModel = trim((string)($payload['deviceModel'] ?? ''));
+    $osVersion = trim((string)($payload['osVersion'] ?? ''));
+    $appVersion = trim((string)($payload['appVersion'] ?? ''));
+    $appBuild = trim((string)($payload['appBuild'] ?? ''));
+
+    $meta = [];
+    if (!empty($payload['deviceBrand'])) {
+        $meta['brand'] = $payload['deviceBrand'];
+    }
+    if (!empty($payload['architecture'])) {
+        $meta['architecture'] = $payload['architecture'];
+    }
+    if (!empty($payload['appVariant'])) {
+        $meta['appVariant'] = $payload['appVariant'];
+    }
+    $metaJson = !empty($meta)
+        ? json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        : null;
+
+    $validPlatforms = ['android', 'ios', 'web', 'macos', 'windows', 'linux'];
+    if (!in_array($platform, $validPlatforms, true)) {
+        $platform = 'unknown';
+    }
+
+    $stmt = $conn->prepare(
+        'INSERT INTO user_devices
+            (user_id, device_id, app_identifier, platform, device_model, os_version, app_version, app_build, meta_json, first_seen_at, last_seen_at)
+         VALUES (?, ?, ?, ?, NULLIF(?, \'\'), NULLIF(?, \'\'), NULLIF(?, \'\'), NULLIF(?, \'\'), ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE
+            platform = VALUES(platform),
+            device_model = VALUES(device_model),
+            os_version = VALUES(os_version),
+            app_version = VALUES(app_version),
+            app_build = VALUES(app_build),
+            meta_json = VALUES(meta_json),
+            last_seen_at = NOW()'
+    );
+    if (!$stmt) {
+        throw new RuntimeException('Failed to prepare device sync statement: ' . $conn->error);
+    }
+    $stmt->bind_param(
+        'issssssss',
+        $userId,
+        $deviceId,
+        $appIdentifier,
+        $platform,
+        $deviceModel,
+        $osVersion,
+        $appVersion,
+        $appBuild,
+        $metaJson
+    );
+    $stmt->execute();
+    $stmt->close();
+}
+
 $raw = file_get_contents('php://input');
 $data = json_decode($raw ?: '', true);
 if (!is_array($data)) {
@@ -401,6 +465,12 @@ $successContext = [
     'proxy_enabled' => $userRow['proxy_enabled'] ?? null,
 ];
 mobileLoginLog('SUCCESS ' . json_encode($successContext, JSON_UNESCAPED_SLASHES));
+
+try {
+    mobileLoginSyncDeviceInfo($conn, (int)$userRow['id'], $data);
+} catch (Throwable $deviceSyncError) {
+    error_log('DEVICE_SYNC_ERROR login user=' . $userRow['username'] . ' error=' . $deviceSyncError->getMessage());
+}
 
 apiRespond(200, [
     'status' => 'ok',

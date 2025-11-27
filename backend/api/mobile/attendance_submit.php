@@ -35,6 +35,8 @@ if ($eventTime === false) {
     apiRespond(400, ['status' => 'error', 'error' => 'Invalid timestamp']);
 }
 $eventTimeSql = date('Y-m-d H:i:s', $eventTime);
+$tzNow = new DateTimeZone('Asia/Kolkata');
+$todayDate = (new DateTimeImmutable('now', $tzNow))->format('Y-m-d');
 
 // Check if the ID exists in drivers table, if not check users table (for supervisors without driver_id)
 $driverStmt = $conn->prepare('SELECT id FROM drivers WHERE id = ? LIMIT 1');
@@ -69,6 +71,27 @@ if (!$assignmentId) {
         }
     }
     // For supervisors without driver_id, we don't need assignment lookup
+}
+
+if ($driverExists) {
+    $absenceStmt = $conn->prepare(
+        'SELECT 1
+           FROM supervisor_absence_marks
+          WHERE driver_id = ? AND plant_id = ? AND absence_date = ? AND marked_absent = 1
+          LIMIT 1'
+    );
+    if ($absenceStmt) {
+        $absenceStmt->bind_param('iis', $driverId, $plantId, $todayDate);
+        $absenceStmt->execute();
+        $isAbsentToday = $absenceStmt->get_result()->fetch_assoc() !== null;
+        $absenceStmt->close();
+        if ($isAbsentToday) {
+            apiRespond(423, [
+                'status' => 'error',
+                'error' => 'Attendance locked for today. Please contact your supervisor.',
+            ]);
+        }
+    }
 }
 
 $geofencingEnabled = false;

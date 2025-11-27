@@ -94,13 +94,17 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     });
 
     try {
-      final results = await Future.wait([
-        _financeRepository.fetchSalaryCredits(driverId),
-        _financeRepository.fetchAdvanceRequests(
-          driverId,
-          status: _advanceStatusFilter == 'All' ? null : _advanceStatusFilter,
-        ),
-      ]);
+      final isSupervisor = widget.user.role == UserRole.supervisor;
+      final salaryFuture = _financeRepository.fetchSalaryCredits(driverId);
+      final advanceFuture = isSupervisor
+          ? _financeRepository.fetchAdvanceRequests(
+              driverId,
+              status:
+                  _advanceStatusFilter == 'All' ? null : _advanceStatusFilter,
+            )
+          : Future.value(const <AdvanceRequest>[]);
+
+      final results = await Future.wait([salaryFuture, advanceFuture]);
 
       if (!mounted) return;
 
@@ -126,6 +130,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
 
   Future<void> _onAdvanceStatusChanged(String? status) async {
     if (status == null) return;
+    if (widget.user.role != UserRole.supervisor) return;
     setState(() => _advanceStatusFilter = status);
     await _loadFinanceData();
   }
@@ -145,6 +150,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final baseSalary = widget.user.salary;
+    final isSupervisor = widget.user.role == UserRole.supervisor;
 
     return Scaffold(
       appBar: AppBar(
@@ -255,130 +261,136 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                               );
                             },
                           ),
-                        const SizedBox(height: 24),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Advance Requests',
-                                style: theme.textTheme.titleMedium,
-                              ),
-                            ),
-                            SizedBox(
-                              width: 170,
-                              child: DropdownButtonFormField<String>(
-                                value: _advanceStatusFilter,
-                                items: const [
-                                  DropdownMenuItem(value: 'All', child: Text('All')),
-                                  DropdownMenuItem(value: 'Pending', child: Text('Pending')),
-                                  DropdownMenuItem(value: 'Approved', child: Text('Approved')),
-                                  DropdownMenuItem(value: 'Rejected', child: Text('Rejected')),
-                                  DropdownMenuItem(value: 'Disbursed', child: Text('Disbursed')),
-                                ],
-                                onChanged: _onAdvanceStatusChanged,
-                                decoration: const InputDecoration(labelText: 'Status'),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (_advanceRequests.isEmpty)
-                          _gradientCard(
-                            child: Text(
-                              'No advance requests for the selected filter.',
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          )
-                        else
-                          ..._advanceRequests.map(
-                            (request) {
-                              final statusColor = switch (request.status) {
-                                'Approved' => Colors.green,
-                                'Disbursed' => Colors.blue,
-                                'Rejected' => Colors.red,
-                                'Pending' => Colors.orange,
-                                _ => Colors.grey,
-                              };
-                              final isDeleting =
-                                  _advanceDeleting.contains(request.advanceRequestId);
-                              return Dismissible(
-                                key: ValueKey('advance-${request.advanceRequestId}'),
-                                direction: request.status == 'Pending'
-                                    ? DismissDirection.endToStart
-                                    : DismissDirection.none,
-                                confirmDismiss: (_) async {
-                                  await _confirmDeleteAdvance(request);
-                                  return false;
-                                },
-                                background: Container(
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 4,
-                                    vertical: 2,
-                                  ),
-                                  alignment: Alignment.centerRight,
-                                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                                  decoration: BoxDecoration(
-                                    color: Colors.red.shade100,
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  child: const Icon(Icons.delete, color: Colors.red),
+                        if (isSupervisor) ...[
+                          const SizedBox(height: 24),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  'Advance Requests',
+                                  style: theme.textTheme.titleMedium,
                                 ),
-                                child: _gradientCard(
-                                  padding: EdgeInsets.zero,
-                                  margin: const EdgeInsets.symmetric(vertical: 6),
-                                  child: ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 12,
-                                    ),
-                                    leading: const Icon(Icons.request_page),
-                                    title: Text(
-                                      '₹${request.amount.toStringAsFixed(2)}',
-                                    ),
-                                    subtitle: Text(
-                                      '${request.purpose}\nRequested: ${_formatDate(request.requestedAt)}',
-                                    ),
-                                    isThreeLine: true,
-                                    trailing: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      crossAxisAlignment: CrossAxisAlignment.end,
-                                      children: [
-                                        Chip(
-                                          label: Text(request.status),
-                                          backgroundColor:
-                                              statusColor.withOpacity(0.15),
-                                          labelStyle: TextStyle(color: statusColor),
-                                        ),
-                                        if (request.disbursedAt != null)
-                                          Text(
-                                            'Disbursed: ${_formatDate(request.disbursedAt)}',
-                                            style: theme.textTheme.bodySmall,
-                                          ),
-                                        if (isDeleting)
-                                          const Padding(
-                                            padding: EdgeInsets.only(top: 4),
-                                            child: SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child:
-                                                  CircularProgressIndicator(strokeWidth: 2),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
+                              ),
+                              SizedBox(
+                                width: 170,
+                                child: DropdownButtonFormField<String>(
+                                  value: _advanceStatusFilter,
+                                  items: const [
+                                    DropdownMenuItem(value: 'All', child: Text('All')),
+                                    DropdownMenuItem(
+                                        value: 'Pending', child: Text('Pending')),
+                                    DropdownMenuItem(
+                                        value: 'Approved', child: Text('Approved')),
+                                    DropdownMenuItem(
+                                        value: 'Rejected', child: Text('Rejected')),
+                                    DropdownMenuItem(
+                                        value: 'Disbursed', child: Text('Disbursed')),
+                                  ],
+                                  onChanged: _onAdvanceStatusChanged,
+                                  decoration: const InputDecoration(labelText: 'Status'),
                                 ),
-                              );
-                            },
+                              ),
+                            ],
                           ),
-                        const SizedBox(height: 24),
-                        FilledButton.icon(
-                          onPressed: () {
-                            _openAdvanceRequestSheet();
-                          },
-                          icon: const Icon(Icons.add_circle_outline),
-                          label: const Text('Request Advance'),
-                        ),
+                          const SizedBox(height: 12),
+                          if (_advanceRequests.isEmpty)
+                            _gradientCard(
+                              child: Text(
+                                'No advance requests for the selected filter.',
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            )
+                          else
+                            ..._advanceRequests.map(
+                              (request) {
+                                final statusColor = switch (request.status) {
+                                  'Approved' => Colors.green,
+                                  'Disbursed' => Colors.blue,
+                                  'Rejected' => Colors.red,
+                                  'Pending' => Colors.orange,
+                                  _ => Colors.grey,
+                                };
+                                final isDeleting =
+                                    _advanceDeleting.contains(request.advanceRequestId);
+                                return Dismissible(
+                                  key: ValueKey('advance-${request.advanceRequestId}'),
+                                  direction: request.status == 'Pending'
+                                      ? DismissDirection.endToStart
+                                      : DismissDirection.none,
+                                  confirmDismiss: (_) async {
+                                    await _confirmDeleteAdvance(request);
+                                    return false;
+                                  },
+                                  background: Container(
+                                    margin: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                    alignment: Alignment.centerRight,
+                                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade100,
+                                      borderRadius: BorderRadius.circular(16),
+                                    ),
+                                    child: const Icon(Icons.delete, color: Colors.red),
+                                  ),
+                                  child: _gradientCard(
+                                    padding: EdgeInsets.zero,
+                                    margin: const EdgeInsets.symmetric(vertical: 6),
+                                    child: ListTile(
+                                      contentPadding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 12,
+                                      ),
+                                      leading: const Icon(Icons.request_page),
+                                      title: Text(
+                                        '₹${request.amount.toStringAsFixed(2)}',
+                                      ),
+                                      subtitle: Text(
+                                        '${request.purpose}\nRequested: ${_formatDate(request.requestedAt)}',
+                                      ),
+                                      isThreeLine: true,
+                                      trailing: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        crossAxisAlignment: CrossAxisAlignment.end,
+                                        children: [
+                                          Chip(
+                                            label: Text(request.status),
+                                            backgroundColor:
+                                                statusColor.withOpacity(0.15),
+                                            labelStyle: TextStyle(color: statusColor),
+                                          ),
+                                          if (request.disbursedAt != null)
+                                            Text(
+                                              'Disbursed: ${_formatDate(request.disbursedAt)}',
+                                              style: theme.textTheme.bodySmall,
+                                            ),
+                                          if (isDeleting)
+                                            const Padding(
+                                              padding: EdgeInsets.only(top: 4),
+                                              child: SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(strokeWidth: 2),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          const SizedBox(height: 24),
+                          FilledButton.icon(
+                            onPressed: () {
+                              _openAdvanceRequestSheet();
+                            },
+                            icon: const Icon(Icons.add_circle_outline),
+                            label: const Text('Request Advance'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -387,6 +399,10 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
 }
 
   Future<void> _openAdvanceRequestSheet() async {
+    if (widget.user.role != UserRole.supervisor) {
+      showAppToast(context, 'Only supervisors can manage advance requests');
+      return;
+    }
     final driverId = widget.user.driverId;
     if (driverId == null || driverId.isEmpty) {
       showAppToast(context, 'Driver mapping missing. Contact admin.', isError: true);

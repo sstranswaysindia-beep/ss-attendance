@@ -56,6 +56,25 @@ class AdminDriver {
     return uri != null && uri.hasScheme && uri.hasAuthority;
   }
 
+  AdminDriver copyWith({
+    String? status,
+  }) {
+    return AdminDriver(
+      id: id,
+      empId: empId,
+      name: name,
+      role: role,
+      status: status ?? this.status,
+      plantName: plantName,
+      contact: contact,
+      dlNumber: dlNumber,
+      dlValidity: dlValidity,
+      joiningDate: joiningDate,
+      profilePhoto: profilePhoto,
+      plantId: plantId,
+    );
+  }
+
   String get initials {
     final segments = name
         .trim()
