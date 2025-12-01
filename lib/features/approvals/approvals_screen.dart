@@ -71,6 +71,8 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
 
   String _statusFilter = 'Pending';
   String? _plantFilter;
+  String _searchQuery = '';
+  late String _personFilter;
   DateTime _selectedDate = DateTime.now();
   String _rangeSelection = '30';
   int? _rangeDays = 30;
@@ -79,6 +81,8 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
   void initState() {
     super.initState();
     _repository = ApprovalsRepository(endpoint: widget.endpointOverride);
+    _personFilter =
+        widget.user.role == UserRole.supervisor ? 'driver' : 'supervisor';
     _loadApprovals();
   }
 
@@ -99,6 +103,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
             : DateFormat('yyyy-MM-dd').format(_selectedDate),
         plantId: _plantFilter,
         rangeDays: _rangeDays,
+        roleFilter: _personFilter == 'all' ? null : _personFilter,
       );
       if (!mounted) return;
       setState(() {
@@ -180,8 +185,11 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       setState(() {
         _processingApprovals.remove(approval.attendanceId);
         final updated = List<AttendanceApproval>.of(_approvals);
-        if (index >= 0 && index < updated.length) {
-          updated.removeAt(index);
+        final removeIndex = updated.indexWhere(
+          (item) => item.attendanceId == approval.attendanceId,
+        );
+        if (removeIndex >= 0) {
+          updated.removeAt(removeIndex);
           _approvals = updated;
         }
       });
@@ -249,6 +257,29 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       '30': 'Last 30 days',
       'custom': 'Custom date',
     };
+    final filteredByRole = _personFilter == 'all'
+        ? _approvals
+        : _approvals
+            .where(
+              (approval) =>
+                  approval.role.toLowerCase() == _personFilter.toLowerCase(),
+            )
+            .toList(growable: false);
+    final visibleApprovals = _searchQuery.isEmpty
+        ? filteredByRole
+        : filteredByRole
+            .where(
+              (approval) =>
+                  approval.driverName.toLowerCase().contains(
+                        _searchQuery.toLowerCase(),
+                      ),
+            )
+            .toList(growable: false);
+    final roleOptions = const [
+      {'value': 'supervisor', 'label': 'Supervisors'},
+      {'value': 'driver', 'label': 'Drivers'},
+      {'value': 'all', 'label': 'All'},
+    ];
 
     return Scaffold(
       appBar: AppBar(
@@ -342,43 +373,110 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                 ),
               ],
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _statusFilter,
-                decoration: const InputDecoration(labelText: 'Status'),
-                dropdownColor: Colors.white,
-                items: statusOptions
-                    .map(
-                      (status) =>
-                          DropdownMenuItem(value: status, child: Text(status)),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _statusFilter = value);
-                  _loadApprovals();
-                },
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: _loadApprovals,
-                  icon: const Icon(Icons.refresh, color: Colors.white),
-                  label: const Text('Refresh'),
-                  style: TextButton.styleFrom(
-                    backgroundColor: _adminPrimaryColor,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _statusFilter,
+                      decoration: const InputDecoration(labelText: 'Status'),
+                      dropdownColor: Colors.white,
+                      items: statusOptions
+                          .map(
+                            (status) => DropdownMenuItem(
+                              value: status,
+                              child: Text(status),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => _statusFilter = value);
+                        _loadApprovals();
+                      },
                     ),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Person type',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: Colors.grey[700]),
+                        ),
+                        const SizedBox(height: 6),
+                        ToggleButtons(
+                          isSelected: roleOptions
+                              .map((option) =>
+                                  option['value'] == _personFilter)
+                              .toList(),
+                          borderRadius: BorderRadius.circular(12),
+                          constraints: const BoxConstraints(minHeight: 40),
+                          onPressed: (index) {
+                            final selected = roleOptions[index]['value']!;
+                            if (selected == _personFilter) return;
+                            setState(() => _personFilter = selected);
+                            _loadApprovals();
+                          },
+                          children: roleOptions
+                              .map(
+                                (option) => Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                  child: Text(option['label']!),
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              if (!_isLoading && _errorMessage == null && _approvals.isNotEmpty)
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: InputDecoration(
+                        labelText: 'Search driver name',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value.trim();
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  TextButton.icon(
+                    onPressed: _loadApprovals,
+                    icon: const Icon(Icons.refresh, color: Colors.white),
+                    label: const Text('Refresh'),
+                    style: TextButton.styleFrom(
+                      backgroundColor: _adminPrimaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              if (!_isLoading &&
+                  _errorMessage == null &&
+                  visibleApprovals.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                   child: Row(
@@ -397,39 +495,39 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
                     : _errorMessage != null
-                    ? Center(
-                        child: Text(
-                          _errorMessage!,
-                          style: theme.textTheme.bodyLarge,
-                          textAlign: TextAlign.center,
-                        ),
-                      )
-                    : _approvals.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No approvals for ${DateFormat('dd MMM yyyy').format(_selectedDate)}.',
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      )
-                    : Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(20),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x1400296B),
-                              blurRadius: 18,
-                              offset: Offset(0, 10),
+                        ? Center(
+                            child: Text(
+                              _errorMessage!,
+                              style: theme.textTheme.bodyLarge,
+                              textAlign: TextAlign.center,
                             ),
-                          ],
-                        ),
-                        child: ListView.separated(
-                          padding: const EdgeInsets.all(8),
-                          itemCount: _approvals.length,
-                          separatorBuilder: (_, __) =>
-                              const SizedBox(height: 12),
-                          itemBuilder: (context, index) {
-                            final approval = _approvals[index];
+                          )
+                        : visibleApprovals.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No approvals for ${DateFormat('dd MMM yyyy').format(_selectedDate)}.',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              )
+                            : Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x1400296B),
+                                      blurRadius: 18,
+                                      offset: Offset(0, 10),
+                                    ),
+                                  ],
+                                ),
+                                child: ListView.separated(
+                                  padding: const EdgeInsets.all(8),
+                                  itemCount: visibleApprovals.length,
+                                  separatorBuilder: (_, __) =>
+                                      const SizedBox(height: 12),
+                                  itemBuilder: (context, index) {
+                                    final approval = visibleApprovals[index];
                             final statusLabel =
                                 approval.status?.isNotEmpty == true
                                 ? approval.status!

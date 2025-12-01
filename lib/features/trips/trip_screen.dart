@@ -277,7 +277,7 @@ class _TripScreenState extends State<TripScreen> {
     if (confirmed != true) return;
 
     try {
-      await _repository.deleteTrip(trip.id);
+      await _repository.deleteTrip(user: widget.user, tripId: trip.id);
       showAppToast(context, 'Trip deleted successfully');
 
       // Refresh the data

@@ -19,7 +19,6 @@ import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/profile_photo_widget.dart';
-import '../meter/meter_reading_sheet.dart';
 import '../../core/widgets/in_app_notification_banner.dart';
 import '../../core/widgets/update_available_sheet.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
@@ -236,15 +235,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       _selectedVehicleId = vehicle.id;
       _selectedVehicleNumber = vehicle.vehicleNumber;
     });
-  }
-
-  Future<void> _openMeterReadingSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => MeterReadingSheet(user: widget.user),
-    );
   }
 
   Future<void> _checkForAppUpdate() async {
@@ -809,12 +799,6 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
           ),
         ),
         actions: [
-          if (!isHelper)
-            IconButton(
-              tooltip: 'Meter reading',
-              onPressed: _openMeterReadingSheet,
-              icon: const Icon(Icons.speed),
-            ),
           IconButton(
             onPressed: () {
               widget.onLogout();
@@ -825,6 +809,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         ],
       ),
       drawer: Drawer(
+        backgroundColor: Colors.white,
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

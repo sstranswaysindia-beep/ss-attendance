@@ -38,6 +38,7 @@ class ApprovalsRepository {
     String? date,
     String? plantId,
     int? rangeDays,
+    String? roleFilter,
   }) async {
     final params = <String, String>{
       userIdParamKey: supervisorUserId,
@@ -45,6 +46,7 @@ class ApprovalsRepository {
       if (date != null && date.isNotEmpty) 'date': date,
       if (plantId != null && plantId.isNotEmpty) 'plantId': plantId,
       if (rangeDays != null) 'rangeDays': rangeDays.toString(),
+      if (roleFilter != null && roleFilter.isNotEmpty) 'role': roleFilter,
     };
 
     final uri = _endpoint.replace(queryParameters: params);

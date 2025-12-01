@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import '../models/app_user.dart';
 import '../models/safety_models.dart';
@@ -16,6 +17,7 @@ class SafetyRepository {
   final http.Client _client;
   final Uri _baseUri;
   final AppUser? _currentUser;
+  final DateFormat _dateFormatter = DateFormat('yyyy-MM-dd');
 
   Uri _resolve(String path, [Map<String, String>? query]) {
     return _baseUri.replace(
@@ -375,4 +377,149 @@ class SafetyRepository {
       psiMax: 130,
     );
   }
+
+  Future<int> submitSpotAudit({
+    required int plantId,
+    required int driverId,
+    required int vehicleId,
+    required String vehicleNumber,
+    required DateTime assessmentDate,
+    String truckCategory = 'VITT',
+    String languageCode = 'en',
+    String transporterName = 'SS Transways India',
+    String? highlights,
+    String? assessedBy,
+    String? actionPlan,
+    DateTime? targetDate,
+    List<Map<String, dynamic>> sections = const [],
+    String? finalAction,
+    AppUser? user,
+  }) async {
+    final payload = <String, dynamic>{
+      'plant_id': plantId,
+      'driver_id': driverId,
+      'vehicle_id': vehicleId,
+      'vehicle_number': vehicleNumber,
+      'assessment_date': _dateFormatter.format(assessmentDate),
+      'truck_category': truckCategory,
+      'language_code': languageCode,
+      'transporter_name': transporterName,
+      'highlights': highlights ?? '',
+      'assessed_by': assessedBy ?? '',
+      'action_plan': actionPlan ?? '',
+      'sections': sections,
+    };
+    if (targetDate != null) {
+      payload['target_date'] = _dateFormatter.format(targetDate);
+    }
+    if (finalAction != null && finalAction.isNotEmpty) {
+      payload['final_action'] = finalAction;
+    }
+
+    final uri = _resolve('spot_audit_save.php', _authQuery(user));
+    final response = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+
+    Map<String, dynamic> decoded;
+    try {
+      decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      decoded = const {};
+    }
+
+    if (response.statusCode >= 300 || decoded['status'] != 'ok') {
+      final message = decoded['message'] ?? decoded['error'];
+      throw Exception(message?.toString() ?? 'Failed to submit audit (${response.statusCode})');
+    }
+
+    final auditId = decoded['audit_id'];
+    if (auditId is int) {
+      return auditId;
+    }
+    if (auditId is String) {
+      return int.tryParse(auditId) ?? 0;
+    }
+    return 0;
+  }
+
+  Future<List<PlantDirectoryEntry>> fetchPlantDirectory({AppUser? user}) async {
+    final authQuery = Map<String, String>.from(_authQuery(user));
+    authQuery.remove('plantId');
+    authQuery.remove('plant_id');
+    final uri = _resolve(
+      'plant_directory.php',
+      authQuery.isEmpty ? null : authQuery,
+    );
+    final response = await _client.get(uri);
+    if (response.statusCode >= 300) {
+      throw Exception('Failed to load plant directory (${response.statusCode})');
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    if (decoded['status'] != 'ok') {
+      throw Exception(decoded['message']?.toString() ?? 'Failed to load plant directory');
+    }
+    final plants = (decoded['plants'] as List<dynamic>? ?? const [])
+        .map((item) => PlantDirectoryEntry.fromJson(item as Map<String, dynamic>))
+        .where((entry) => entry.id > 0)
+        .toList(growable: false);
+    return plants;
+  }
+}
+
+class PlantDirectoryEntry {
+  PlantDirectoryEntry({
+    required this.id,
+    required this.name,
+    required this.vehicles,
+    required this.drivers,
+  });
+
+  factory PlantDirectoryEntry.fromJson(Map<String, dynamic> json) {
+    return PlantDirectoryEntry(
+      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
+      name: json['name']?.toString() ?? '',
+      vehicles: (json['vehicles'] as List<dynamic>? ?? const [])
+          .map((item) => PlantDirectoryVehicle.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+      drivers: (json['drivers'] as List<dynamic>? ?? const [])
+          .map((item) => PlantDirectoryDriver.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+    );
+  }
+
+  final int id;
+  final String name;
+  final List<PlantDirectoryVehicle> vehicles;
+  final List<PlantDirectoryDriver> drivers;
+}
+
+class PlantDirectoryVehicle {
+  const PlantDirectoryVehicle({required this.id, required this.number});
+
+  factory PlantDirectoryVehicle.fromJson(Map<String, dynamic> json) {
+    return PlantDirectoryVehicle(
+      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
+      number: json['number']?.toString() ?? '',
+    );
+  }
+
+  final int id;
+  final String number;
+}
+
+class PlantDirectoryDriver {
+  const PlantDirectoryDriver({required this.id, required this.name});
+
+  factory PlantDirectoryDriver.fromJson(Map<String, dynamic> json) {
+    return PlantDirectoryDriver(
+      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
+      name: json['name']?.toString() ?? '',
+    );
+  }
+
+  final int id;
+  final String name;
 }

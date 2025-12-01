@@ -49,6 +49,26 @@ function days_between($from, $to){
 }
 
 $ACTIVE_MENU = 'trips_monitor';
+$sessionUser = (isset($_SESSION['user']) && is_array($_SESSION['user'])) ? $_SESSION['user'] : [];
+$currentUserId = null;
+foreach ([
+    $_SESSION['user_id'] ?? null,
+    $_SESSION['id'] ?? null,
+    $sessionUser['id'] ?? null,
+    $sessionUser['user_id'] ?? null,
+] as $candidate) {
+    if (is_numeric($candidate) && (int)$candidate > 0) { $currentUserId = (int)$candidate; break; }
+}
+
+$currentUserName = $_SESSION['full_name']
+    ?? ($sessionUser['full_name'] ?? null)
+    ?? ($_SESSION['username']
+        ?? ($sessionUser['username'] ?? null)
+        ?? ($_SESSION['name']
+            ?? ($sessionUser['name'] ?? null)));
+if ($currentUserName === null || $currentUserName === '') {
+    $currentUserName = 'Trip Monitor user';
+}
 
 /* ---------- Date filters ---------- */
 /* Defaults: current month */
@@ -918,6 +938,11 @@ $monYearStr = date('M Y', strtotime($monthStart));
     }
   });
 
+  const TD_USER_ID = <?= $currentUserId !== null ? (int)$currentUserId : 'null' ?>;
+  const TD_USER_NAME = <?= json_encode($currentUserName ?? null, JSON_UNESCAPED_UNICODE) ?>;
+  window.TD_USER_ID = TD_USER_ID;
+  window.TD_USER_NAME = TD_USER_NAME;
+
   /* ========= Delegated clicks: End, GPS, Delete ========= */
   document.addEventListener('click', (e)=>{
     const endBtn = e.target.closest('.end-btn');
@@ -944,7 +969,11 @@ $monYearStr = date('M Y', strtotime($monthStart));
         method:'POST',
         credentials:'include',
         headers:{'Content-Type':'application/json','Accept':'application/json'},
-        body: JSON.stringify({ trip_id:id })
+        body: JSON.stringify({
+          trip_id: id,
+          user_id: window.TD_USER_ID || null,
+          deleted_by_name: window.TD_USER_NAME || null
+        })
       })
       .then(r=>r.text())
       .then(txt=>{

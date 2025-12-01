@@ -354,9 +354,23 @@ class TripRepository {
     }
   }
 
-  Future<void> deleteTrip(int tripId) async {
+  Future<void> deleteTrip({
+    required AppUser user,
+    required int tripId,
+  }) async {
     final uri = Uri.parse('${_mobileBase}trips_delete.php');
-    final payload = <String, dynamic>{'trip_id': tripId};
+    final payload = <String, dynamic>{
+      'trip_id': tripId,
+      'role': _roleToString(user.role),
+      if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+      if (_tryParseInt(user.driverId) != null)
+        'driverId': _tryParseInt(user.driverId),
+    };
+
+    final deletedByName = user.displayName.trim();
+    if (deletedByName.isNotEmpty) {
+      payload['deleted_by_name'] = deletedByName;
+    }
 
     try {
       final response = await _client.post(
@@ -532,6 +546,34 @@ class TripRepository {
         'TripRepository.fetchPlantsForUser: unexpected $error\n$stackTrace',
       );
       if (fallbackPlants.isNotEmpty) return fallbackPlants;
+      throw TripFailure('Unable to load plants.');
+    }
+  }
+
+  Future<List<TripPlant>> fetchAllPlants() async {
+    try {
+      final uri = Uri.parse('${_mobileBase}plants.php');
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(<String, dynamic>{'role': 'admin'}),
+      );
+      if (response.statusCode >= 300) {
+        throw TripFailure('Unable to load plants (status: ${response.statusCode}).');
+      }
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (payload['status'] != 'ok') {
+        throw TripFailure(payload['error']?.toString() ?? 'Unable to load plants.');
+      }
+      final plantsJson = payload['plants'] as List<dynamic>? ?? const [];
+      final plants = plantsJson
+          .map((item) => TripPlant.fromJson(item as Map<String, dynamic>))
+          .where((plant) => plant.id > 0)
+          .toList(growable: false);
+      return plants;
+    } catch (error) {
+      if (error is TripFailure) rethrow;
+      debugPrint('TripRepository.fetchAllPlants unexpected error: $error');
       throw TripFailure('Unable to load plants.');
     }
   }

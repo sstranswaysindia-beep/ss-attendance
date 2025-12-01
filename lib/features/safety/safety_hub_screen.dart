@@ -6,6 +6,7 @@ import '../../core/models/safety_models.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import 'spot_audit_wizard_screen.dart';
 import 'tyre_instructions_screen.dart';
 
 class SafetyHubScreen extends StatefulWidget {
@@ -37,6 +38,13 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
               user: widget.user,
               repository: _repository,
             ),
+          ),
+        );
+        break;
+      case 'spot_audit':
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SpotAuditWizardScreen(user: widget.user),
           ),
         );
         break;

@@ -29,7 +29,6 @@ import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
-import '../meter/meter_reading_sheet.dart';
 import '../attendance/proxy_attendance_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../profile/supervisor_profile_screen.dart';
@@ -355,15 +354,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       _loadSupervisorTodayAttendance(silent: true),
       _loadActiveShift(),
     ]);
-  }
-
-  Future<void> _openMeterReadingSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (context) => MeterReadingSheet(user: widget.user),
-    );
   }
 
   Future<void> _checkForAppUpdate() async {
@@ -769,11 +759,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
               icon: const Icon(Icons.switch_account),
             ),
           IconButton(
-            tooltip: 'Meter reading',
-            onPressed: _openMeterReadingSheet,
-            icon: const Icon(Icons.speed),
-          ),
-          IconButton(
             onPressed: () {
               widget.onLogout();
               showAppToast(context, 'Logged out successfully');
@@ -783,6 +768,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         ],
       ),
       drawer: Drawer(
+        backgroundColor: Colors.white,
         child: SafeArea(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

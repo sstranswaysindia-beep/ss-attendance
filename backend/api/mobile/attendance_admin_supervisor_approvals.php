@@ -14,10 +14,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 require __DIR__ . '/common.php';
 
 $adminUserId = apiSanitizeInt($_GET['adminUserId'] ?? null);
-$statusFilter = trim($_GET['status'] ?? 'Pending');
-$dateFilter = trim($_GET['date'] ?? date('Y-m-d'));
-$plantFilter = apiSanitizeInt($_GET['plantId'] ?? null);
-$rangeDays = apiSanitizeInt($_GET['rangeDays'] ?? null);
+$statusFilter   = trim($_GET['status'] ?? 'Pending');
+$dateFilter     = trim($_GET['date'] ?? '');
+$fromDateParam  = trim($_GET['fromDate'] ?? '');
+$toDateParam    = trim($_GET['toDate'] ?? '');
+$plantFilter    = apiSanitizeInt($_GET['plantId'] ?? null);
+$rangeDays      = apiSanitizeInt($_GET['rangeDays'] ?? null);
+
+if ($dateFilter === '' && $fromDateParam === '' && $toDateParam === '') {
+    $dateFilter = date('Y-m-d');
+}
 
 if ($rangeDays !== null && $rangeDays <= 0) {
     $rangeDays = null;
@@ -34,10 +40,15 @@ try {
     $userRow = $userStmt->get_result()->fetch_assoc();
     $userStmt->close();
 
-    if (!$userRow || $userRow['role'] !== 'admin') {
+    if (
+        !$userRow
+        || !isset($userRow['role'])
+        || !in_array(strtolower((string)$userRow['role']), ['admin', 'super_admin'], true)
+    ) {
         apiRespond(403, ['status' => 'error', 'error' => 'User is not authorized']);
     }
 
+    // ---- filters ---------------------------------------------------
     $conditions = ["COALESCE(d.role, 'driver') IN ('supervisor', 'driver')"];
     $bindTypes = '';
     $bindValues = [];
@@ -49,15 +60,29 @@ try {
     }
 
     $fromDate = null;
-    $toDate = null;
+    $toDate   = null;
 
-    if ($rangeDays !== null) {
-        $toDate = date('Y-m-d');
-        $fromDate = (new DateTime($toDate))->modify(sprintf('-%d days', max(0, $rangeDays - 1)))->format('Y-m-d');
+    // 1) Highest priority: explicit fromDate / toDate from UI
+    if ($fromDateParam !== '' && $toDateParam !== '') {
+        $fromDate = $fromDateParam;
+        $toDate   = $toDateParam;
         $conditions[] = 'DATE(a.in_time) BETWEEN ? AND ?';
         $bindTypes .= 'ss';
         $bindValues[] = $fromDate;
         $bindValues[] = $toDate;
+
+    // 2) rangeDays (e.g., last 30 days)
+    } elseif ($rangeDays !== null) {
+        $toDate = date('Y-m-d');
+        $fromDate = (new DateTime($toDate))
+            ->modify(sprintf('-%d days', max(0, $rangeDays - 1)))
+            ->format('Y-m-d');
+        $conditions[] = 'DATE(a.in_time) BETWEEN ? AND ?';
+        $bindTypes .= 'ss';
+        $bindValues[] = $fromDate;
+        $bindValues[] = $toDate;
+
+    // 3) single date
     } elseif ($dateFilter !== '') {
         $fromDate = $dateFilter;
         $toDate = $dateFilter;
@@ -66,6 +91,7 @@ try {
         $bindValues[] = $dateFilter;
     }
 
+    // 4) final fallback: today
     if ($fromDate === null || $toDate === null) {
         $fromDate = date('Y-m-d');
         $toDate = $fromDate;
@@ -80,10 +106,12 @@ try {
         $bindValues[] = $plantFilter;
     }
 
+    // ---- approvals list --------------------------------------------
     $sql = 'SELECT a.id,
                    a.driver_id,
                    d.name AS driver_name,
                    d.profile_photo_url,
+                   COALESCE(d.role, \'driver\') AS role,
                    a.plant_id,
                    p.plant_name,
                    a.vehicle_id,
@@ -111,7 +139,7 @@ try {
     $stmt->execute();
     $result = $stmt->get_result();
 
-    $plantMap = [];
+    $plantMap  = [];
     $plantMeta = [];
     $approvals = [];
 
@@ -119,34 +147,36 @@ try {
         if (!empty($row['plant_id']) && !isset($plantMap[$row['plant_id']])) {
             $plantMap[$row['plant_id']] = true;
             $plantMeta[] = [
-                'plantId' => (int) $row['plant_id'],
+                'plantId'   => (int) $row['plant_id'],
                 'plantName' => $row['plant_name'],
             ];
         }
 
         $approvals[] = [
-            'attendanceId' => (int) $row['id'],
-            'driverId' => (int) $row['driver_id'],
-            'driverName' => $row['driver_name'],
-            'profilePhoto' => apiBuildProfileUrl($row['profile_photo_url'] ?? null),
-            'plantId' => (int) $row['plant_id'],
-            'plantName' => $row['plant_name'],
-            'vehicleId' => $row['vehicle_id'],
+            'attendanceId'  => (int) $row['id'],
+            'driverId'      => (int) $row['driver_id'],
+            'driverName'    => $row['driver_name'],
+            'role'          => $row['role'], // <-- used by UI for Supervisor / Driver toggle
+            'profilePhoto'  => apiBuildProfileUrl($row['profile_photo_url'] ?? null),
+            'plantId'       => (int) $row['plant_id'],
+            'plantName'     => $row['plant_name'],
+            'vehicleId'     => $row['vehicle_id'],
             'vehicleNumber' => $row['vehicle_no'],
-            'inTime' => $row['in_time'],
-            'outTime' => $row['out_time'],
-            'inPhotoUrl' => $row['in_photo_url'],
-            'outPhotoUrl' => $row['out_photo_url'],
-            'status' => $row['approval_status'],
-            'source' => $row['source'],
-            'notes' => $row['notes'],
-            'createdAt' => $row['created_at'],
+            'inTime'        => $row['in_time'],
+            'outTime'       => $row['out_time'],
+            'inPhotoUrl'    => $row['in_photo_url'],
+            'outPhotoUrl'   => $row['out_photo_url'],
+            'status'        => $row['approval_status'],
+            'source'        => $row['source'],
+            'notes'         => $row['notes'],
+            'createdAt'     => $row['created_at'],
         ];
     }
     $stmt->close();
 
     usort($plantMeta, static fn(array $a, array $b): int => strcmp($a['plantName'], $b['plantName']));
 
+    // ---- missing attendance ----------------------------------------
     $missingSql = "SELECT d.id,
                           d.name,
                           COALESCE(d.role, 'driver') AS role,
@@ -157,7 +187,7 @@ try {
                     WHERE d.status = 'Active'
                       AND COALESCE(d.role, 'driver') IN ('supervisor', 'driver')";
 
-    $missingTypes = '';
+    $missingTypes  = '';
     $missingParams = [];
 
     if ($plantFilter) {
@@ -189,22 +219,23 @@ try {
     }
     $missingStmt->execute();
     $missingResult = $missingStmt->get_result();
+
     $missingPeople = [];
     while ($row = $missingResult->fetch_assoc()) {
         $missingPeople[] = [
-            'driverId' => (int) $row['id'],
-            'name' => $row['name'],
-            'role' => $row['role'],
-            'plantId' => $row['plant_id'] !== null ? (int) $row['plant_id'] : null,
+            'driverId'  => (int) $row['id'],
+            'name'      => $row['name'],
+            'role'      => $row['role'],
+            'plantId'   => $row['plant_id'] !== null ? (int) $row['plant_id'] : null,
             'plantName' => $row['plant_name'],
         ];
     }
     $missingStmt->close();
 
     apiRespond(200, [
-        'status' => 'ok',
-        'plants' => $plantMeta,
-        'approvals' => $approvals,
+        'status'            => 'ok',
+        'plants'            => $plantMeta,
+        'approvals'         => $approvals,
         'missingAttendance' => $missingPeople,
     ]);
 } catch (Throwable $error) {
