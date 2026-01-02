@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -22,6 +23,32 @@ class InAppNotificationData {
   final String body;
   final Map<String, dynamic> data;
   final DateTime receivedAt;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'body': body,
+    'data': data,
+    'receivedAt': receivedAt.toIso8601String(),
+  };
+
+  static InAppNotificationData? fromJson(Map<String, dynamic> json) {
+    try {
+      return InAppNotificationData(
+        id: json['id']?.toString() ?? '',
+        title: json['title']?.toString() ?? '',
+        body: json['body']?.toString() ?? '',
+        data: json['data'] is Map
+            ? Map<String, dynamic>.from(json['data'] as Map)
+            : <String, dynamic>{},
+        receivedAt:
+            DateTime.tryParse(json['receivedAt']?.toString() ?? '') ??
+            DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 }
 
 class NotificationService {
@@ -35,7 +62,7 @@ class NotificationService {
   final StreamController<InAppNotificationData> _inAppNotificationController =
       StreamController<InAppNotificationData>.broadcast();
   final StreamController<List<InAppNotificationData>>
-      _inAppNotificationListController =
+  _inAppNotificationListController =
       StreamController<List<InAppNotificationData>>.broadcast();
   final List<InAppNotificationData> _recentInAppNotifications = [];
   final StreamController<bool> _bellVisibilityController =
@@ -44,6 +71,87 @@ class NotificationService {
   String? _fcmToken;
   int _notificationCounter = 0;
   int _bellHideRequests = 0;
+
+  static const _inboxPrefsKey = 'in_app_notification_inbox_v1';
+
+  Future<void> _loadInboxFromPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_inboxPrefsKey);
+      if (raw == null || raw.trim().isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final loaded = <InAppNotificationData>[];
+      for (final entry in decoded) {
+        if (entry is Map) {
+          final parsed = InAppNotificationData.fromJson(
+            Map<String, dynamic>.from(entry),
+          );
+          if (parsed != null && parsed.id.trim().isNotEmpty) {
+            loaded.add(parsed);
+          }
+        }
+      }
+      _recentInAppNotifications
+        ..clear()
+        ..addAll(loaded);
+      _emitNotificationState();
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  Future<void> _persistInboxToPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _recentInAppNotifications
+          .take(50)
+          .map((e) => e.toJson())
+          .toList(growable: false);
+      await prefs.setString(_inboxPrefsKey, jsonEncode(list));
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  InAppNotificationData _buildInAppNotification(RemoteMessage message) {
+    final notification = message.notification;
+    final data = Map<String, dynamic>.from(message.data);
+    final title =
+        notification?.title ?? data['title']?.toString() ?? 'SS Transways';
+    final body =
+        notification?.body ??
+        data['body']?.toString() ??
+        data['message']?.toString() ??
+        '';
+    final notificationId = message.messageId?.isNotEmpty == true
+        ? message.messageId!
+        : 'local_${DateTime.now().millisecondsSinceEpoch}_${_notificationCounter++}';
+    return InAppNotificationData(
+      id: notificationId,
+      title: title,
+      body: body,
+      data: data,
+      receivedAt: DateTime.now(),
+    );
+  }
+
+  Future<void> _storeAndEmitInAppNotification(
+    InAppNotificationData notification,
+  ) async {
+    _recentInAppNotifications.insert(0, notification);
+    if (_recentInAppNotifications.length > 50) {
+      _recentInAppNotifications.removeRange(
+        50,
+        _recentInAppNotifications.length,
+      );
+    }
+    if (!_inAppNotificationController.isClosed) {
+      _inAppNotificationController.add(notification);
+    }
+    _emitNotificationState();
+    await _persistInboxToPrefs();
+  }
 
   void _emitNotificationState() {
     if (!_inAppNotificationListController.isClosed) {
@@ -115,6 +223,9 @@ class NotificationService {
       // Initialize Firebase Cloud Messaging
       await _initializeFCM();
 
+      // Load persisted in-app inbox (best-effort).
+      await _loadInboxFromPrefs();
+
       _isInitialized = true;
     } catch (e) {
       if (kDebugMode) {
@@ -184,6 +295,12 @@ class NotificationService {
 
       // Handle notification taps when app is in background
       FirebaseMessaging.onMessageOpenedApp.listen(_handleNotificationTap);
+
+      // If the app was launched by tapping a notification, capture it too.
+      final initialMessage = await _firebaseMessaging.getInitialMessage();
+      if (initialMessage != null) {
+        await _handleNotificationTap(initialMessage);
+      }
     } catch (e) {
       if (kDebugMode) {
         print('FCM initialization failed: $e');
@@ -200,41 +317,61 @@ class NotificationService {
       print('Message data: ${message.data}');
       print('Message notification: ${message.notification?.title}');
     }
+
+    // Best-effort: persist to inbox so it can show inside the app too.
+    // Note: background delivery depends on message type (data vs notification).
+    try {
+      final data = Map<String, dynamic>.from(message.data);
+      final title =
+          message.notification?.title ??
+          data['title']?.toString() ??
+          'SS Transways';
+      final body =
+          message.notification?.body ??
+          data['body']?.toString() ??
+          data['message']?.toString() ??
+          '';
+      final id = message.messageId?.isNotEmpty == true
+          ? message.messageId!
+          : 'bg_${DateTime.now().millisecondsSinceEpoch}';
+      final entry = InAppNotificationData(
+        id: id,
+        title: title,
+        body: body,
+        data: data,
+        receivedAt: DateTime.now(),
+      );
+
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_inboxPrefsKey);
+      final list = <dynamic>[];
+      if (raw != null && raw.trim().isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is List) {
+          list.addAll(decoded);
+        }
+      }
+      list.insert(0, entry.toJson());
+      if (list.length > 50) {
+        list.removeRange(50, list.length);
+      }
+      await prefs.setString(_inboxPrefsKey, jsonEncode(list));
+    } catch (_) {
+      // ignore
+    }
   }
 
   // Handle foreground messages
-  void _handleForegroundMessage(RemoteMessage message) {
+  void _handleForegroundMessage(RemoteMessage message) async {
     if (kDebugMode) {
       print('Handling a foreground message: ${message.messageId}');
     }
+    final inAppNotification = _buildInAppNotification(message);
+    await _storeAndEmitInAppNotification(inAppNotification);
 
-    final notification = message.notification;
-    final data = Map<String, dynamic>.from(message.data);
-    final title =
-        notification?.title ?? data['title']?.toString() ?? 'SS Transways';
-    final body =
-        notification?.body ??
-        data['body']?.toString() ??
-        data['message']?.toString() ??
-        '';
-    final notificationId = message.messageId?.isNotEmpty == true
-        ? message.messageId!
-        : 'local_${DateTime.now().millisecondsSinceEpoch}_${_notificationCounter++}';
-    final inAppNotification = InAppNotificationData(
-      id: notificationId,
-      title: title,
-      body: body,
-      data: data,
-      receivedAt: DateTime.now(),
-    );
-
-    _recentInAppNotifications.insert(0, inAppNotification);
-    if (_recentInAppNotifications.length > 20) {
-      _recentInAppNotifications.removeLast();
-    }
-    _inAppNotificationController.add(inAppNotification);
-    _emitNotificationState();
-
+    final title = inAppNotification.title;
+    final body = inAppNotification.body;
+    final data = inAppNotification.data;
     if (title.isNotEmpty || body.isNotEmpty) {
       showNotification(
         id: DateTime.now().millisecondsSinceEpoch ~/ 1000,
@@ -246,12 +383,16 @@ class NotificationService {
   }
 
   // Handle notification taps
-  void _handleNotificationTap(RemoteMessage message) {
+  Future<void> _handleNotificationTap(RemoteMessage message) async {
     if (kDebugMode) {
       print('Notification tapped: ${message.messageId}');
       print('Message data: ${message.data}');
     }
     // Handle navigation based on message data
+
+    // Also store it to the in-app inbox so it appears inside the app.
+    final inAppNotification = _buildInAppNotification(message);
+    await _storeAndEmitInAppNotification(inAppNotification);
   }
 
   // Get FCM token
@@ -277,6 +418,7 @@ class NotificationService {
     _recentInAppNotifications.removeWhere((item) => item.id == id);
     if (_recentInAppNotifications.length != before) {
       _emitNotificationState();
+      _persistInboxToPrefs();
     }
   }
 
@@ -286,6 +428,7 @@ class NotificationService {
     }
     _recentInAppNotifications.clear();
     _emitNotificationState();
+    _persistInboxToPrefs();
   }
 
   Future<bool> requestPermissions() async {

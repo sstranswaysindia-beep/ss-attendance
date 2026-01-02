@@ -199,8 +199,6 @@ class TripRepository {
       'status': status,
       if (plantId != null && plantId.isNotEmpty) 'plantId': plantId,
       if (vehicleId != null && vehicleId.isNotEmpty) 'vehicleId': vehicleId,
-      // Add a cache-busting token so CDN/intermediate caches always fetch fresh data
-      'ts': DateTime.now().millisecondsSinceEpoch.toString(),
     };
 
     final uri = _endpoint.replace(queryParameters: queryParams);
@@ -272,9 +270,6 @@ class TripRepository {
       if (gpsLat != null) 'gps_lat': gpsLat,
       if (gpsLng != null) 'gps_lng': gpsLng,
     };
-    debugPrint(
-      'TripRepository.createTrip payload: ${jsonEncode(payload)}',
-    );
 
     try {
       final response = await _client.post(
@@ -354,23 +349,9 @@ class TripRepository {
     }
   }
 
-  Future<void> deleteTrip({
-    required AppUser user,
-    required int tripId,
-  }) async {
+  Future<void> deleteTrip(int tripId) async {
     final uri = Uri.parse('${_mobileBase}trips_delete.php');
-    final payload = <String, dynamic>{
-      'trip_id': tripId,
-      'role': _roleToString(user.role),
-      if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
-      if (_tryParseInt(user.driverId) != null)
-        'driverId': _tryParseInt(user.driverId),
-    };
-
-    final deletedByName = user.displayName.trim();
-    if (deletedByName.isNotEmpty) {
-      payload['deleted_by_name'] = deletedByName;
-    }
+    final payload = <String, dynamic>{'trip_id': tripId};
 
     try {
       final response = await _client.post(
@@ -408,7 +389,6 @@ class TripRepository {
     List<String>? addCustomerNames,
     List<String>? setCustomerNames,
     int? helperId,
-    List<int>? helperIds,
     String? note,
     List<int>? setDriverIds,
   }) async {
@@ -429,9 +409,7 @@ class TripRepository {
       payload['set_customer_names'] = setCustomerNames;
     }
 
-    if (helperIds != null && helperIds.isNotEmpty) {
-      payload['helper_ids'] = helperIds;
-    } else if (helperId != null) {
+    if (helperId != null) {
       payload['helper_id'] = helperId;
     }
 
@@ -550,34 +528,6 @@ class TripRepository {
     }
   }
 
-  Future<List<TripPlant>> fetchAllPlants() async {
-    try {
-      final uri = Uri.parse('${_mobileBase}plants.php');
-      final response = await _client.post(
-        uri,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(<String, dynamic>{'role': 'admin'}),
-      );
-      if (response.statusCode >= 300) {
-        throw TripFailure('Unable to load plants (status: ${response.statusCode}).');
-      }
-      final payload = jsonDecode(response.body) as Map<String, dynamic>;
-      if (payload['status'] != 'ok') {
-        throw TripFailure(payload['error']?.toString() ?? 'Unable to load plants.');
-      }
-      final plantsJson = payload['plants'] as List<dynamic>? ?? const [];
-      final plants = plantsJson
-          .map((item) => TripPlant.fromJson(item as Map<String, dynamic>))
-          .where((plant) => plant.id > 0)
-          .toList(growable: false);
-      return plants;
-    } catch (error) {
-      if (error is TripFailure) rethrow;
-      debugPrint('TripRepository.fetchAllPlants unexpected error: $error');
-      throw TripFailure('Unable to load plants.');
-    }
-  }
-
   List<TripPlant> _buildFallbackPlants(AppUser user) {
     final uniquePlants = <int, TripPlant>{};
 
@@ -606,9 +556,12 @@ class TripRepository {
     final fallbackVehicles = _buildFallbackVehicles(user);
 
     try {
-      // For supervisors, filter vehicles from login response by selected plant
+      // For supervisors, filter vehicles from login response by selected plant (only when plantId > 0).
+      final plantIdInt = int.tryParse(plantId);
       if (user.role == UserRole.supervisor &&
-          user.availableVehicles.isNotEmpty) {
+          user.availableVehicles.isNotEmpty &&
+          plantIdInt != null &&
+          plantIdInt > 0) {
         print(
           'TripRepository: Supervisor - filtering vehicles by selected plant',
         );
@@ -621,10 +574,10 @@ class TripRepository {
         );
 
         // Check if supervisor supervises the selected plant
-        final selectedPlantIdInt = int.tryParse(plantId);
-        final supervisesThisPlant =
-            selectedPlantIdInt != null &&
-            user.supervisedPlantIds.contains(selectedPlantIdInt);
+        final selectedPlantIdInt = plantIdInt;
+        final supervisesThisPlant = user.supervisedPlantIds.contains(
+          selectedPlantIdInt,
+        );
 
         print(
           'TripRepository: Supervisor supervises selected plant: $supervisesThisPlant',

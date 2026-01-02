@@ -1,0 +1,3 @@
+- Safety training: inline images render from `Image:` lines; bold/italic/underline tags supported; word highlighting retained with slower Hindi TTS; “Next Training” button appears near completion (≥95%) to mark done and return.
+- Training progress: API auto-completes at 95% and never downgrades completion.
+- Version bump to 1.0.124+124 for driver/supervisor app release. 

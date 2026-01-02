@@ -34,9 +34,62 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
   bool _navigating = false;
   bool _isInitialising = true;
   String? _initialError;
+  final Map<String, String> _displayToOriginal = {};
 
-  bool get _allPositionsCompleted =>
-      widget.positions.every((position) => _tyreStates[position]?.isComplete == true);
+  List<String> get _applicablePositions => _mapPositions(widget.positions);
+
+  List<String> _mapPositions(List<String> positions) {
+    final mapped = <String>[];
+    _displayToOriginal.clear();
+    for (final code in positions) {
+      final display = _mapCode(code);
+      mapped.add(display);
+      _displayToOriginal[display] = code;
+    }
+    // Ensure uniqueness while preserving order
+    final seen = <String>{};
+    return mapped
+        .where((p) {
+          final isNew = !seen.contains(p);
+          seen.add(p);
+          return isNew;
+        })
+        .toList(growable: false);
+  }
+
+  String _mapCode(String code) {
+    final isSix = widget.vehicle.tyreCount == 6;
+    final isTen = widget.vehicle.tyreCount == 10;
+    if (isSix) {
+      switch (code) {
+        case 'L21':
+          return 'L31';
+        case 'L22':
+          return 'L32';
+        case 'R21':
+          return 'R31';
+        case 'R22':
+          return 'R32';
+      }
+    }
+    if (isTen) {
+      switch (code) {
+        case 'L21':
+          return 'L41';
+        case 'L22':
+          return 'L42';
+        case 'R21':
+          return 'R41';
+        case 'R22':
+          return 'R42';
+      }
+    }
+    return code;
+  }
+
+  bool get _allPositionsCompleted => _applicablePositions.every(
+    (position) => _tyreStates[position]?.isComplete == true,
+  );
 
   @override
   void initState() {
@@ -52,16 +105,20 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
 
     try {
       final expectedCheckpoints = widget.instructions.checkpoints.length;
-      final futures = widget.positions.map((position) async {
-        final state = await widget.repository.fetchTyreState(
-          inspectionId: widget.inspectionId,
-          positionCode: position,
-          expectedCheckpoints: expectedCheckpoints,
-        );
-        if (state != null) {
-          _tyreStates[position] = state;
-        }
-      }).toList(growable: false);
+      final futures = _applicablePositions
+          .map((displayPosition) async {
+            final apiPosition =
+                _displayToOriginal[displayPosition] ?? displayPosition;
+            final state = await widget.repository.fetchTyreState(
+              inspectionId: widget.inspectionId,
+              positionCode: apiPosition,
+              expectedCheckpoints: expectedCheckpoints,
+            );
+            if (state != null) {
+              _tyreStates[displayPosition] = state;
+            }
+          })
+          .toList(growable: false);
 
       await Future.wait(futures);
 
@@ -83,7 +140,7 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
 
   Map<String, TyreChipStatus> _buildStatusMap() {
     final map = <String, TyreChipStatus>{};
-    for (final position in widget.positions) {
+    for (final position in _applicablePositions) {
       map[position] = _statusFor(_tyreStates[position]);
     }
     map['S'] = _statusFor(_tyreStates['S']);
@@ -93,8 +150,12 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
   TyreChipStatus _statusFor(TyreChecklistTyreState? state) {
     if (state == null) return TyreChipStatus.draft;
     final hasCritical = state.hasCriticalIssue;
-    final caution = state.hasCaution ||
-        state.psiOutsideRange(widget.instructions.psiMin, widget.instructions.psiMax);
+    final caution =
+        state.hasCaution ||
+        state.psiOutsideRange(
+          widget.instructions.psiMin,
+          widget.instructions.psiMax,
+        );
     if (hasCritical) return TyreChipStatus.issue;
     if (!state.isComplete) return TyreChipStatus.draft;
     if (caution) return TyreChipStatus.caution;
@@ -106,17 +167,19 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
     if (_navigating) return;
     setState(() => _navigating = true);
     try {
-      final updatedState = await Navigator.of(context).push<TyreChecklistTyreState>(
-        MaterialPageRoute(
-          builder: (_) => TyreDetailScreen(
-            repository: widget.repository,
-            inspectionId: widget.inspectionId,
-            position: position,
-            instructions: widget.instructions,
-            initialState: _tyreStates[position],
-          ),
-        ),
-      );
+      final updatedState = await Navigator.of(context)
+          .push<TyreChecklistTyreState>(
+            MaterialPageRoute(
+              builder: (_) => TyreDetailScreen(
+                repository: widget.repository,
+                inspectionId: widget.inspectionId,
+                position: position,
+                apiPosition: _displayToOriginal[position] ?? position,
+                instructions: widget.instructions,
+                initialState: _tyreStates[position],
+              ),
+            ),
+          );
 
       if (updatedState != null && mounted) {
         setState(() {
@@ -139,7 +202,7 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
           inspectionId: widget.inspectionId,
           instructions: widget.instructions,
           vehicle: widget.vehicle,
-          tyreStates: widget.positions
+          tyreStates: _applicablePositions
               .map((position) => _tyreStates[position])
               .whereType<TyreChecklistTyreState>()
               .toList(growable: false),
@@ -404,9 +467,20 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final psiRange = '${widget.instructions.psiMin.toStringAsFixed(0)}'
+    // Clamp textScaler to prevent scaling from both font size and display size settings
+    final psiRange =
+        '${widget.instructions.psiMin.toStringAsFixed(0)}'
         '–${widget.instructions.psiMax.toStringAsFixed(0)} PSI';
 
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
+      child: _buildContent(context, theme, psiRange),
+    );
+  }
+
+  Widget _buildContent(BuildContext context, ThemeData theme, String psiRange) {
     if (_isInitialising) {
       return const AppGradientBackground(
         child: Scaffold(
@@ -426,7 +500,11 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.warning_amber_rounded, size: 48, color: Colors.orange),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 48,
+                    color: Colors.orange,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'Unable to load saved tyre data.',
@@ -473,7 +551,10 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: Colors.transparent,
+          backgroundColor: const Color(
+            0xFF12355B,
+          ), // Dark blue (same as training/spot audit)
+          foregroundColor: Colors.white,
           elevation: 0,
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -483,7 +564,7 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
                 style: GoogleFonts.josefinSans(
                   textStyle: theme.textTheme.headlineSmall?.copyWith(
                     fontWeight: FontWeight.w600,
-                    color: const Color(0xFF0F2949),
+                    color: Colors.white,
                   ),
                 ),
               ),
@@ -491,11 +572,12 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
               Text(
                 'Tyres: ${widget.vehicle.tyreCount} · PSI guide $psiRange',
                 style: theme.textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF3A5A84),
+                  color: Colors.white70,
                 ),
               ),
             ],
           ),
+          iconTheme: const IconThemeData(color: Colors.white),
         ),
         body: Column(
           children: [
@@ -531,7 +613,7 @@ class _TyreLayoutScreenState extends State<TyreLayoutScreen> {
                       children: [
                         TyreVehicleCanvas(
                           vehicleNumber: widget.vehicle.vehicleNumber,
-                          positions: widget.positions,
+                          positions: _applicablePositions,
                           statusMap: _buildStatusMap(),
                           psiMin: widget.instructions.psiMin,
                           psiMax: widget.instructions.psiMax,

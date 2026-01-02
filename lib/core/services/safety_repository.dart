@@ -6,13 +6,16 @@ import 'package:intl/intl.dart';
 
 import '../models/app_user.dart';
 import '../models/safety_models.dart';
+import '../models/incab_models.dart';
+import '../models/plant_directory.dart';
+import '../models/training_models.dart';
 
 class SafetyRepository {
   SafetyRepository({http.Client? client, Uri? baseUri, AppUser? currentUser})
-      : _client = client ?? http.Client(),
-        _baseUri = baseUri ??
-            Uri.parse('https://sstranswaysindia.com/api/safety/'),
-        _currentUser = currentUser;
+    : _client = client ?? http.Client(),
+      _baseUri =
+          baseUri ?? Uri.parse('https://sstranswaysindia.com/api/safety/'),
+      _currentUser = currentUser;
 
   final http.Client _client;
   final Uri _baseUri;
@@ -43,9 +46,7 @@ class SafetyRepository {
         break;
     }
 
-    Map<String, String> data = {
-      if (role != null) 'role': role,
-    };
+    Map<String, String> data = {if (role != null) 'role': role};
 
     int? toInt(String? value) => value == null ? null : int.tryParse(value);
 
@@ -55,7 +56,9 @@ class SafetyRepository {
     final driverId = toInt(target.driverId);
     if (driverId != null) data['driverId'] = driverId.toString();
 
-    final plantId = toInt(target.plantId ?? target.assignmentPlantId ?? target.defaultPlantId);
+    final plantId = toInt(
+      target.plantId ?? target.assignmentPlantId ?? target.defaultPlantId,
+    );
     if (plantId != null) data['plantId'] = plantId.toString();
 
     if (target.supervisedPlantIds.isNotEmpty) {
@@ -121,23 +124,19 @@ class SafetyRepository {
 
       return TyreInstructions.fromJson(decoded);
     } catch (error, stackTrace) {
-      debugPrint('SafetyRepository.fetchTyreInstructions fallback: $error\n$stackTrace');
+      debugPrint(
+        'SafetyRepository.fetchTyreInstructions fallback: $error\n$stackTrace',
+      );
       return _fallbackInstructions();
     }
   }
 
-  Future<List<SafetyVehicle>> fetchVehicles({
-    AppUser? user,
-  }) async {
+  Future<List<SafetyVehicle>> fetchVehicles({AppUser? user}) async {
     final effectiveUser = user ?? _currentUser;
-    final scope = effectiveUser?.role == UserRole.supervisor ? 'plant' : 'mine';
-    final query = {
-      'scope': scope,
-      ..._authQuery(effectiveUser),
-      if (effectiveUser?.assignmentPlantId != null &&
-          effectiveUser!.assignmentPlantId!.isNotEmpty)
-        'plantId': effectiveUser.assignmentPlantId!,
-    };
+    final scope = 'all';
+    final query = {'scope': scope, ..._authQuery(effectiveUser)};
+    query.remove('plantId');
+    query.remove('plant_id');
     final uri = _resolve('vehicles.php', query);
     final response = await _client.get(uri);
     if (response.statusCode >= 300) {
@@ -146,7 +145,9 @@ class SafetyRepository {
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Failed to load vehicles');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to load vehicles',
+      );
     }
 
     final vehicles = (decoded['vehicles'] as List<dynamic>? ?? const [])
@@ -157,15 +158,49 @@ class SafetyRepository {
     return vehicles;
   }
 
+  Future<List<PlantDirectoryEntry>> fetchPlantDirectory({AppUser? user}) async {
+    final authQuery = Map<String, String>.from(_authQuery(user));
+    authQuery.remove('plantId');
+    authQuery.remove('plant_id');
+    final uri = _resolve(
+      'plant_directory.php',
+      authQuery.isEmpty ? null : authQuery,
+    );
+    final response = await _client.get(uri);
+    if (response.statusCode >= 300) {
+      throw Exception(
+        'Failed to load plant directory (${response.statusCode})',
+      );
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    if (decoded['status'] != 'ok') {
+      throw Exception(
+        decoded['message']?.toString() ?? 'Failed to load plant directory',
+      );
+    }
+    final plants = (decoded['plants'] as List<dynamic>? ?? const [])
+        .map(
+          (item) => PlantDirectoryEntry.fromJson(item as Map<String, dynamic>),
+        )
+        .where((entry) => entry.id > 0)
+        .toList(growable: false);
+    return plants;
+  }
+
   Future<TyreInspectionStart> startInspection({
     required int vehicleId,
+    required int driverId,
     AppUser? user,
   }) async {
     final uri = _resolve('tyres/inspections/start.php', _authQuery(user));
     final response = await _client.post(
       uri,
       headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'vehicle_id': vehicleId}),
+      body: jsonEncode({
+        'vehicle_id': vehicleId,
+        'driver_id': driverId,
+        'inspector_user_id': user?.id,
+      }),
     );
 
     if (response.statusCode >= 300) {
@@ -178,12 +213,16 @@ class SafetyRepository {
       } catch (_) {
         // ignore parse errors
       }
-      throw Exception(message ?? 'Failed to start inspection (${response.statusCode})');
+      throw Exception(
+        message ?? 'Failed to start inspection (${response.statusCode})',
+      );
     }
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Failed to start inspection');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to start inspection',
+      );
     }
 
     return TyreInspectionStart.fromJson(decoded);
@@ -269,22 +308,27 @@ class SafetyRepository {
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Failed to load tyre state');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to load tyre state',
+      );
     }
 
     final answers = (decoded['answers'] as List<dynamic>? ?? const <dynamic>[])
         .map((entry) {
-      final map = entry as Map<String, dynamic>;
-      return TyreAnswer(
-        checkpointNo: map['checkpoint_no'] is int
-            ? map['checkpoint_no'] as int
-            : int.tryParse(map['checkpoint_no']?.toString() ?? '0') ?? 0,
-        result: TyreCheckpointResult.fromApi(map['result']?.toString() ?? 'acceptable'),
-        remark: (map['remark']?.toString().trim().isEmpty ?? true)
-            ? null
-            : map['remark']?.toString().trim(),
-      );
-    }).toList(growable: false);
+          final map = entry as Map<String, dynamic>;
+          return TyreAnswer(
+            checkpointNo: map['checkpoint_no'] is int
+                ? map['checkpoint_no'] as int
+                : int.tryParse(map['checkpoint_no']?.toString() ?? '0') ?? 0,
+            result: TyreCheckpointResult.fromApi(
+              map['result']?.toString() ?? 'acceptable',
+            ),
+            remark: (map['remark']?.toString().trim().isEmpty ?? true)
+                ? null
+                : map['remark']?.toString().trim(),
+          );
+        })
+        .toList(growable: false);
 
     final psi = decoded['psi'];
     return TyreChecklistTyreState(
@@ -292,9 +336,11 @@ class SafetyRepository {
       answers: answers,
       psi: psi is num ? psi.toDouble() : 0,
       photoUrl: decoded['photo_url']?.toString(),
-      warnings: (decoded['warnings'] as List<dynamic>? ?? const <dynamic>[]) // propagate warnings if any
-          .map((entry) => entry.toString())
-          .toList(growable: false),
+      warnings:
+          (decoded['warnings'] as List<dynamic>? ??
+                  const <dynamic>[]) // propagate warnings if any
+              .map((entry) => entry.toString())
+              .toList(growable: false),
       expectedCheckpoints: expectedCheckpoints,
     );
   }
@@ -323,7 +369,9 @@ class SafetyRepository {
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Failed to submit inspection');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to submit inspection',
+      );
     }
   }
 
@@ -337,7 +385,8 @@ class SafetyRepository {
       TyreCheckpoint(
         number: 2,
         textHi: 'संभावित लीक (वाल्व कैप्स / एक्सटेंशन वाल्व) के लिए जाँच।',
-        textEn: 'Check visually for possible leakage (valve caps / extension valves).',
+        textEn:
+            'Check visually for possible leakage (valve caps / extension valves).',
       ),
       TyreCheckpoint(
         number: 3,
@@ -351,7 +400,8 @@ class SafetyRepository {
       ),
       TyreCheckpoint(
         number: 5,
-        textHi: 'अगर अनियमित घिसाव है — वाहन के सस्पेंशन / रिम के नट्स की जाँच करें।',
+        textHi:
+            'अगर अनियमित घिसाव है — वाहन के सस्पेंशन / रिम के नट्स की जाँच करें।',
         textEn: 'If irregular wear—check suspension / nuts on rims.',
       ),
       TyreCheckpoint(
@@ -361,8 +411,10 @@ class SafetyRepository {
       ),
       TyreCheckpoint(
         number: 7,
-        textHi: 'एक ही धुरी/एक्सल पर एक ही प्रकार/आकार/कंपनी के टायर इस्तेमाल हों।',
-        textEn: 'Same manufacturer/type/size/service description/wear on same axle.',
+        textHi:
+            'एक ही धुरी/एक्सल पर एक ही प्रकार/आकार/कंपनी के टायर इस्तेमाल हों।',
+        textEn:
+            'Same manufacturer/type/size/service description/wear on same axle.',
       ),
       TyreCheckpoint(
         number: 8,
@@ -432,7 +484,10 @@ class SafetyRepository {
 
     if (response.statusCode >= 300 || decoded['status'] != 'ok') {
       final message = decoded['message'] ?? decoded['error'];
-      throw Exception(message?.toString() ?? 'Failed to submit audit (${response.statusCode})');
+      throw Exception(
+        message?.toString() ??
+            'Failed to submit audit (${response.statusCode})',
+      );
     }
 
     final auditId = decoded['audit_id'];
@@ -445,81 +500,114 @@ class SafetyRepository {
     return 0;
   }
 
-  Future<List<PlantDirectoryEntry>> fetchPlantDirectory({AppUser? user}) async {
-    final authQuery = Map<String, String>.from(_authQuery(user));
-    authQuery.remove('plantId');
-    authQuery.remove('plant_id');
-    final uri = _resolve(
-      'plant_directory.php',
-      authQuery.isEmpty ? null : authQuery,
-    );
+  Future<List<InCabSection>> fetchInCabQuestions() async {
+    final uri = _resolve('incab_questions.php');
     final response = await _client.get(uri);
     if (response.statusCode >= 300) {
-      throw Exception('Failed to load plant directory (${response.statusCode})');
+      throw Exception(
+        'Failed to load in-cab questions (${response.statusCode})',
+      );
     }
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (decoded['status'] != 'ok') {
-      throw Exception(decoded['message']?.toString() ?? 'Failed to load plant directory');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to load in-cab questions',
+      );
     }
-    final plants = (decoded['plants'] as List<dynamic>? ?? const [])
-        .map((item) => PlantDirectoryEntry.fromJson(item as Map<String, dynamic>))
-        .where((entry) => entry.id > 0)
+    final sections = (decoded['sections'] as List<dynamic>? ?? const [])
+        .map((item) => InCabSection.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
-    return plants;
+    return sections;
   }
-}
 
-class PlantDirectoryEntry {
-  PlantDirectoryEntry({
-    required this.id,
-    required this.name,
-    required this.vehicles,
-    required this.drivers,
-  });
-
-  factory PlantDirectoryEntry.fromJson(Map<String, dynamic> json) {
-    return PlantDirectoryEntry(
-      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
-      name: json['name']?.toString() ?? '',
-      vehicles: (json['vehicles'] as List<dynamic>? ?? const [])
-          .map((item) => PlantDirectoryVehicle.fromJson(item as Map<String, dynamic>))
-          .toList(growable: false),
-      drivers: (json['drivers'] as List<dynamic>? ?? const [])
-          .map((item) => PlantDirectoryDriver.fromJson(item as Map<String, dynamic>))
-          .toList(growable: false),
+  Future<int> submitInCabAssessment(InCabAssessmentRequest request) async {
+    final uri = _resolve('incab_save.php', _authQuery(_currentUser));
+    final response = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(request.toJson()),
     );
+    Map<String, dynamic> decoded = {};
+    try {
+      decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {}
+
+    if (response.statusCode >= 300 || decoded['status'] != 'ok') {
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to save in-cab assessment',
+      );
+    }
+
+    return decoded['assessment_id'] is int
+        ? decoded['assessment_id'] as int
+        : int.tryParse(decoded['assessment_id']?.toString() ?? '') ?? 0;
   }
 
-  final int id;
-  final String name;
-  final List<PlantDirectoryVehicle> vehicles;
-  final List<PlantDirectoryDriver> drivers;
-}
+  Future<List<TrainingModule>> fetchTrainingModules() async {
+    final uri = _resolve('training_modules.php', _authQuery(_currentUser));
+    final response = await _client.get(uri);
+    if (response.statusCode >= 300) {
+      throw Exception(
+        'Failed to load training modules (${response.statusCode})',
+      );
+    }
+    final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    if (decoded['status'] != 'ok') {
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to load training modules',
+      );
+    }
+    final modules = (decoded['modules'] as List<dynamic>? ?? const [])
+        .map((e) => TrainingModule.fromJson(e as Map<String, dynamic>))
+        .toList(growable: false);
+    // Sort by numeric suffix in code (e.g., training_2 before training_10)
+    modules.sort((a, b) {
+      int parseOrder(TrainingModule m) {
+        final match = RegExp(r'(\d+)$').firstMatch(m.code);
+        return int.tryParse(match?.group(1) ?? '') ?? 0;
+      }
 
-class PlantDirectoryVehicle {
-  const PlantDirectoryVehicle({required this.id, required this.number});
+      final na = parseOrder(a);
+      final nb = parseOrder(b);
+      if (na != nb) return na.compareTo(nb);
+      return a.code.compareTo(b.code);
+    });
+    return modules;
+  }
 
-  factory PlantDirectoryVehicle.fromJson(Map<String, dynamic> json) {
-    return PlantDirectoryVehicle(
-      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
-      number: json['number']?.toString() ?? '',
+  Future<void> saveTrainingProgress({
+    required int moduleId,
+    required int positionSeconds,
+    bool completed = false,
+    int? durationSeconds,
+  }) async {
+    final uri = _resolve(
+      'training_progress_save.php',
+      _authQuery(_currentUser),
     );
-  }
-
-  final int id;
-  final String number;
-}
-
-class PlantDirectoryDriver {
-  const PlantDirectoryDriver({required this.id, required this.name});
-
-  factory PlantDirectoryDriver.fromJson(Map<String, dynamic> json) {
-    return PlantDirectoryDriver(
-      id: int.tryParse(json['id']?.toString() ?? '') ?? 0,
-      name: json['name']?.toString() ?? '',
+    final payload = <String, dynamic>{
+      'module_id': moduleId,
+      'position_seconds': positionSeconds,
+      'completed': completed,
+    };
+    if (durationSeconds != null && durationSeconds > 0) {
+      payload['duration_seconds'] = durationSeconds;
+    }
+    final response = await _client.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
     );
-  }
 
-  final int id;
-  final String name;
+    Map<String, dynamic> decoded = {};
+    try {
+      decoded = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {}
+
+    if (response.statusCode >= 300 || decoded['status'] != 'ok') {
+      throw Exception(
+        decoded['error']?.toString() ?? 'Failed to save training progress',
+      );
+    }
+  }
 }

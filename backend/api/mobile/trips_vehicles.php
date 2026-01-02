@@ -87,7 +87,12 @@ try {
         apiRespond(200, ['status' => 'ok', 'vehicles' => []]);
     }
 
-    $stmt = $conn->prepare("SELECT id, {$vehicleNumberColumn} AS vehicle_no FROM vehicles WHERE {$plantColumn} = ? ORDER BY {$vehicleNumberColumn}");
+    $disableCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE 'disable_flag'");
+    $disableWhere = ($disableCheck && $disableCheck->num_rows > 0)
+        ? " AND (disable_flag = 'Y' OR disable_flag IS NULL)"
+        : '';
+
+    $stmt = $conn->prepare("SELECT id, {$vehicleNumberColumn} AS vehicle_no FROM vehicles WHERE {$plantColumn} = ?{$disableWhere} ORDER BY {$vehicleNumberColumn}");
     $stmt->bind_param('i', $plantId);
     $stmt->execute();
     $result = $stmt->get_result();

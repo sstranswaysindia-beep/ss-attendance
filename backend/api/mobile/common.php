@@ -1,6 +1,23 @@
 <?php
 declare(strict_types=1);
 
+function apiSendCorsHeaders(): void {
+    if (headers_sent()) {
+        return;
+    }
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization');
+    header('Access-Control-Max-Age: 86400');
+}
+
+// Handle CORS preflight early for all endpoints that include this file.
+if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    apiSendCorsHeaders();
+    http_response_code(204);
+    exit;
+}
+
 $configCandidates = [
     dirname(__DIR__, 2) . '/conf/config.php',
     dirname(__DIR__, 3) . '/conf/config.php',
@@ -23,6 +40,7 @@ if (!$configLoaded) {
 
 function apiRespond(int $status, array $payload): void {
     if (!headers_sent()) {
+        apiSendCorsHeaders();
         http_response_code($status);
         header('Content-Type: application/json; charset=utf-8');
         header('Cache-Control: no-store, no-cache, must-revalidate, private');

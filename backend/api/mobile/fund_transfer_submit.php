@@ -13,6 +13,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require __DIR__ . '/common.php';
 
+if (!function_exists('column_exists')) {
+    function column_exists(mysqli $db, string $table, string $column): bool
+    {
+        $tableEsc = $db->real_escape_string($table);
+        $columnEsc = $db->real_escape_string($column);
+        $sql = "SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = '{$tableEsc}'
+                  AND COLUMN_NAME = '{$columnEsc}'
+                LIMIT 1";
+        $res = $db->query($sql);
+        $exists = $res && $res->num_rows > 0;
+        if ($res instanceof mysqli_result) {
+            $res->free();
+        }
+        return $exists;
+    }
+}
+
 // Debug: Log that API was called
 $debugMsg = "DEBUG: Fund transfer API called at " . date('Y-m-d H:i:s') . "\n";
 file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
@@ -23,7 +42,9 @@ $data = apiRequireJson();
 $driverId = apiSanitizeInt($data['driverId'] ?? null);
 $amount = (float)($data['amount'] ?? 0);
 $description = trim($data['description'] ?? '');
+$category = trim((string)($data['category'] ?? ''));
 $senderId = apiSanitizeInt($data['senderId'] ?? null); // Who is sending the money
+$timestamp = isset($data['timestamp']) ? trim((string)$data['timestamp']) : '';
 $requestSenderName = '';
 if (isset($data['senderName'])) {
     $requestSenderName = trim((string) $data['senderName']);
@@ -165,6 +186,21 @@ try {
     if ($senderName === null) {
         $senderName = "Driver ID $senderId";
     }
+    $senderPlant = '';
+    if (isset($senderData['plant_id']) && (int)$senderData['plant_id'] > 0) {
+        $senderPlantId = (int)$senderData['plant_id'];
+        $senderPlantStmt = $conn->prepare("SELECT plant_name FROM plants WHERE id = ? LIMIT 1");
+        if ($senderPlantStmt) {
+            $senderPlantStmt->bind_param('i', $senderPlantId);
+            $senderPlantStmt->execute();
+            $senderPlantResult = $senderPlantStmt->get_result();
+            if ($senderPlantRow = $senderPlantResult->fetch_assoc()) {
+                $senderPlant = trim((string)($senderPlantRow['plant_name'] ?? ''));
+            }
+            $senderPlantStmt->close();
+        }
+    }
+    $senderLabel = $senderName . ($senderPlant !== '' ? " ($senderPlant)" : '');
 
     $debugMsg = "[" . date('Y-m-d H:i:s') . "] SENDER_NAME_EXTRACTED: '$senderName'\n";
     error_log($debugMsg);
@@ -175,7 +211,28 @@ try {
     if ($receiverName === '') {
         $receiverName = "Driver ID $driverId";
     }
-    $finalReceiverDesc = "Fund transfer from {$senderName} - $description";
+    $receiverPlant = '';
+    if (isset($driverData['plant_id']) && (int)$driverData['plant_id'] > 0) {
+        $plantId = (int)$driverData['plant_id'];
+        $plantStmt = $conn->prepare("SELECT plant_name FROM plants WHERE id = ? LIMIT 1");
+        if ($plantStmt) {
+            $plantStmt->bind_param('i', $plantId);
+            $plantStmt->execute();
+            $plantResult = $plantStmt->get_result();
+            if ($plantRow = $plantResult->fetch_assoc()) {
+                $receiverPlant = trim((string)($plantRow['plant_name'] ?? ''));
+            }
+            $plantStmt->close();
+        }
+    }
+    $receiverLabel = $receiverName . ($receiverPlant !== '' ? " ($receiverPlant)" : '');
+    $normalizedCategory = strtoupper($category);
+    $isAdvanceCategory =
+        $normalizedCategory !== '' && stripos($normalizedCategory, 'ADVANCE') !== false;
+
+    $finalReceiverDesc = $isAdvanceCategory
+        ? "Fund transfer from {$senderLabel}"
+        : "Fund transfer from {$senderLabel} - $description";
     $debugMsg = "[" . date('Y-m-d H:i:s') . "] RECEIVER_DESCRIPTION: '$finalReceiverDesc'\n";
     error_log($debugMsg);
     file_put_contents(__DIR__ . '/../../debug_fund_transfer.log', $debugMsg, FILE_APPEND);
@@ -198,12 +255,17 @@ try {
     error_log($debugMsg);
     file_put_contents(__DIR__ . '/../../debug_log.txt', $debugMsg, FILE_APPEND);
 
-    // Check if sender has sufficient balance
-    if ($senderBalance < $amount) {
-        apiRespond(400, ['status' => 'error', 'error' => 'Insufficient balance for transfer']);
-    }
+    // Allow negative balances for advance entries (fund transfers)
+    // Removed balance check to allow advance entries even when balance is negative
+    // This enables drivers to receive advances even if their current balance is negative
 
     $createdAt = date('Y-m-d H:i:s');
+    if ($timestamp !== '') {
+        $ts = strtotime($timestamp);
+        if ($ts !== false) {
+            $createdAt = date('Y-m-d H:i:s', $ts);
+        }
+    }
 
     // Start transaction
     $conn->begin_transaction();
@@ -218,17 +280,45 @@ try {
         // Cast variables to proper types for bind_param
         $receiverDriverId = (int)$driverId;
         $receiverAmount = (float)$amount;
-        
-        $receiverStmt = $conn->prepare(
-            'INSERT INTO advance_transactions (
-                driver_id,
-                amount,
-                type,
-                description,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?)' 
-        );
-        $receiverStmt->bind_param('idsss', $receiverDriverId, $receiverAmount, $receiverType, $receiverDesc, $createdAt);
+
+        $hasCpDriverCol = column_exists($conn, 'advance_transactions', 'counterparty_driver_id');
+        $hasCpPlantCol = column_exists($conn, 'advance_transactions', 'counterparty_plant_id');
+        $hasCategoryCol = column_exists($conn, 'advance_transactions', 'category');
+
+        $receiverCols = ['driver_id', 'amount', 'type', 'description', 'created_at'];
+        $receiverPh = ['?', '?', '?', '?', '?'];
+        $receiverTypes = 'idsss';
+        $receiverVals = [$receiverDriverId, $receiverAmount, $receiverType, $receiverDesc, $createdAt];
+
+        if ($hasCpDriverCol) {
+            $receiverCols[] = 'counterparty_driver_id';
+            $receiverPh[] = '?';
+            $receiverTypes .= 'i';
+            $receiverVals[] = (int)$senderId;
+        }
+        if ($hasCpPlantCol) {
+            $receiverCols[] = 'counterparty_plant_id';
+            $receiverPh[] = '?';
+            $receiverTypes .= 'i';
+            $receiverVals[] = (int)$senderPlantId;
+        }
+        if ($hasCategoryCol && $category !== '') {
+            $receiverCols[] = 'category';
+            $receiverPh[] = '?';
+            $receiverTypes .= 's';
+            $receiverVals[] = $category;
+        }
+
+        $receiverSql = 'INSERT INTO advance_transactions (' . implode(', ', $receiverCols) . ') VALUES (' . implode(', ', $receiverPh) . ')';
+        $receiverStmt = $conn->prepare($receiverSql);
+        if (!$receiverStmt) {
+            throw new RuntimeException('Failed to prepare receiver insert statement');
+        }
+        $receiverBind = [$receiverTypes];
+        foreach ($receiverVals as $k => $v) {
+            $receiverBind[] = &$receiverVals[$k];
+        }
+        call_user_func_array([$receiverStmt, 'bind_param'], $receiverBind);
         $receiverStmt->execute();
         $receiverTransactionId = $receiverStmt->insert_id;
         $receiverStmt->close();
@@ -251,24 +341,50 @@ try {
 
         // 2. Insert transaction for SENDER - they spend money
         $senderType = 'expense';
-        $senderDesc = "Fund transfer to {$receiverName} - $description";
+        $senderDesc = $isAdvanceCategory
+            ? "Fund transfer to {$receiverLabel}"
+            : "Fund transfer to {$receiverLabel} - $description";
         
         error_log("DEBUG: Sender transaction params - senderId: " . gettype($senderId) . " = $senderId, amount: " . gettype($amount) . " = $amount");
         
         // Cast variables to proper types for bind_param
         $senderDriverId = (int)$senderId;
         $senderAmount = (float)$amount;
-        
-        $senderStmt = $conn->prepare(
-            'INSERT INTO advance_transactions (
-                driver_id,
-                amount,
-                type,
-                description,
-                created_at
-            ) VALUES (?, ?, ?, ?, ?)' 
-        );
-        $senderStmt->bind_param('idsss', $senderDriverId, $senderAmount, $senderType, $senderDesc, $createdAt);
+
+        $senderCols = ['driver_id', 'amount', 'type', 'description', 'created_at'];
+        $senderPh = ['?', '?', '?', '?', '?'];
+        $senderTypes = 'idsss';
+        $senderVals = [$senderDriverId, $senderAmount, $senderType, $senderDesc, $createdAt];
+
+        if ($hasCpDriverCol) {
+            $senderCols[] = 'counterparty_driver_id';
+            $senderPh[] = '?';
+            $senderTypes .= 'i';
+            $senderVals[] = (int)$driverId;
+        }
+        if ($hasCpPlantCol) {
+            $senderCols[] = 'counterparty_plant_id';
+            $senderPh[] = '?';
+            $senderTypes .= 'i';
+            $senderVals[] = (int)$plantId;
+        }
+        if ($hasCategoryCol && $category !== '') {
+            $senderCols[] = 'category';
+            $senderPh[] = '?';
+            $senderTypes .= 's';
+            $senderVals[] = $category;
+        }
+
+        $senderSql = 'INSERT INTO advance_transactions (' . implode(', ', $senderCols) . ') VALUES (' . implode(', ', $senderPh) . ')';
+        $senderStmt = $conn->prepare($senderSql);
+        if (!$senderStmt) {
+            throw new RuntimeException('Failed to prepare sender insert statement');
+        }
+        $senderBind = [$senderTypes];
+        foreach ($senderVals as $k => $v) {
+            $senderBind[] = &$senderVals[$k];
+        }
+        call_user_func_array([$senderStmt, 'bind_param'], $senderBind);
         $senderStmt->execute();
         $senderTransactionId = $senderStmt->insert_id;
         $senderStmt->close();
@@ -285,7 +401,7 @@ try {
             'receiverTransactionId' => (int)$receiverTransactionId,
             'senderTransactionId' => (int)$senderTransactionId,
             'driverId' => $driverId,
-            'driverName' => $receiverName,
+            'driverName' => $receiverLabel,
             'senderId' => $senderId,
             'senderName' => $senderName,
             'amount' => $amount,

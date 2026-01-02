@@ -29,43 +29,65 @@ class TyreVehicleCanvas extends StatelessWidget {
   Widget build(BuildContext context) {
     final layout = _analyzePositions(positions);
 
-    return AspectRatio(
-      aspectRatio: 9 / 16,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFF8FAFC), Color(0xFFEFF3F8)],
+    // Lock scaling so system font/display size does not affect layout
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
+      child: AspectRatio(
+        // Taller canvas so the plotted layout box has more height
+        aspectRatio: 9 / 12,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: const LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Color(0xFFF8FAFC), Color(0xFFEFF3F8)],
+            ),
           ),
-        ),
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final width = constraints.maxWidth;
-            final height = constraints.maxHeight;
-            return Stack(
-              children: [
-                _Cabin(vehicleNumber: vehicleNumber, width: width, height: height),
-                _RearChassis(width: width, height: height),
-                ..._buildSteerAxle(context, width, height, layout.steerLeft, layout.steerRight),
-                ..._buildRearAxles(context, width, height, layout.rearAxles),
-                if ((layout.stepneyCode ?? stepneyPosition).isNotEmpty)
-                  _buildStepney(context, width, height, layout.stepneyCode ?? stepneyPosition),
-                Positioned(
-                  left: 18,
-                  top: 12,
-                  child: Text(
-                    'PSI: ${psiMin.toStringAsFixed(0)} – ${psiMax.toStringAsFixed(0)}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: Colors.blueGrey.shade600,
-                          fontWeight: FontWeight.w600,
-                        ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final width = constraints.maxWidth;
+              final height = constraints.maxHeight;
+              return Stack(
+                children: [
+                  _Cabin(
+                    vehicleNumber: vehicleNumber,
+                    width: width,
+                    height: height,
                   ),
-                ),
-              ],
-            );
-          },
+                  _RearChassis(width: width, height: height),
+                  ..._buildSteerAxle(
+                    context,
+                    width,
+                    height,
+                    layout.steerLeft,
+                    layout.steerRight,
+                  ),
+                  ..._buildRearAxles(context, width, height, layout.rearAxles),
+                  if ((layout.stepneyCode ?? stepneyPosition).isNotEmpty)
+                    _buildStepney(
+                      context,
+                      width,
+                      height,
+                      layout.stepneyCode ?? stepneyPosition,
+                    ),
+                  Positioned(
+                    left: 18,
+                    top: 12,
+                    child: Text(
+                      'PSI: ${psiMin.toStringAsFixed(0)} – ${psiMax.toStringAsFixed(0)}',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.blueGrey.shade600,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -81,27 +103,34 @@ class TyreVehicleCanvas extends StatelessWidget {
     if (leftCodes.isEmpty && rightCodes.isEmpty) return const [];
 
     final widgets = <Widget>[];
-    final centerY = height * 0.21;
+    final centerY = height * 0.23;
     final leftX = width * 0.14;
     final rightX = width * 0.86;
+    final maxGroupHeight = height * 0.28;
 
-    widgets.addAll(_placeTyreGroup(
-      context: context,
-      codes: leftCodes,
-      centerY: centerY,
-      x: leftX,
-      alignRight: false,
-      isSteerGroup: true,
-    ));
+    widgets.addAll(
+      _placeTyreGroup(
+        context: context,
+        codes: leftCodes,
+        centerY: centerY,
+        x: leftX,
+        alignRight: false,
+        isSteerGroup: true,
+        maxGroupHeight: maxGroupHeight,
+      ),
+    );
 
-    widgets.addAll(_placeTyreGroup(
-      context: context,
-      codes: rightCodes,
-      centerY: centerY,
-      x: rightX,
-      alignRight: true,
-      isSteerGroup: true,
-    ));
+    widgets.addAll(
+      _placeTyreGroup(
+        context: context,
+        codes: rightCodes,
+        centerY: centerY,
+        x: rightX,
+        alignRight: true,
+        isSteerGroup: true,
+        maxGroupHeight: maxGroupHeight,
+      ),
+    );
 
     widgets.add(
       Positioned(
@@ -113,16 +142,20 @@ class TyreVehicleCanvas extends StatelessWidget {
             color: Colors.blueGrey.shade900,
             borderRadius: BorderRadius.circular(999),
             boxShadow: const [
-              BoxShadow(color: Color(0x1F000000), offset: Offset(0, 2), blurRadius: 6),
+              BoxShadow(
+                color: Color(0x1F000000),
+                offset: Offset(0, 2),
+                blurRadius: 6,
+              ),
             ],
           ),
           child: Text(
             'Steer Axle',
             style: GoogleFonts.josefinSans(
               textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -141,31 +174,40 @@ class TyreVehicleCanvas extends StatelessWidget {
     if (rearAxles.isEmpty) return const [];
 
     final widgets = <Widget>[];
-    const startYPct = 0.42;
-    const endYPct = 0.86;
+    const startYPct = 0.38;
+    const endYPct = 0.88;
     final total = rearAxles.length + 1;
     final leftX = width * 0.16;
     final rightX = width * 0.84;
 
     for (var index = 0; index < rearAxles.length; index++) {
-      final centerY = height * (startYPct + ((index + 1) * (endYPct - startYPct) / total));
+      final centerY =
+          height * (startYPct + ((index + 1) * (endYPct - startYPct) / total));
+      final spacingY = (endYPct - startYPct) * height / total;
+      final maxGroupHeight = spacingY * 0.75;
       final axle = rearAxles[index];
-      widgets.addAll(_placeTyreGroup(
-        context: context,
-        codes: axle.leftCodes,
-        centerY: centerY,
-        x: leftX,
-        alignRight: false,
-        isSteerGroup: false,
-      ));
-      widgets.addAll(_placeTyreGroup(
-        context: context,
-        codes: axle.rightCodes,
-        centerY: centerY,
-        x: rightX,
-        alignRight: true,
-        isSteerGroup: false,
-      ));
+      widgets.addAll(
+        _placeTyreGroup(
+          context: context,
+          codes: axle.leftCodes,
+          centerY: centerY,
+          x: leftX,
+          alignRight: false,
+          isSteerGroup: false,
+          maxGroupHeight: maxGroupHeight,
+        ),
+      );
+      widgets.addAll(
+        _placeTyreGroup(
+          context: context,
+          codes: axle.rightCodes,
+          centerY: centerY,
+          x: rightX,
+          alignRight: true,
+          isSteerGroup: false,
+          maxGroupHeight: maxGroupHeight,
+        ),
+      );
     }
     return widgets;
   }
@@ -178,39 +220,20 @@ class TyreVehicleCanvas extends StatelessWidget {
   ) {
     final state = statusMap[code];
     final color = state?.mapColor ?? Colors.blueGrey.shade900;
-    final tyreWidth = max(54.0, width * 0.12);
-    final tyreHeight = tyreWidth * 1.6;
+    // Match rear tyre sizing so S looks like L21/R21
+    final tyreWidth = max(36.0, width * 0.082);
+    final tyreHeight = tyreWidth * 1.15;
 
     return Positioned(
       left: (width / 2) - (tyreWidth / 2),
-      bottom: height * 0.10,
-      child: Column(
-        children: [
-          _TyreChip(
-            code: code,
-            width: tyreWidth,
-            height: tyreHeight,
-            color: color,
-            onTap: () => onTyreTap?.call(code),
-          ),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.blueGrey.shade900,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              'Stepney',
-              style: GoogleFonts.josefinSans(
-                textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ),
-          ),
-        ],
+      // Bring stepney closer to the cargo/body (smaller gap)
+      bottom: height * -0.015,
+      child: _TyreChip(
+        code: code,
+        width: tyreWidth,
+        height: tyreHeight,
+        color: color,
+        onTap: () => onTyreTap?.call(code),
       ),
     );
   }
@@ -222,16 +245,27 @@ class TyreVehicleCanvas extends StatelessWidget {
     required double x,
     required bool alignRight,
     required bool isSteerGroup,
+    double? maxGroupHeight,
   }) {
     if (codes.isEmpty) return const [];
 
     final baseWidth = MediaQuery.of(context).size.width;
-    final tyreWidth = isSteerGroup ? max(36.0, baseWidth * 0.085) : max(54.0, baseWidth * 0.11);
-    final tyreHeight = tyreWidth * (isSteerGroup ? 1.55 : 1.3);
-    final spacing = isSteerGroup ? 4.0 : 10.0;
+    double tyreWidth = isSteerGroup
+        ? max(26.0, baseWidth * 0.060)
+        : max(36.0, baseWidth * 0.082);
+    double tyreHeight = tyreWidth * (isSteerGroup ? 1.45 : 1.15);
+    // No gap for rear pairs; moderate spacing for steer
+    double spacing = isSteerGroup ? 8.0 : 0.0;
 
     if (isSteerGroup) {
-      final totalHeight = (codes.length * tyreHeight) + spacing * max(0, codes.length - 1);
+      final totalHeight =
+          (codes.length * tyreHeight) + spacing * max(0, codes.length - 1);
+      if (maxGroupHeight != null && totalHeight > maxGroupHeight) {
+        final scale = maxGroupHeight / totalHeight;
+        tyreWidth *= scale;
+        tyreHeight *= scale;
+        spacing *= scale;
+      }
       final startTop = centerY - totalHeight / 2;
 
       return List.generate(codes.length, (index) {
@@ -253,7 +287,8 @@ class TyreVehicleCanvas extends StatelessWidget {
       });
     }
 
-    final totalWidth = (codes.length * tyreWidth) + spacing * max(0, codes.length - 1);
+    final totalWidth =
+        (codes.length * tyreWidth) + spacing * max(0, codes.length - 1);
     final top = centerY - (tyreHeight / 2);
     final baseLeft = alignRight ? (x - totalWidth) : x;
 
@@ -323,8 +358,7 @@ class TyreVehicleCanvas extends StatelessWidget {
     steerLeft.sort((a, b) => _tyreCodeOrder(a).compareTo(_tyreCodeOrder(b)));
     steerRight.sort((a, b) => _tyreCodeOrder(a).compareTo(_tyreCodeOrder(b)));
 
-    final rearAxles = rearBuilders.entries
-        .toList()
+    final rearAxles = rearBuilders.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
     final rear = rearAxles
@@ -353,13 +387,13 @@ class _Cabin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cabinWidth = width * 0.68;
-    final cabinHeight = height * 0.20;
+    final cabinWidth = width * 0.72;
+    final cabinHeight = height * 0.24;
     final left = (width - cabinWidth) / 2;
 
     return Positioned(
       left: left,
-      top: height * 0.05,
+      top: height * 0.04,
       child: Container(
         width: cabinWidth,
         height: cabinHeight,
@@ -376,7 +410,10 @@ class _Cabin extends StatelessWidget {
               right: 0,
               child: Center(
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.blueGrey.shade900,
                     borderRadius: BorderRadius.circular(999),
@@ -384,11 +421,11 @@ class _Cabin extends StatelessWidget {
                   child: Text(
                     'Cabin · $vehicleNumber',
                     style: GoogleFonts.josefinSans(
-                      textStyle:
-                          Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
+                      textStyle: Theme.of(context).textTheme.labelSmall
+                          ?.copyWith(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
                     ),
                   ),
                 ),
@@ -404,7 +441,11 @@ class _Cabin extends StatelessWidget {
                   color: Colors.blueGrey.shade900,
                   shape: BoxShape.circle,
                   boxShadow: const [
-                    BoxShadow(color: Color(0x26000000), offset: Offset(0, 4), blurRadius: 12),
+                    BoxShadow(
+                      color: Color(0x26000000),
+                      offset: Offset(0, 4),
+                      blurRadius: 12,
+                    ),
                   ],
                 ),
                 alignment: Alignment.center,
@@ -423,10 +464,7 @@ class _Cabin extends StatelessWidget {
 }
 
 class _RearChassis extends StatelessWidget {
-  const _RearChassis({
-    required this.width,
-    required this.height,
-  });
+  const _RearChassis({required this.width, required this.height});
 
   final double width;
   final double height;
@@ -434,9 +472,10 @@ class _RearChassis extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final chassisWidth = width * 0.72;
-    final chassisHeight = height * 0.50;
+    // Increased height to give the cargo/body more vertical space
+    final chassisHeight = height * 0.60;
     final left = (width - chassisWidth) / 2;
-    final top = height * 0.32;
+    final top = height * 0.34;
 
     return Positioned(
       left: left,
@@ -463,9 +502,9 @@ class _RearChassis extends StatelessWidget {
                 'Cargo / Body',
                 style: GoogleFonts.josefinSans(
                   textStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -497,16 +536,20 @@ class _TyreChip extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(14),
         child: Ink(
           width: width,
           height: height,
           decoration: BoxDecoration(
             color: color,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.black.withOpacity(0.12)),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.black.withOpacity(0.10)),
             boxShadow: const [
-              BoxShadow(color: Color(0x26000000), offset: Offset(0, 2), blurRadius: 8),
+              BoxShadow(
+                color: Color(0x26000000),
+                offset: Offset(0, 2),
+                blurRadius: 8,
+              ),
             ],
           ),
           child: Center(
@@ -514,10 +557,13 @@ class _TyreChip extends StatelessWidget {
               code,
               style: GoogleFonts.josefinSans(
                 textStyle: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
+                  fontSize: 11,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),

@@ -315,7 +315,9 @@ class FinanceRepository {
     required String senderId,
     required double amount,
     required String description,
+    String? category,
     String? senderName,
+    String? timestamp,
   }) async {
     print(
       'DEBUG: FinanceRepository.submitFundTransfer called - driverId: $driverId, senderId: $senderId, amount: $amount, senderName: $senderName',
@@ -329,6 +331,12 @@ class FinanceRepository {
       'amount': amount,
       'description': description,
     };
+    if (category != null && category.trim().isNotEmpty) {
+      requestPayload['category'] = category.trim();
+    }
+    if (timestamp != null && timestamp.isNotEmpty) {
+      requestPayload['timestamp'] = timestamp;
+    }
     if (trimmedSenderName != null && trimmedSenderName.isNotEmpty) {
       requestPayload['senderName'] = trimmedSenderName;
     }

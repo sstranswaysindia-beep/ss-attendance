@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/driver_vehicle.dart';
@@ -16,8 +17,12 @@ import '../../core/services/gps_ping_service.dart';
 import '../../core/services/profile_repository.dart';
 import '../../core/services/app_update_service.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/safety_repository.dart';
+import '../../core/services/auth_storage_service.dart';
+import '../../core/services/training_flag_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/widgets/in_app_notification_banner.dart';
 import '../../core/widgets/update_available_sheet.dart';
@@ -28,6 +33,8 @@ import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
+import '../safety/safety_hub_screen.dart';
+import '../safety/training/training_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
 import '../watch_ads/watch_ads_screen.dart';
@@ -47,7 +54,7 @@ class DriverDashboardScreen extends StatefulWidget {
 }
 
 class _DriverDashboardScreenState extends State<DriverDashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late DateTime _now;
   Timer? _ticker;
   late String? _selectedVehicleId;
@@ -60,6 +67,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
   final ProfileRepository _profileRepository = ProfileRepository();
   final AppUpdateService _appUpdateService = AppUpdateService();
+  late SafetyRepository _safetyRepository;
   GpsPingService? _gpsPingService;
 
   AttendanceRecord? _latestShift;
@@ -68,6 +76,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   String? _shiftSummary;
   bool _isAttendanceLockedToday = false;
   bool _isCheckingAbsence = false;
+  bool _checkingTraining = false;
 
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
@@ -80,11 +89,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   StreamSubscription<List<InAppNotificationData>>?
   _pushNotificationListSubscription;
   String? _appVersion;
-  bool _hasPromptedForUpdate = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _now = DateTime.now();
     _initializePushNotifications();
     _selectedVehicleNumber = widget.user.vehicleNumber;
@@ -120,11 +129,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
 
+    _safetyRepository = SafetyRepository(currentUser: widget.user);
     _loadActiveShift();
     _loadNotifications();
     _loadAppVersion();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForAppUpdate();
+      _checkTrainingRequirement();
     });
 
     _gpsPingService =
@@ -140,12 +151,22 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _glowController.dispose();
     _gpsPingService?.stop();
     _pushNotificationSubscription?.cancel();
     _pushNotificationListSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _checkForAppUpdate();
+      _checkTrainingRequirement();
+    }
   }
 
   void _initializePushNotifications() {
@@ -238,17 +259,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   Future<void> _checkForAppUpdate() async {
-    if (_hasPromptedForUpdate) {
-      return;
-    }
-
     final status = await _appUpdateService.checkForUpdate();
     if (!mounted || !status.isUpdateAvailable) {
-      return;
-    }
-
-    _hasPromptedForUpdate = true;
-    if (!mounted) {
       return;
     }
 
@@ -263,6 +275,40 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         onDismissed: () {},
       ),
     );
+  }
+
+  Future<void> _checkTrainingRequirement() async {
+    if (_checkingTraining) return;
+    _checkingTraining = true;
+    try {
+      // Reload latest user and override to catch updated flag without relogin
+      final storedUser = await AuthStorageService.getUser();
+      final effectiveUser = storedUser ?? widget.user;
+      final override = await TrainingFlagService.isTrainingRequiredOverride();
+      final trainingRequiredFlag = effectiveUser.trainingRequired || override;
+      final shouldRedirect =
+          trainingRequiredFlag &&
+          (effectiveUser.role == UserRole.driver ||
+              effectiveUser.role == UserRole.supervisor);
+
+      if (shouldRedirect && mounted) {
+        // use freshest user context for repository
+        final repoUser = storedUser ?? widget.user;
+        _safetyRepository = SafetyRepository(currentUser: repoUser);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => SafetyTrainingScreen(
+              user: repoUser,
+              repository: _safetyRepository,
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      // Best-effort; ignore errors to avoid blocking dashboard usage
+    } finally {
+      _checkingTraining = false;
+    }
   }
 
   Future<void> _openVehiclePicker() async {
@@ -425,9 +471,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       }
 
       if (now.hour >= 21 && hasTodayCheckIn && !hasCheckedOut) {
-        final checkInLabel = inTime != null
-            ? DateFormat('hh:mm a').format(inTime)
-            : 'earlier';
+        final checkInLabel = DateFormat('hh:mm a').format(inTime);
         items.add(
           _NotificationItem(
             message:
@@ -659,9 +703,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   void _openScreen(Widget screen) {
-    Navigator.of(context)
-        .push(MaterialPageRoute(builder: (_) => screen))
-        .then((_) {
+    Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen)).then((
+      _,
+    ) {
       _loadActiveShift();
       _loadNotifications();
     });
@@ -680,7 +724,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       return;
     }
 
-    final driverIdValue = (widget.user.driverId ?? widget.user.id).toString().trim();
+    final driverIdValue = (widget.user.driverId ?? widget.user.id)
+        .toString()
+        .trim();
     final plantIdValue = widget.user.plantId?.trim();
 
     if (driverIdValue.isEmpty) {
@@ -791,12 +837,37 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          isHelper ? 'Helper Dashboard' : 'Driver Dashboard',
-          style: textTheme.titleLarge?.copyWith(
-            fontSize: 24,
-            fontWeight: FontWeight.w600,
+        titleSpacing: 0,
+        leadingWidth: 36,
+        leading: Builder(
+          builder: (context) => IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            iconSize: 20,
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
           ),
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: Lottie.asset(
+                'assets/animations/green_flashing_circle_icon.json',
+                repeat: true,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              isHelper ? 'Helper Dashboard' : 'Driver Dashboard',
+              style: textTheme.titleLarge?.copyWith(
+                fontSize: 24,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         actions: [
           IconButton(
@@ -905,11 +976,35 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        'Welcome, ${widget.user.displayName}',
-                        style: textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 130,
+                            height: 34,
+                            child: Lottie.asset(
+                              'downloads/welcome.json',
+                              repeat: true,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                          const SizedBox(width: 0),
+                          Flexible(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 8, left: 2),
+                              child: Text(
+                                widget.user.displayName,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.titleMedium?.copyWith(
+                                  fontSize:
+                                      (textTheme.titleMedium?.fontSize ?? 16) +
+                                          6,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -988,17 +1083,17 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                       ? Icons.access_time
                       : _isAttendanceLockedToday
                       ? Icons.verified
-                      : Icons.check_circle,
+                      : Icons.arrow_right_alt,
                   iconColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
                       : _isAttendanceLockedToday
                       ? const Color(0xFF37474F)
-                      : Colors.white,
+                      : Colors.black,
                   textColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
                       : _isAttendanceLockedToday
                       ? const Color(0xFF37474F)
-                      : const Color(0xFF003300),
+                      : Colors.black,
                 ),
                 if (_shiftSummary != null) ...[
                   const SizedBox(height: 8),
@@ -1058,6 +1153,13 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                           AttendanceAdjustRequestScreen(user: widget.user),
                         ),
                       ),
+                      const Divider(height: 0),
+                      HoverListTile(
+                        leading: const Icon(Icons.safety_check),
+                        title: const Text('Safety'),
+                        onTap: () =>
+                            _openScreen(SafetyHubScreen(user: widget.user)),
+                      ),
                       if (!isHelper) ...[
                         const Divider(height: 0),
                         HoverListTile(
@@ -1079,10 +1181,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 Container(
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFE3F2FD),
-                        Colors.white,
-                      ],
+                      colors: [Color(0xFFE3F2FD), Colors.white],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -1091,16 +1190,20 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     children: [
-                      for (int index = 0;
-                          index < notifications.length;
-                          index++) ...[
+                      for (
+                        int index = 0;
+                        index < notifications.length;
+                        index++
+                      ) ...[
                         Builder(
                           builder: (context) {
                             final item = notifications[index];
-                            final hasTitle = item.title != null &&
+                            final hasTitle =
+                                item.title != null &&
                                 item.title!.trim().isNotEmpty;
-                            final timeLabel =
-                                _formatNotificationTime(item.timestamp);
+                            final timeLabel = _formatNotificationTime(
+                              item.timestamp,
+                            );
                             return Card(
                               margin: EdgeInsets.zero,
                               elevation: 2,
@@ -1115,19 +1218,16 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                                   color: item.type.color,
                                 ),
                                 title: Text(
-                                  hasTitle
-                                      ? item.title!.trim()
-                                      : item.message,
+                                  hasTitle ? item.title!.trim() : item.message,
                                 ),
                                 subtitle: hasTitle ? Text(item.message) : null,
                                 trailing: timeLabel != null
                                     ? Text(
                                         timeLabel,
-                                        style:
-                                            theme.textTheme.labelSmall?.copyWith(
-                                          color:
-                                              theme.colorScheme.outline,
-                                        ),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: theme.colorScheme.outline,
+                                            ),
                                       )
                                     : null,
                                 onTap: item.isPlaceholder
@@ -1182,7 +1282,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: AppLoader(size: 16),
                           )
                         : const Icon(Icons.swap_horiz),
                     label: Text(
@@ -1255,7 +1355,7 @@ class GlowingAttendanceButton extends StatelessWidget {
     required this.onTap,
     this.label = 'Mark Attendance',
     this.gradient,
-    this.icon = Icons.check_circle,
+    this.icon = Icons.arrow_right_alt,
     this.iconColor,
     this.textColor,
     this.isLoading = false,
@@ -1280,54 +1380,56 @@ class GlowingAttendanceButton extends StatelessWidget {
         final gradientValue =
             gradient ??
             const LinearGradient(
-              colors: [Color(0xFF00C853), Color(0xFF64DD17)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+              colors: [Color(0xFF00EB5E), Color(0xFF00C853)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
             );
-        final baseColor = gradientValue.colors.first;
         return GestureDetector(
           onTap: isLoading ? null : onTap,
           child: Container(
             decoration: BoxDecoration(
               gradient: gradientValue,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.black, width: 2),
               boxShadow: [
                 BoxShadow(
-                  color: baseColor.withOpacity(0.35 + glow * 0.25),
-                  blurRadius: 22 + glow * 14,
-                  spreadRadius: 2 + glow * 3,
+                  color: Colors.black.withOpacity(0.16 + glow * 0.14),
+                  offset: const Offset(0, 2),
+                  blurRadius: 10 + glow * 16,
+                  spreadRadius: glow * 2.5,
                 ),
               ],
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 22),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: iconColor ?? Colors.white, size: 26),
-                const SizedBox(width: 12),
-                Transform.scale(
-                  scale: 0.94 + glow * 0.12,
-                  child: Text(
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+            child: Transform.scale(
+              scale: 1.0 + glow * 0.10,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, color: iconColor ?? Colors.black, size: 26),
+                  const SizedBox(width: 10),
+                  Text(
                     label,
                     style: theme.textTheme.titleLarge?.copyWith(
-                      color: textColor ?? const Color(0xFF003300),
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 0.8,
+                      fontSize: 22,
+                      color: textColor ?? Colors.black,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.3,
                     ),
                   ),
-                ),
-                if (isLoading) ...[
-                  const SizedBox(width: 12),
-                  const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  if (isLoading) ...[
+                    const SizedBox(width: 12),
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
                     ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
         );
@@ -1358,7 +1460,6 @@ class _HoverListTileState extends State<HoverListTile> {
 
   @override
   Widget build(BuildContext context) {
-    final baseColor = Colors.blue.shade50;
     final hoverColor = Colors.blue.shade100;
 
     return MouseRegion(

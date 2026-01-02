@@ -15,6 +15,7 @@ import '../../core/services/local_storage_service.dart';
 import '../../core/services/trip_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/glowing_badge.dart';
 import '../../core/services/notification_service.dart';
 
@@ -80,7 +81,9 @@ class _TripScreenState extends State<TripScreen> {
   final GlobalKey<FormFieldState<int?>> _helperDropdownKey =
       GlobalKey<FormFieldState<int?>>();
 
-  DateTime _from = DateTime.now().subtract(const Duration(days: _maxBackDateDays));
+  DateTime _from = DateTime.now().subtract(
+    const Duration(days: _maxBackDateDays),
+  );
   DateTime _to = DateTime.now();
   String _status = 'All';
   String? _selectedPlantId;
@@ -277,7 +280,7 @@ class _TripScreenState extends State<TripScreen> {
     if (confirmed != true) return;
 
     try {
-      await _repository.deleteTrip(user: widget.user, tripId: trip.id);
+      await _repository.deleteTrip(trip.id);
       showAppToast(context, 'Trip deleted successfully');
 
       // Refresh the data
@@ -747,7 +750,7 @@ class _TripScreenState extends State<TripScreen> {
         user: widget.user,
         tripId: _ongoingTrip!.id,
         setDriverIds: driverIds,
-        helperIds: helperIds.isNotEmpty ? helperIds : null,
+        helperId: helperIds.isNotEmpty ? helperIds.first : null,
         setCustomerNames: customerNames,
         note: note.isNotEmpty ? note : null,
       );
@@ -778,61 +781,90 @@ class _TripScreenState extends State<TripScreen> {
     );
 
     final startKm = _ongoingTrip!.startKm ?? 0;
+    int? currentEndKm = int.tryParse(endKmController.text.trim());
 
     return showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
           title: const Text('End Trip'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: endDateController,
-                decoration: const InputDecoration(
-                  labelText: 'End Date',
-                  suffixIcon: Icon(Icons.calendar_today),
-                ),
-                readOnly: true,
-                onTap: () async {
-                  final date = await showDatePicker(
-                    context: context,
-                    initialDate: DateTime.now(),
-                    firstDate: DateTime.now().subtract(
-                      const Duration(days: _maxBackDateDays),
+          content: StatefulBuilder(
+            builder: (dialogContext, dialogSetState) {
+              final totalKm = (currentEndKm != null && currentEndKm! > startKm)
+                  ? (currentEndKm! - startKm)
+                  : null;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: endDateController,
+                    decoration: const InputDecoration(
+                      labelText: 'End Date',
+                      suffixIcon: Icon(Icons.calendar_today, size: 18),
                     ),
-                    lastDate: DateTime.now().add(const Duration(days: 1)),
-                  );
-                  if (date != null) {
-                    endDateController.text = date.toIso8601String().split(
-                      'T',
-                    )[0];
-                  }
-                },
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: endKmController,
-                decoration: InputDecoration(
-                  labelText: 'End KM',
-                  hintText: 'Enter end KM (must be > $startKm)',
-                  suffixText: 'km',
-                ),
-                keyboardType: TextInputType.number,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Start KM: $startKm km',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-              ),
-            ],
+                    readOnly: true,
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now().subtract(
+                          const Duration(days: _maxBackDateDays),
+                        ),
+                        lastDate: DateTime.now().add(const Duration(days: 1)),
+                      );
+                      if (date != null) {
+                        endDateController.text = date.toIso8601String().split(
+                          'T',
+                        )[0];
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: endKmController,
+                    decoration: InputDecoration(
+                      labelText: 'End KM',
+                      hintText: 'Enter end KM (must be > $startKm)',
+                      suffixText: 'km',
+                    ),
+                    keyboardType: TextInputType.number,
+                    onChanged: (_) {
+                      dialogSetState(() {
+                        currentEndKm = int.tryParse(
+                          endKmController.text.replaceAll(',', '').trim(),
+                        );
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Start KM: $startKm km',
+                    style: Theme.of(
+                      dialogContext,
+                    ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
+                  ),
+                  if (totalKm != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      'Total KM: $totalKm km',
+                      style: Theme.of(dialogContext).textTheme.bodySmall
+                          ?.copyWith(
+                            color: Colors.grey[700],
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                ],
+              );
+            },
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
               child: const Text('Cancel'),
             ),
             FilledButton(
@@ -852,6 +884,10 @@ class _TripScreenState extends State<TripScreen> {
                 Navigator.of(context).pop();
                 await _performEndTrip(endKm, endDateController.text);
               },
+              style: FilledButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
               child: const Text('End Trip'),
             ),
           ],
@@ -1341,9 +1377,8 @@ class _TripScreenState extends State<TripScreen> {
         _helpersForPlant = helpers;
         _selectedHelpers = _selectedHelpers
             .where(
-              (helper) => helpers.any(
-                (candidate) => _helpersMatch(candidate, helper),
-              ),
+              (helper) =>
+                  helpers.any((candidate) => _helpersMatch(candidate, helper)),
             )
             .toList(growable: false);
       });
@@ -1442,7 +1477,9 @@ class _TripScreenState extends State<TripScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedStartDate,
-      firstDate: DateTime.now().subtract(const Duration(days: _maxBackDateDays)),
+      firstDate: DateTime.now().subtract(
+        const Duration(days: _maxBackDateDays),
+      ),
       lastDate: DateTime.now().add(const Duration(days: 30)),
     );
     if (picked == null) {
@@ -1521,7 +1558,7 @@ class _TripScreenState extends State<TripScreen> {
       // Get GPS coordinates
       final gpsLocation = await _gpsService.getLocationWithPrompt();
 
-      await _repository.createTrip(
+      final createdTripId = await _repository.createTrip(
         user: widget.user,
         vehicleId: vehicle.id,
         startDate: startDate,
@@ -1538,7 +1575,7 @@ class _TripScreenState extends State<TripScreen> {
         gpsLng: gpsLocation?['lng'],
       );
 
-      showAppToast(context, 'Trip started successfully.');
+      showAppToast(context, 'Trip started successfully. (ID: $createdTripId)');
 
       _customerController.clear();
       _noteController.clear();
@@ -1749,7 +1786,7 @@ class _TripScreenState extends State<TripScreen> {
                       const SizedBox(height: 12),
 
                       if (_isLoading && overview == null)
-                        const Center(child: CircularProgressIndicator())
+                        const Center(child: AppLoader())
                       else if (_error != null && overview == null)
                         _ErrorState(message: _error!, onRetry: _loadTrips)
                       else if (overview != null) ...[
@@ -2430,8 +2467,12 @@ class _PlantVehicleCard extends StatelessWidget {
                         color: Colors.teal.shade300,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      padding: const EdgeInsets.all(8),
-                      child: const Icon(Icons.factory, color: Colors.white),
+                      padding: const EdgeInsets.all(6),
+                      child: const Icon(
+                        Icons.factory,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Text(
@@ -2460,6 +2501,7 @@ class _PlantVehicleCard extends StatelessWidget {
                         ? selectedPlant
                         : null,
                     decoration: buildDropdownDecoration('Plant'),
+                    dropdownColor: Colors.white,
                     isExpanded: true,
                     items: plants
                         .map(
@@ -2469,7 +2511,7 @@ class _PlantVehicleCard extends StatelessWidget {
                               children: [
                                 const Icon(
                                   Icons.local_florist,
-                                  size: 18,
+                                  size: 14,
                                   color: Colors.teal,
                                 ),
                                 const SizedBox(width: 8),
@@ -2505,6 +2547,7 @@ class _PlantVehicleCard extends StatelessWidget {
                         ? selectedVehicle
                         : null,
                     decoration: buildDropdownDecoration('Vehicle'),
+                    dropdownColor: Colors.white,
                     isExpanded: true,
                     items: vehicles
                         .map((vehicle) {
@@ -2523,7 +2566,7 @@ class _PlantVehicleCard extends StatelessWidget {
                               children: [
                                 const Icon(
                                   Icons.local_shipping,
-                                  size: 16,
+                                  size: 14,
                                   color: Colors.blue,
                                 ),
                                 const SizedBox(width: 8),
@@ -2691,8 +2734,12 @@ class _DriverHelperCard extends StatelessWidget {
                         color: Colors.indigo.shade300,
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      padding: const EdgeInsets.all(8),
-                      child: const Icon(Icons.groups, color: Colors.white),
+                      padding: const EdgeInsets.all(6),
+                      child: const Icon(
+                        Icons.groups,
+                        color: Colors.white,
+                        size: 16,
+                      ),
                     ),
                     const SizedBox(width: 10),
                     Text(
@@ -2720,6 +2767,7 @@ class _DriverHelperCard extends StatelessWidget {
               key: driverFieldKey,
               focusNode: driverFocusNode,
               decoration: buildDropdownDecoration('Add Driver'),
+              dropdownColor: Colors.white,
               value: null,
               isExpanded: true,
               items: <DropdownMenuItem<int?>>[
@@ -2734,7 +2782,7 @@ class _DriverHelperCard extends StatelessWidget {
                       children: [
                         const Icon(
                           Icons.person,
-                          size: 18,
+                          size: 14,
                           color: Colors.indigo,
                         ),
                         const SizedBox(width: 8),
@@ -2807,6 +2855,7 @@ class _DriverHelperCard extends StatelessWidget {
               key: helperFieldKey,
               focusNode: helperFocusNode,
               decoration: buildDropdownDecoration('Add Helper'),
+              dropdownColor: Colors.white,
               value: null,
               isExpanded: true,
               items: <DropdownMenuItem<int?>>[
@@ -2821,7 +2870,7 @@ class _DriverHelperCard extends StatelessWidget {
                       children: [
                         const Icon(
                           Icons.volunteer_activism,
-                          size: 18,
+                          size: 14,
                           color: Colors.purple,
                         ),
                         const SizedBox(width: 8),
@@ -3002,8 +3051,12 @@ class _TripStartCardState extends State<_TripStartCard> {
                     color: Colors.deepOrange.shade300,
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  padding: const EdgeInsets.all(8),
-                  child: const Icon(Icons.rocket_launch, color: Colors.white),
+                  padding: const EdgeInsets.all(6),
+                  child: const Icon(
+                    Icons.rocket_launch,
+                    color: Colors.white,
+                    size: 16,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Text(
@@ -3225,7 +3278,7 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [Colors.orange.shade50, Colors.orange.shade100],
+              colors: [const Color(0xFFFFF1A3), const Color(0xFFFFD86B)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -3269,7 +3322,7 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
                           icon: const Icon(Icons.update, size: 16),
                           label: const Text('Update'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
+                            backgroundColor: const Color(0xFF00674B),
                             foregroundColor: Colors.white,
                             padding: const EdgeInsets.symmetric(
                               horizontal: 12,

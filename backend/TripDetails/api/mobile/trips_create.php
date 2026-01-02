@@ -181,6 +181,28 @@ if ($vehicle_id <= 0 || $start_date === '' || $start_km === null || empty($drive
     ]], 400);
 }
 
+/* ---------- ongoing trip guard (avoid false "started") ---------- */
+$ongo = $db->prepare("SELECT id, start_km, start_date FROM trips WHERE vehicle_id=? AND status='ongoing' ORDER BY id DESC LIMIT 1");
+$ongo->bind_param('i', $vehicle_id);
+$ongo->execute();
+$ongoRes = $ongo->get_result();
+if ($ongoRes && $ongoRes->num_rows) {
+    $row = $ongoRes->fetch_assoc();
+    $ongo->close();
+    m_json_out([
+        'ok' => true,
+        'success' => true,
+        'status' => 'ok',
+        'duplicate' => true,
+        'already_ongoing' => true,
+        'trip_id' => (int)($row['id'] ?? 0),
+        'existing_start_km' => isset($row['start_km']) ? (int)$row['start_km'] : null,
+        'existing_start_date' => $row['start_date'] ?? null,
+        'message' => 'Trip already ongoing for this vehicle',
+    ], 200);
+}
+$ongo->close();
+
 /* ---------- column guards ---------- */
 $has_note           = m_has_col($db, 'trips', 'note');
 $has_started_at     = m_has_col($db, 'trips', 'started_at');
@@ -316,7 +338,22 @@ try {
             $q->close();
             if ($row) m_json_out(['ok'=>true,'success'=>true,'status'=>'ok','duplicate'=>true,'trip_id'=>(int)$row['id']], 200);
         } catch (Throwable $ignore) {}
-        m_json_out(['ok'=>true,'success'=>true,'status'=>'ok','duplicate'=>true], 200);
+        // As a fallback, try to return current ongoing trip id (common unique constraint case).
+        try {
+            $q2 = $db->prepare("SELECT id FROM trips WHERE vehicle_id=? AND status='ongoing' ORDER BY id DESC LIMIT 1");
+            $q2->bind_param('i', $vehicle_id);
+            $q2->execute();
+            $qr2 = $q2->get_result();
+            $row2 = $qr2 ? $qr2->fetch_assoc() : null;
+            $q2->close();
+            if ($row2) {
+                m_json_out([
+                    'ok'=>true,'success'=>true,'status'=>'ok',
+                    'duplicate'=>true,'already_ongoing'=>true,'trip_id'=>(int)$row2['id'],
+                ], 200);
+            }
+        } catch (Throwable $ignore) {}
+        m_json_out(['ok'=>true,'success'=>true,'status'=>'ok','duplicate'=>true,'trip_id'=>0], 200);
     }
     m_json_out(['ok'=>false,'success'=>false,'status'=>'error','error'=>'Insert failed','code'=>(int)$e->getCode(),'detail'=>$e->getMessage()], 500);
 } catch (Throwable $e) {

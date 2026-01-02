@@ -1,0 +1,3 @@
+- Added Training 3 (Truck Rollover Prevention) and Training 4 (Intoxication & Smoking Risk) with Hindi transcripts; no audio required.
+- Training list/player styling stays light (white pages, light blue cards; player card light grey).
+- Training transcript now keeps bullets/line breaks and highlights words during TTS.

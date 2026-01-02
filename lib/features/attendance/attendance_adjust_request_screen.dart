@@ -3,7 +3,6 @@ import 'package:intl/intl.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/services/attendance_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 
 class AttendanceAdjustRequestScreen extends StatefulWidget {
@@ -76,7 +75,7 @@ class _AttendanceAdjustRequestScreenState
 
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       showAppToast(
         context,
         'User mapping missing. Contact admin.',
@@ -175,67 +174,97 @@ class _AttendanceAdjustRequestScreenState
     final dateLabel = DateFormat('dd-MM-yyyy').format(_selectedDate);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Past Attendance Request')),
-      body: AppGradientBackground(
+      appBar: AppBar(
+        title: const Text(
+          'Past Attendance Request',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: const Color(0xFF12355B),
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
+        elevation: 0,
+      ),
+      backgroundColor: Colors.white,
+      body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Date'),
-                  subtitle: Text(dateLabel),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.calendar_month),
-                    onPressed: _pickDate,
-                  ),
-                ),
-                TextFormField(
-                  controller: _inTimeController,
-                  readOnly: true,
-                  decoration: const InputDecoration(labelText: 'In Time'),
-                  onTap: () => _pickTime(isIn: true),
-                  validator: (value) =>
-                      value == null || value.isEmpty ? 'Provide in time' : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _outTimeController,
-                  readOnly: true,
-                  decoration: const InputDecoration(labelText: 'Out Time'),
-                  onTap: () => _pickTime(isIn: false),
-                  validator: (value) => value == null || value.isEmpty
-                      ? 'Provide out time'
-                      : null,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: _reasonController,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Reason',
-                    alignLabelWithHint: true,
-                  ),
-                  validator: (value) => value == null || value.trim().isEmpty
-                      ? 'Please describe the reason'
-                      : null,
-                ),
-                const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: _isSubmitting ? null : _submit,
-                  icon: _isSubmitting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send),
-                  label: Text(_isSubmitting ? 'Submitting...' : 'Submit'),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
                 ),
               ],
+            ),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Date'),
+                    subtitle: Text(dateLabel),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.calendar_month),
+                      onPressed: _pickDate,
+                    ),
+                  ),
+                  TextFormField(
+                    controller: _inTimeController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'In Time'),
+                    onTap: () => _pickTime(isIn: true),
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Provide in time'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _outTimeController,
+                    readOnly: true,
+                    decoration: const InputDecoration(labelText: 'Out Time'),
+                    onTap: () => _pickTime(isIn: false),
+                    validator: (value) => value == null || value.isEmpty
+                        ? 'Provide out time'
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: _reasonController,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Reason',
+                      alignLabelWithHint: true,
+                    ),
+                    validator: (value) => value == null || value.trim().isEmpty
+                        ? 'Please describe the reason'
+                        : null,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: _isSubmitting ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: _isSubmitting
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send),
+                    label: Text(_isSubmitting ? 'Submitting...' : 'Submit'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

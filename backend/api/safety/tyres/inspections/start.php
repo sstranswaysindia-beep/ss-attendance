@@ -151,7 +151,8 @@ try {
             $submittedAtRaw = $row['submitted_at'];
             if (!empty($submittedAtRaw)) {
                 $submittedAt = new DateTimeImmutable($submittedAtRaw);
-                $unlockAt = $submittedAt->modify('+15 days');
+                // Lock duration: 7 days
+                $unlockAt = $submittedAt->modify('+7 days');
                 $now = new DateTimeImmutable('now');
                 if ($unlockAt > $now) {
                     $remainingSeconds = $unlockAt->getTimestamp() - $now->getTimestamp();

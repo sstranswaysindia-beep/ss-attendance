@@ -106,7 +106,7 @@ if ($username === '' || $password === '') {
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
-$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable, proxy_enabled FROM users WHERE username = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable, proxy_enabled, training_req FROM users WHERE username = ? LIMIT 1');
 $stmt->bind_param('s', $username);
 $stmt->execute();
 $userRow = $stmt->get_result()->fetch_assoc();
@@ -214,7 +214,7 @@ if ($role === 'supervisor') {
             error_log("Supervisor {$userRow['username']} supervises plants: " . implode(',', $supervisedPlantIds));
             $placeholders = str_repeat('?,', count($supervisedPlantIds) - 1) . '?';
             $vehicleStmt = $conn->prepare(
-                "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) ORDER BY plant_id, vehicle_no"
+                "SELECT id, vehicle_no, plant_id FROM vehicles WHERE plant_id IN ($placeholders) AND (disable_flag = 'Y' OR disable_flag IS NULL) ORDER BY plant_id, vehicle_no"
             );
             if ($vehicleStmt) {
                 $vehicleStmt->bind_param(str_repeat('i', count($supervisedPlantIds)), ...$supervisedPlantIds);
@@ -369,7 +369,7 @@ if (!empty($userRow['driver_id'])) {
         // For drivers, fetch vehicles from assigned plant only
         if ($effectivePlantId && $role !== 'supervisor') {
             $vehicleStmt = $conn->prepare(
-                'SELECT id, vehicle_no FROM vehicles WHERE plant_id = ? ORDER BY vehicle_no'
+                'SELECT id, vehicle_no FROM vehicles WHERE plant_id = ? AND (disable_flag = \'Y\' OR disable_flag IS NULL) ORDER BY vehicle_no'
             );
             $vehicleStmt->bind_param('i', $effectivePlantId);
             $vehicleStmt->execute();
@@ -482,6 +482,7 @@ apiRespond(200, [
         'view_document' => $userRow['view_document'] ?? null,
         'geofencing_enable' => $userRow['geofencing_enable'] ?? null,
         'proxy_enabled' => $userRow['proxy_enabled'] ?? null,
+        'training_req' => $userRow['training_req'] ?? null,
     ],
     'driver' => $driverInfo,
     'supervisor' => $supervisorInfo,

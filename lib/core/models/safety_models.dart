@@ -60,10 +60,11 @@ class TyreInstructions {
   });
 
   factory TyreInstructions.fromJson(Map<String, dynamic> json) {
-    final checkpoints = (json['checkpoints'] as List<dynamic>?)
-            ?.map((entry) => TyreCheckpoint.fromJson(
-                  entry as Map<String, dynamic>,
-                ))
+    final checkpoints =
+        (json['checkpoints'] as List<dynamic>?)
+            ?.map(
+              (entry) => TyreCheckpoint.fromJson(entry as Map<String, dynamic>),
+            )
             .toList(growable: false) ??
         const <TyreCheckpoint>[];
 
@@ -117,19 +118,24 @@ class SafetyVehicle {
 
   DateTime? get _latestSubmittedDate => latestInspectionSubmittedAt == null
       ? null
-      : DateTime.tryParse(latestInspectionSubmittedAt!);
+      : DateTime.tryParse(
+          latestInspectionSubmittedAt!.contains(' ') &&
+                  !latestInspectionSubmittedAt!.contains('T')
+              ? latestInspectionSubmittedAt!.replaceFirst(' ', 'T')
+              : latestInspectionSubmittedAt!,
+        );
 
   bool get isInspectionLocked {
     final submittedAt = _latestSubmittedDate;
     if (submittedAt == null) return false;
-    final unlockAt = submittedAt.add(const Duration(days: 15));
+    final unlockAt = submittedAt.add(const Duration(days: 7));
     return unlockAt.isAfter(DateTime.now());
   }
 
   int? get inspectionUnlockDays {
     final submittedAt = _latestSubmittedDate;
     if (submittedAt == null) return null;
-    final unlockAt = submittedAt.add(const Duration(days: 15));
+    final unlockAt = submittedAt.add(const Duration(days: 7));
     final remaining = unlockAt.difference(DateTime.now());
     if (remaining.isNegative) {
       return 0;
@@ -146,14 +152,14 @@ class TyreInspectionStart {
   });
 
   factory TyreInspectionStart.fromJson(Map<String, dynamic> json) {
-    final positions = (json['positions'] as List<dynamic>?)
+    final positions =
+        (json['positions'] as List<dynamic>?)
             ?.map((entry) => entry.toString())
             .toList(growable: false) ??
         const <String>[];
 
     return TyreInspectionStart(
-      inspectionId:
-          int.tryParse(json['inspection_id']?.toString() ?? '') ?? 0,
+      inspectionId: int.tryParse(json['inspection_id']?.toString() ?? '') ?? 0,
       positions: positions,
     );
   }
@@ -201,18 +207,23 @@ class TyreChecklistTyreState {
   final List<String> warnings;
   final int expectedCheckpoints;
 
-  bool get isComplete => answers.isNotEmpty && answers.length >= expectedCheckpoints;
+  bool get isComplete =>
+      answers.isNotEmpty && answers.length >= expectedCheckpoints;
 
-  bool get hasCaution => answers
-      .firstWhereOrNull((answer) => answer.result == TyreCheckpointResult.caution)
-      ?.result !=
+  bool get hasCaution =>
+      answers
+          .firstWhereOrNull(
+            (answer) => answer.result == TyreCheckpointResult.caution,
+          )
+          ?.result !=
       null;
 
-  bool get hasCriticalIssue => answers
-      .firstWhereOrNull(
-        (answer) => answer.result == TyreCheckpointResult.nonAcceptable,
-      )
-      ?.result !=
+  bool get hasCriticalIssue =>
+      answers
+          .firstWhereOrNull(
+            (answer) => answer.result == TyreCheckpointResult.nonAcceptable,
+          )
+          ?.result !=
       null;
 
   bool get hasIssue => hasCriticalIssue || hasCaution;
@@ -226,7 +237,8 @@ class TyreSaveResponse {
   const TyreSaveResponse({this.photoUrl, this.warnings = const <String>[]});
 
   factory TyreSaveResponse.fromJson(Map<String, dynamic> json) {
-    final warnings = (json['warnings'] as List<dynamic>?)
+    final warnings =
+        (json['warnings'] as List<dynamic>?)
             ?.map((entry) => entry.toString())
             .toList(growable: false) ??
         const <String>[];

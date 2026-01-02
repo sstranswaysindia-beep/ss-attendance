@@ -6,8 +6,13 @@ class AdvanceTransaction {
     required this.amount,
     required this.description,
     required this.createdAt,
+    this.vehicleId,
+    this.vehiclePlantId,
+    this.counterpartyDriverId,
+    this.counterpartyPlantId,
     this.runningBalance,
     this.receiptPath,
+    this.category,
   });
 
   factory AdvanceTransaction.fromJson(Map<String, dynamic> json) {
@@ -19,8 +24,19 @@ class AdvanceTransaction {
       amount: double.tryParse(json['amount']?.toString() ?? '0') ?? 0.0,
       description: json['description']?.toString() ?? '',
       createdAt: json['created_at']?.toString() ?? '',
+      vehicleId: _parseNullableInt(json['vehicle_id'] ?? json['vehicleId']),
+      vehiclePlantId: _parseNullableInt(
+        json['vehicle_plant_id'] ?? json['vehiclePlantId'],
+      ),
+      counterpartyDriverId: _parseNullableInt(
+        json['counterparty_driver_id'] ?? json['counterpartyDriverId'],
+      ),
+      counterpartyPlantId: _parseNullableInt(
+        json['counterparty_plant_id'] ?? json['counterpartyPlantId'],
+      ),
       runningBalance: _parseNullableDouble(json['running_balance']),
       receiptPath: json['receipt_path']?.toString(),
+      category: json['category']?.toString(),
     );
   }
 
@@ -30,8 +46,13 @@ class AdvanceTransaction {
   final double amount;
   final String description;
   final String createdAt;
+  final int? vehicleId;
+  final int? vehiclePlantId;
+  final int? counterpartyDriverId;
+  final int? counterpartyPlantId;
   final double? runningBalance;
   final String? receiptPath;
+  final String? category;
 
   bool get isAdvanceReceived => type == 'advance_received';
   bool get isExpense => type == 'expense';
@@ -99,6 +120,12 @@ class AdvanceTransaction {
       return null;
     }
     final parsed = double.tryParse(value.toString());
+    return parsed;
+  }
+
+  static int? _parseNullableInt(dynamic value) {
+    if (value == null) return null;
+    final parsed = int.tryParse(value.toString());
     return parsed;
   }
 }

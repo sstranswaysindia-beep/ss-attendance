@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/widgets/app_toast.dart';
@@ -67,7 +68,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Widget build(BuildContext context) {
     final now = DateTime.now();
     final date = DateFormat('dd-MM-yyyy').format(now);
-    final theme = Theme.of(context);
     final isHrAttendanceUser = _isHrAttendanceUser(widget.user);
     
     print('DEBUG: AdminDashboard User Check');
@@ -312,10 +312,10 @@ class _AdminCard extends StatelessWidget {
 
 class _AdminWelcomeHeader extends StatefulWidget {
   const _AdminWelcomeHeader({
+    Key? key,
     required this.user,
     required this.date,
-    super.key,
-  });
+  }) : super(key: key);
 
   final AppUser user;
   final String date;
@@ -367,13 +367,41 @@ class _AdminWelcomeHeaderState extends State<_AdminWelcomeHeader> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Welcome HR, ${widget.user.displayName}',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: _adminPrimaryColor,
-                    letterSpacing: 0.3,
-                  ),
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 130,
+                      height: 34,
+                      child: Lottie.asset(
+                        'downloads/welcome.json',
+                        repeat: true,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              'HR, ${widget.user.displayName}',
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontSize:
+                                    (theme.textTheme.titleMedium?.fontSize ??
+                                        16) +
+                                    6,
+                                fontWeight: FontWeight.w700,
+                                color: _adminPrimaryColor,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 Row(

@@ -37,6 +37,9 @@ ios/Runner/GoogleService-Info.plist
 .pub/
 /build/
 /coverage/
+.home/
+.tmp_home/
+.tmp_gradle/
 
 # Symbolication related
 app.*.symbols

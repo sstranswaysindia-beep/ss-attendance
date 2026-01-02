@@ -6,17 +6,23 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'dart:async';
 
 import 'core/models/app_user.dart';
 import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
+import 'core/services/training_flag_service.dart';
 import 'core/services/notification_service.dart';
+import 'core/services/session_event_bus.dart';
 import 'firebase_options.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/driver_dashboard_screen.dart';
 import 'features/dashboard/supervisor_dashboard_screen.dart';
+import 'features/safety/training/training_screen.dart';
+import 'core/services/safety_repository.dart';
 import 'core/widgets/in_app_notification_banner.dart';
+import 'core/widgets/app_loader.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,15 +61,30 @@ class SSTranswaysApp extends StatefulWidget {
   State<SSTranswaysApp> createState() => _SSTranswaysAppState();
 }
 
-class _SSTranswaysAppState extends State<SSTranswaysApp> {
+class _SSTranswaysAppState extends State<SSTranswaysApp>
+    with WidgetsBindingObserver {
   AppUser? _currentUser;
   bool _isLoading = true;
   final AuthRepository _authRepository = AuthRepository();
+  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+  bool _forcingTrainingNav = false;
+  late final StreamSubscription<void> _logoutSub;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _logoutSub = SessionEventBus.onLogoutRequested.listen((_) {
+      _handleLogout();
+    });
     _loadSavedUser();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _logoutSub.cancel();
+    super.dispose();
   }
 
   Future<void> _loadSavedUser() async {
@@ -75,11 +96,13 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
           appVariant: 'driver',
         );
       }
+      final mergedUser = await _mergeTrainingFlag(savedUser);
       if (mounted) {
         setState(() {
-          _currentUser = savedUser;
+          _currentUser = mergedUser;
           _isLoading = false;
         });
+        _forceTrainingIfRequired();
       }
     } catch (e) {
       if (mounted) {
@@ -92,14 +115,13 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
   }
 
   void _handleLogin(AppUser user) async {
-    await _authRepository.syncDeviceInfo(
-      user: user,
-      appVariant: 'driver',
-    );
-    await AuthStorageService.saveUser(user);
+    await _authRepository.syncDeviceInfo(user: user, appVariant: 'driver');
+    final mergedUser = (await _mergeTrainingFlag(user)) ?? user;
+    await AuthStorageService.saveUser(mergedUser);
     if (mounted) {
-      setState(() => _currentUser = user);
+      setState(() => _currentUser = mergedUser);
     }
+    _forceTrainingIfRequired();
   }
 
   void _handleLogout() async {
@@ -107,6 +129,117 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
     if (mounted) {
       setState(() => _currentUser = null);
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      await _refreshTrainingRequirement();
+      _forceTrainingIfRequired();
+    }
+  }
+
+  Future<void> _refreshTrainingRequirement() async {
+    if (_currentUser == null) return;
+    final merged = await _mergeTrainingFlag(_currentUser);
+    if (!mounted) return;
+    if (merged != null && merged != _currentUser) {
+      setState(() => _currentUser = merged);
+    }
+  }
+
+  Future<AppUser?> _mergeTrainingFlag(AppUser? user) async {
+    if (user == null) return null;
+    final override = await TrainingFlagService.isTrainingRequiredOverride();
+    final serverNeedsTraining = await _fetchTrainingNeedFromServer(user);
+    // Effective flag: server flag OR local override.
+    final needsTraining = override || serverNeedsTraining;
+    if (needsTraining == user.trainingRequired) return user;
+    final updated = _cloneWithTrainingRequired(user, needsTraining);
+    await AuthStorageService.updateUser(updated);
+    return updated;
+  }
+
+  void _forceTrainingIfRequired() {
+    if (_forcingTrainingNav) return;
+    if (_currentUser == null) return;
+    if (!_currentUser!.trainingRequired) return;
+    final nav = _navKey.currentState;
+    if (nav == null) return;
+    _forcingTrainingNav = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        _forcingTrainingNav = false;
+        return;
+      }
+      // If training no longer required, do nothing (normal flow)
+      if (!_currentUser!.trainingRequired) {
+        _forcingTrainingNav = false;
+        return;
+      }
+      // Force training when required
+      nav.pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => SafetyTrainingScreen(
+            user: _currentUser!,
+            repository: SafetyRepository(currentUser: _currentUser),
+          ),
+        ),
+        (route) => false,
+      );
+      _forcingTrainingNav = false;
+    });
+  }
+
+  AppUser _cloneWithTrainingRequired(AppUser user, bool trainingRequired) {
+    return AppUser(
+      id: user.id,
+      displayName: user.displayName,
+      role: user.role,
+      username: user.username,
+      employeeId: user.employeeId,
+      driverId: user.driverId,
+      plantId: user.plantId,
+      plantName: user.plantName,
+      defaultPlantId: user.defaultPlantId,
+      defaultPlantName: user.defaultPlantName,
+      assignmentId: user.assignmentId,
+      assignmentPlantId: user.assignmentPlantId,
+      assignmentPlantName: user.assignmentPlantName,
+      assignmentVehicleId: user.assignmentVehicleId,
+      assignmentVehicleNumber: user.assignmentVehicleNumber,
+      salary: user.salary,
+      profilePhoto: user.profilePhoto,
+      aadhaar: user.aadhaar,
+      esiNumber: user.esiNumber,
+      uanNumber: user.uanNumber,
+      ifscCode: user.ifscCode,
+      ifscVerified: user.ifscVerified,
+      bankAccount: user.bankAccount,
+      branchName: user.branchName,
+      fatherName: user.fatherName,
+      address: user.address,
+      vehicleNumber: user.vehicleNumber,
+      driverRole: user.driverRole,
+      availableVehicles: user.availableVehicles,
+      joiningDate: user.joiningDate,
+      supervisorName: user.supervisorName,
+      supervisedPlants: user.supervisedPlants,
+      supervisedPlantIds: user.supervisedPlantIds,
+      canViewDocuments: user.canViewDocuments,
+      geofencingEnabled: user.geofencingEnabled,
+      proxyEnabled: user.proxyEnabled,
+      trainingRequired: trainingRequired,
+    );
+  }
+
+  Future<bool> _fetchTrainingNeedFromServer(AppUser user) async {
+    final serverFlag = await _authRepository.fetchTrainingRequired(
+      userId: user.id,
+      username: user.username,
+    );
+    return serverFlag ?? user.trainingRequired;
   }
 
   @override
@@ -132,6 +265,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'SS Transways India',
+        navigatorKey: _navKey,
         theme: baseTheme.copyWith(
           textTheme: textTheme,
           appBarTheme: baseTheme.appBarTheme.copyWith(
@@ -155,9 +289,15 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
             return const SizedBox.shrink();
           }
           final mediaQuery = MediaQuery.of(context);
-          final clampedScale = mediaQuery.textScaleFactor.clamp(1.0, 1.1);
+          final isAndroid =
+              !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
           return MediaQuery(
-            data: mediaQuery.copyWith(textScaleFactor: clampedScale),
+            // Only block Android "Font size" scaling. Do NOT fight Android "Display size":
+            // changing display size changes logical pixels; the UI must adapt to fill the screen.
+            data: isAndroid
+                ? mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0))
+                : mediaQuery,
             child: InAppNotificationBannerHost(
               hideBell: child is _LoginRoute,
               child: child,
@@ -165,7 +305,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp> {
           );
         },
         home: _isLoading
-            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            ? const Scaffold(body: Center(child: AppLoader()))
             : _currentUser == null
             ? _LoginRoute(
                 child: LoginScreen(onLogin: _handleLogin, screenTitle: 'Login'),
@@ -184,6 +324,14 @@ class _HomeSwitchboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // If training is required, route user directly to the training screen
+    if (user.trainingRequired) {
+      return SafetyTrainingScreen(
+        user: user,
+        repository: SafetyRepository(currentUser: user),
+      );
+    }
+
     switch (user.role) {
       case UserRole.driver:
         return DriverDashboardScreen(user: user, onLogout: onLogout);

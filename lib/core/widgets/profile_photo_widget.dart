@@ -4,6 +4,9 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:lottie/lottie.dart';
+
+import 'app_loader.dart';
 
 class ProfilePhotoWidget extends StatelessWidget {
   const ProfilePhotoWidget({
@@ -58,13 +61,19 @@ class ProfilePhotoWidget extends StatelessWidget {
     );
 
     if (profilePhoto == null || profilePhoto.isEmpty) {
-      print('ProfilePhotoWidget: No profile photo, showing initials');
-      return Text(
-        _getInitials(),
-        style: TextStyle(
-          fontSize: radius * 0.6,
-          fontWeight: FontWeight.w600,
-          color: theme.colorScheme.primary,
+      print('ProfilePhotoWidget: No profile photo, showing animation fallback');
+      return ClipOval(
+        child: Transform.scale(
+          scale: 1.8,
+          child: SizedBox(
+            width: radius * 2,
+            height: radius * 2,
+            child: Lottie.asset(
+              'assets/animations/man_account_icon.json',
+              repeat: true,
+              fit: BoxFit.cover,
+            ),
+          ),
         ),
       );
     }
@@ -78,14 +87,7 @@ class ProfilePhotoWidget extends StatelessWidget {
         placeholder: (context, url) => Container(
           color: theme.colorScheme.primary.withOpacity(0.1),
           child: Center(
-            child: SizedBox(
-              width: radius * 0.5,
-              height: radius * 0.5,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: theme.colorScheme.primary,
-              ),
-            ),
+            child: AppLoader(size: radius * 0.5),
           ),
         ),
         errorWidget: (context, url, error) => Text(
@@ -175,10 +177,7 @@ class _ProfilePhotoWithUploadState extends State<ProfilePhotoWithUpload> {
               shape: BoxShape.circle,
               color: Colors.black.withOpacity(0.5),
             ),
-            child: const CircularProgressIndicator(
-              color: Colors.white,
-              strokeWidth: 2,
-            ),
+            child: AppLoader(size: widget.radius),
           ),
         if (!widget.isUploading)
           Positioned(

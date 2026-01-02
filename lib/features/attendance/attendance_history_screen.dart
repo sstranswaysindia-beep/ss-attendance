@@ -5,6 +5,7 @@ import '../../core/models/app_user.dart';
 import '../../core/models/attendance_record.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/app_toast.dart';
 
 const Color _historyPrimaryColor = Color(0xFF00296B);
@@ -32,6 +33,8 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
 
   bool _isLoading = false;
+  // Used to prevent duplicate delete taps / show a loader if needed.
+  // ignore: unused_field
   bool _isDeleting = false;
   String? _errorMessage;
   List<AttendanceRecord> _records = const [];
@@ -53,7 +56,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   Future<void> _loadHistory() async {
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       setState(() {
         _errorMessage = 'User mapping missing. Contact admin.';
         _records = const [];
@@ -158,7 +161,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
   Future<void> _deleteRecord(AttendanceRecord record) async {
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       showAppToast(
         context,
         'User mapping missing. Contact admin.',
@@ -297,7 +300,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
               const SizedBox(height: 16),
               if (_isLoading)
                 const Expanded(
-                  child: Center(child: CircularProgressIndicator()),
+                  child: const Center(child: AppLoader()),
                 )
               else if (_errorMessage != null)
                 Expanded(

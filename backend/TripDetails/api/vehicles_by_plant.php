@@ -25,6 +25,9 @@ foreach (['active','enabled','is_active','status'] as $flag){
     break;
   }
 }
+if (has_col($db, 'vehicles', 'disable_flag')) {
+  $activeWhere .= " AND (disable_flag = 'Y' OR disable_flag IS NULL)";
+}
 
 $vehicles = [];
 if ($idCol && $numCol && $plantCol) {

@@ -19,23 +19,29 @@ class AuthFailure implements Exception {
 }
 
 class AuthRepository {
-  AuthRepository({
-    http.Client? client,
-    Uri? endpoint,
-    Uri? deviceEndpoint,
-  })  : _client = client ?? http.Client(),
-        _endpoint = endpoint ?? Uri.parse(_defaultEndpoint),
-        _deviceEndpoint =
-            deviceEndpoint ?? Uri.parse(_defaultDeviceEndpoint);
+  AuthRepository({http.Client? client, Uri? endpoint, Uri? deviceEndpoint})
+    : _client = client ?? http.Client(),
+      _endpoint = endpoint ?? Uri.parse(_defaultEndpoint),
+      _deviceEndpoint = deviceEndpoint ?? Uri.parse(_defaultDeviceEndpoint);
 
   static const String _defaultEndpoint =
       'https://sstranswaysindia.com/api/mobile/mobile_login.php';
   static const String _defaultDeviceEndpoint =
       'https://sstranswaysindia.com/api/mobile/user_device_sync.php';
+  static const String _defaultTrainingReqStatusEndpoint =
+      'https://sstranswaysindia.com/api/mobile/training_req_status.php';
+  static const String _defaultTrainingReqClearEndpoint =
+      'https://sstranswaysindia.com/api/mobile/training_req_clear.php';
 
   final http.Client _client;
   final Uri _endpoint;
   final Uri _deviceEndpoint;
+  final Uri _trainingReqStatusEndpoint = Uri.parse(
+    _defaultTrainingReqStatusEndpoint,
+  );
+  final Uri _trainingReqClearEndpoint = Uri.parse(
+    _defaultTrainingReqClearEndpoint,
+  );
 
   static final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
 
@@ -117,6 +123,9 @@ class AuthRepository {
       final bool proxyEnabled = _parseFlag(
         userJson['proxy_enabled'] ?? userJson['proxyEnabled'],
       );
+      final bool trainingRequired = _parseFlag(
+        userJson['training_req'] ?? userJson['trainingRequired'],
+      );
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
@@ -142,6 +151,7 @@ class AuthRepository {
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
+          trainingRequired: trainingRequired,
         );
       }
 
@@ -208,6 +218,7 @@ class AuthRepository {
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
+          trainingRequired: trainingRequired,
         );
       }
 
@@ -317,6 +328,7 @@ class AuthRepository {
         canViewDocuments: canViewDocuments,
         geofencingEnabled: geofencingEnabled,
         proxyEnabled: proxyEnabled,
+        trainingRequired: trainingRequired,
       );
     } on AuthFailure {
       rethrow;
@@ -352,8 +364,9 @@ class AuthRepository {
         normalized == 'true';
   }
 
-  Future<Map<String, String>> _collectDeviceInfo(
-      {String appVariant = 'driver'}) async {
+  Future<Map<String, String>> _collectDeviceInfo({
+    String appVariant = 'driver',
+  }) async {
     final packageInfo = await PackageInfo.fromPlatform();
 
     String platform = 'unknown';
@@ -371,8 +384,7 @@ class AuthRepository {
         deviceBrand = info.brand ?? '';
         final manufacturer = info.manufacturer ?? '';
         final model = info.model ?? '';
-        deviceModel =
-            (manufacturer.isNotEmpty ? '$manufacturer ' : '') + model;
+        deviceModel = (manufacturer.isNotEmpty ? '$manufacturer ' : '') + model;
         osVersion = 'Android ${info.version.release ?? ''}'.trim();
         architecture = info.supportedAbis?.join(', ') ?? '';
         if (deviceId.isEmpty) {
@@ -383,8 +395,8 @@ class AuthRepository {
         final info = await _deviceInfoPlugin.iosInfo;
         deviceId = info.identifierForVendor ?? '';
         deviceModel = info.utsname.machine ?? info.model ?? '';
-        osVersion =
-            '${info.systemName ?? 'iOS'} ${info.systemVersion ?? ''}'.trim();
+        osVersion = '${info.systemName ?? 'iOS'} ${info.systemVersion ?? ''}'
+            .trim();
       } else if (Platform.isMacOS) {
         platform = 'macos';
         final info = await _deviceInfoPlugin.macOsInfo;
@@ -470,6 +482,45 @@ class AuthRepository {
       );
     } catch (_) {
       // Ignore failures.
+    }
+  }
+
+  Future<bool?> fetchTrainingRequired({
+    required String userId,
+    String? username,
+  }) async {
+    try {
+      final response = await _client.post(
+        _trainingReqStatusEndpoint,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'userId': userId, 'username': username}),
+      );
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode != 200 || payload['status'] != 'ok') {
+        throw AuthFailure(
+          payload['error']?.toString() ?? 'Unable to check flag',
+        );
+      }
+      final raw = payload['training_req'] ?? payload['trainingRequired'];
+      return _parseFlag(raw);
+    } catch (_) {
+      // Best-effort; do not block app flow if server not reachable.
+      return null;
+    }
+  }
+
+  Future<void> clearTrainingRequired({
+    required String userId,
+    String? username,
+  }) async {
+    final response = await _client.post(
+      _trainingReqClearEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode({'userId': userId, 'username': username}),
+    );
+    final payload = jsonDecode(response.body) as Map<String, dynamic>;
+    if (response.statusCode != 200 || payload['status'] != 'ok') {
+      throw AuthFailure(payload['error']?.toString() ?? 'Unable to clear flag');
     }
   }
 

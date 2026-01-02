@@ -19,14 +19,16 @@ class TyreDetailScreen extends StatefulWidget {
     required this.repository,
     required this.inspectionId,
     required this.position,
+    String? apiPosition,
     required this.instructions,
     this.initialState,
     super.key,
-  });
+  }) : apiPosition = apiPosition ?? position;
 
   final SafetyRepository repository;
   final int inspectionId;
   final String position;
+  final String apiPosition;
   final TyreInstructions instructions;
   final TyreChecklistTyreState? initialState;
 
@@ -37,6 +39,7 @@ class TyreDetailScreen extends StatefulWidget {
 class _TyreDetailScreenState extends State<TyreDetailScreen> {
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _picker = ImagePicker();
+  late final String _apiPosition;
   late final TextEditingController _psiController;
   late final List<TextEditingController> _remarkControllers;
   late final List<TyreCheckpointResult?> _selectedResults;
@@ -53,9 +56,13 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _apiPosition = widget.apiPosition;
     _psiController = TextEditingController();
     final checkpoints = widget.instructions.checkpoints;
-    _selectedResults = List<TyreCheckpointResult?>.filled(checkpoints.length, null);
+    _selectedResults = List<TyreCheckpointResult?>.filled(
+      checkpoints.length,
+      null,
+    );
     _remarkControllers = List.generate(
       checkpoints.length,
       (_) => TextEditingController(),
@@ -89,7 +96,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
       );
       final state = await widget.repository.fetchTyreState(
         inspectionId: widget.inspectionId,
-        positionCode: widget.position,
+        positionCode: _apiPosition,
         expectedCheckpoints: widget.instructions.checkpoints.length,
       );
       if (!mounted) return;
@@ -117,7 +124,9 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
     final checkpoints = widget.instructions.checkpoints;
     for (var i = 0; i < checkpoints.length; i++) {
       final cp = checkpoints[i];
-      final match = state.answers.where((entry) => entry.checkpointNo == cp.number);
+      final match = state.answers.where(
+        (entry) => entry.checkpointNo == cp.number,
+      );
       if (match.isNotEmpty) {
         final answer = match.first;
         _selectedResults[i] = answer.result;
@@ -152,7 +161,9 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
       final boxLeft = math.max(0, stamped.width - boxWidth - margin).toInt();
       final boxTop = math.max(0, stamped.height - boxHeight - margin).toInt();
       final boxRight = math.min(stamped.width - 1, boxLeft + boxWidth).toInt();
-      final boxBottom = math.min(stamped.height - 1, boxTop + boxHeight).toInt();
+      final boxBottom = math
+          .min(stamped.height - 1, boxTop + boxHeight)
+          .toInt();
 
       final backgroundColor = img.ColorUint8.rgba(0, 0, 0, 180);
       img.fillRect(
@@ -233,17 +244,30 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
 
     final psiValue = double.tryParse(_psiController.text.trim());
     if (psiValue == null) {
-      showAppToast(context, 'Enter PSI value for ${widget.position}', isError: true);
+      showAppToast(
+        context,
+        'Enter PSI value for ${widget.position}',
+        isError: true,
+      );
       return;
     }
 
-    final hasPhoto = _photoFile != null || ((_existingPhotoUrl ?? '').isNotEmpty);
+    final hasPhoto =
+        _photoFile != null || ((_existingPhotoUrl ?? '').isNotEmpty);
     if (!hasPhoto) {
-      showAppToast(context, 'Photo is required for ${widget.position}', isError: true);
+      showAppToast(
+        context,
+        'Photo is required for ${widget.position}',
+        isError: true,
+      );
       return;
     }
 
-    setState(() => _showPsiWarning = psiValue < widget.instructions.psiMin || psiValue > widget.instructions.psiMax);
+    setState(
+      () => _showPsiWarning =
+          psiValue < widget.instructions.psiMin ||
+          psiValue > widget.instructions.psiMax,
+    );
 
     final answers = <TyreAnswer>[];
     for (var i = 0; i < checkpoints.length; i++) {
@@ -273,7 +297,7 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
       );
       final response = await widget.repository.saveTyre(
         inspectionId: widget.inspectionId,
-        positionCode: widget.position,
+        positionCode: _apiPosition,
         psi: psiValue,
         answers: answers,
         photoBase64: photoBase64,
@@ -324,8 +348,22 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    // Clamp textScaler to prevent scaling from both font size and display size settings
     final checkpoints = widget.instructions.checkpoints;
 
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
+      child: _buildContent(context, theme, checkpoints),
+    );
+  }
+
+  Widget _buildContent(
+    BuildContext context,
+    ThemeData theme,
+    List checkpoints,
+  ) {
     if (_isLoadingExisting) {
       return const AppGradientBackground(
         child: Scaffold(
@@ -346,7 +384,11 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.warning_amber, size: 48, color: Colors.orange),
+                  const Icon(
+                    Icons.warning_amber,
+                    size: 48,
+                    color: Colors.orange,
+                  ),
                   const SizedBox(height: 12),
                   Text(
                     'Unable to load saved data for ${widget.position}.',
@@ -357,7 +399,9 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                   Text(
                     _loadError!,
                     textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   FilledButton(
@@ -382,21 +426,26 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
+          backgroundColor: const Color(
+            0xFF12355B,
+          ), // Dark blue (same as training/spot audit)
+          foregroundColor: Colors.white,
+          elevation: 0,
           automaticallyImplyLeading: true,
           leading: BackButton(
             onPressed: () => Navigator.of(context).maybePop(),
-            color: theme.colorScheme.onSurface,
+            color: Colors.white,
           ),
           title: Text(
             'Tyre ${widget.position}',
             style: GoogleFonts.josefinSans(
               textStyle: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w600,
+                color: Colors.white,
               ),
             ),
           ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.white),
         ),
         body: Form(
           key: _formKey,
@@ -431,7 +480,8 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
 
                     if (index == checkpoints.length + 1) {
                       final hasExistingPhoto =
-                          (_existingPhotoUrl != null && _existingPhotoUrl!.isNotEmpty) &&
+                          (_existingPhotoUrl != null &&
+                              _existingPhotoUrl!.isNotEmpty) &&
                           _photoFile == null;
                       return _PhotoPickerCard(
                         onPickPhoto: _pickPhoto,
@@ -448,10 +498,12 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                       psiMin: widget.instructions.psiMin,
                       psiMax: widget.instructions.psiMax,
                       currentPsi: double.tryParse(_psiController.text.trim()),
-                      answersProvided:
-                          _selectedResults.where((result) => result != null).length,
+                      answersProvided: _selectedResults
+                          .where((result) => result != null)
+                          .length,
                       totalCheckpoints: widget.instructions.checkpoints.length,
-                      hasPhoto: _photoFile != null ||
+                      hasPhoto:
+                          _photoFile != null ||
                           ((_existingPhotoUrl ?? '').isNotEmpty),
                       photoPath: _photoFile?.path ?? _existingPhotoUrl,
                       warnings: _currentWarnings,
@@ -478,7 +530,9 @@ class _TyreDetailScreenState extends State<TyreDetailScreen> {
                             height: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
                             ),
                           )
                         : Text(
@@ -679,9 +733,9 @@ class _LegendItem extends StatelessWidget {
         Text(
           label,
           style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w600,
-              ),
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );
@@ -716,7 +770,9 @@ class _SelectionButton extends StatelessWidget {
             duration: const Duration(milliseconds: 180),
             padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
             decoration: BoxDecoration(
-              color: selected ? color.withOpacity(0.12) : const Color(0xFFF5F7FB),
+              color: selected
+                  ? color.withOpacity(0.12)
+                  : const Color(0xFFF5F7FB),
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: selected ? color : color.withOpacity(0.35),
@@ -726,10 +782,7 @@ class _SelectionButton extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  icon,
-                  color: selected ? color : color.withOpacity(0.8),
-                ),
+                Icon(icon, color: selected ? color : color.withOpacity(0.8)),
                 const SizedBox(height: 6),
                 Text(
                   label,
@@ -891,7 +944,11 @@ class _PhotoPickerCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 18),
+                    const Icon(
+                      Icons.check_circle,
+                      color: Color(0xFF16A34A),
+                      size: 18,
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -922,8 +979,7 @@ class _PhotoPickerCard extends StatelessWidget {
                 ),
               ),
             ],
-          ]
-          else
+          ] else
             Text(
               'Attach photo before saving. This helps supervisors validate inspections.',
               style: theme.textTheme.bodySmall?.copyWith(
@@ -1005,10 +1061,16 @@ class _DiagnosticsPanel extends StatelessWidget {
           style: theme.textTheme.bodySmall,
         ),
         children: [
-          _DebugRow(label: 'PSI Range', value: '${psiMin.toStringAsFixed(0)} – ${psiMax.toStringAsFixed(0)}'),
+          _DebugRow(
+            label: 'PSI Range',
+            value:
+                '${psiMin.toStringAsFixed(0)} – ${psiMax.toStringAsFixed(0)}',
+          ),
           _DebugRow(
             label: 'Current PSI',
-            value: currentPsi != null ? currentPsi!.toStringAsFixed(1) : 'Not entered',
+            value: currentPsi != null
+                ? currentPsi!.toStringAsFixed(1)
+                : 'Not entered',
           ),
           _DebugRow(
             label: 'Checkpoint Coverage',
@@ -1070,10 +1132,7 @@ class _DebugRow extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          Text(
-            value,
-            style: theme.textTheme.bodySmall,
-          ),
+          Text(value, style: theme.textTheme.bodySmall),
         ],
       ),
     );

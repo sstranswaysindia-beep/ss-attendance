@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/attendance_approval.dart';
 import '../../core/services/approvals_repository.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 
 const Color _adminPrimaryColor = Color(0xFF00296B);
 const Color _adminAccentLight = Color(0xFFE3F2FD);
@@ -199,6 +201,9 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
           context,
           isApprove ? 'Attendance approved.' : 'Attendance rejected.',
         );
+        if (isApprove) {
+          _showApproveSuccessAnimation();
+        }
         if (_statusFilter.toLowerCase() != 'pending') {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
@@ -221,6 +226,32 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
         setState(() => _processingApprovals.remove(approval.attendanceId));
       }
       return false;
+    }
+  }
+
+  Future<void> _showApproveSuccessAnimation() async {
+    if (!mounted) {
+      return;
+    }
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withOpacity(0.15),
+      builder: (_) => Center(
+        child: SizedBox(
+          width: 180,
+          child: Lottie.asset(
+            'assets/animations/check_mark_success.json',
+            repeat: false,
+          ),
+        ),
+      ),
+    );
+
+    await Future<void>.delayed(const Duration(milliseconds: 1400));
+    if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
     }
   }
 
@@ -493,7 +524,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                 ),
               Expanded(
                 child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
+                    ? const Center(child: AppLoader())
                     : _errorMessage != null
                         ? Center(
                             child: Text(

@@ -40,6 +40,7 @@ class AppUser {
     this.canViewDocuments = false,
     this.geofencingEnabled = false,
     this.proxyEnabled = false,
+    this.trainingRequired = false,
   });
 
   final String id;
@@ -78,6 +79,87 @@ class AppUser {
   final bool canViewDocuments;
   final bool geofencingEnabled;
   final bool proxyEnabled;
+  final bool trainingRequired;
+
+  AppUser copyWith({
+    String? id,
+    String? displayName,
+    UserRole? role,
+    String? username,
+    String? employeeId,
+    String? driverId,
+    String? plantId,
+    String? plantName,
+    String? defaultPlantId,
+    String? defaultPlantName,
+    String? assignmentId,
+    String? assignmentPlantId,
+    String? assignmentPlantName,
+    String? assignmentVehicleId,
+    String? assignmentVehicleNumber,
+    String? salary,
+    String? profilePhoto,
+    String? aadhaar,
+    String? esiNumber,
+    String? uanNumber,
+    String? ifscCode,
+    bool? ifscVerified,
+    String? bankAccount,
+    String? branchName,
+    String? fatherName,
+    String? address,
+    String? vehicleNumber,
+    String? driverRole,
+    List<DriverVehicle>? availableVehicles,
+    DateTime? joiningDate,
+    String? supervisorName,
+    List<Map<String, dynamic>>? supervisedPlants,
+    List<dynamic>? supervisedPlantIds,
+    bool? canViewDocuments,
+    bool? geofencingEnabled,
+    bool? proxyEnabled,
+    bool? trainingRequired,
+  }) {
+    return AppUser(
+      id: id ?? this.id,
+      displayName: displayName ?? this.displayName,
+      role: role ?? this.role,
+      username: username ?? this.username,
+      employeeId: employeeId ?? this.employeeId,
+      driverId: driverId ?? this.driverId,
+      plantId: plantId ?? this.plantId,
+      plantName: plantName ?? this.plantName,
+      defaultPlantId: defaultPlantId ?? this.defaultPlantId,
+      defaultPlantName: defaultPlantName ?? this.defaultPlantName,
+      assignmentId: assignmentId ?? this.assignmentId,
+      assignmentPlantId: assignmentPlantId ?? this.assignmentPlantId,
+      assignmentPlantName: assignmentPlantName ?? this.assignmentPlantName,
+      assignmentVehicleId: assignmentVehicleId ?? this.assignmentVehicleId,
+      assignmentVehicleNumber: assignmentVehicleNumber ?? this.assignmentVehicleNumber,
+      salary: salary ?? this.salary,
+      profilePhoto: profilePhoto ?? this.profilePhoto,
+      aadhaar: aadhaar ?? this.aadhaar,
+      esiNumber: esiNumber ?? this.esiNumber,
+      uanNumber: uanNumber ?? this.uanNumber,
+      ifscCode: ifscCode ?? this.ifscCode,
+      ifscVerified: ifscVerified ?? this.ifscVerified,
+      bankAccount: bankAccount ?? this.bankAccount,
+      branchName: branchName ?? this.branchName,
+      fatherName: fatherName ?? this.fatherName,
+      address: address ?? this.address,
+      vehicleNumber: vehicleNumber ?? this.vehicleNumber,
+      driverRole: driverRole ?? this.driverRole,
+      availableVehicles: availableVehicles ?? this.availableVehicles,
+      joiningDate: joiningDate ?? this.joiningDate,
+      supervisorName: supervisorName ?? this.supervisorName,
+      supervisedPlants: supervisedPlants ?? this.supervisedPlants,
+      supervisedPlantIds: supervisedPlantIds ?? this.supervisedPlantIds,
+      canViewDocuments: canViewDocuments ?? this.canViewDocuments,
+      geofencingEnabled: geofencingEnabled ?? this.geofencingEnabled,
+      proxyEnabled: proxyEnabled ?? this.proxyEnabled,
+      trainingRequired: trainingRequired ?? this.trainingRequired,
+    );
+  }
 
   Map<String, dynamic> toJson() {
     return {
@@ -117,6 +199,7 @@ class AppUser {
       'canViewDocuments': canViewDocuments,
       'geofencingEnabled': geofencingEnabled,
       'proxyEnabled': proxyEnabled,
+      'trainingRequired': trainingRequired,
     };
   }
 
@@ -170,6 +253,9 @@ class AppUser {
       ),
       proxyEnabled: _parseGeofenceFlag(
         json['proxyEnabled'] ?? json['proxy_enabled'],
+      ),
+      trainingRequired: _parseGeofenceFlag(
+        json['trainingRequired'] ?? json['training_req'],
       ),
     );
   }

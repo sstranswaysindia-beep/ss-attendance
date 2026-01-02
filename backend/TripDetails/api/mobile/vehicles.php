@@ -31,6 +31,7 @@ $role = TD_MOBILE_ROLE;
 $userId = TD_MOBILE_USER_ID;
 $driverId = TD_MOBILE_DRIVER_ID;
 $plantId = apiSanitizeInt(td_request_value('plantId', td_request_value('plant_id')));
+$q = trim((string)td_request_value('q', td_request_value('query', td_request_value('search'))));
 
 if (!$driverId && isset($_SESSION['driver_id'])) {
     $driverId = apiSanitizeInt($_SESSION['driver_id']);
@@ -55,12 +56,191 @@ if (!$driverId && $userId) {
     }
 }
 
-if (!$plantId) {
+// plantId is normally required.
+// Exceptions:
+// - supervisor/admin global search mode (q provided)
+// - supervisor/admin global list mode (plantId=0 with empty q) to populate pickers
+$isSupervisorOrAdmin = in_array($role, ['supervisor', 'admin'], true);
+if (!$plantId && !($isSupervisorOrAdmin && $q !== '')) {
     apiRespond(400, ['status' => 'error', 'error' => 'plantId is required']);
 }
 
 try {
     $hasAccess = false;
+
+    // Supervisor/admin: allow searching vehicles across ALL plants when q is provided.
+    // This is used for global search in Khata Book vehicle picker.
+    if ($q !== '' && in_array($role, ['supervisor', 'admin'], true)) {
+        $column = 'vehicle_no';
+        $columnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE 'vehicle_no'");
+        if (!$columnCheck || $columnCheck->num_rows === 0) {
+            foreach (['number', 'reg_no', 'registration_no'] as $candidate) {
+                $columnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE '{$candidate}'");
+                if ($columnCheck && $columnCheck->num_rows > 0) {
+                    $column = $candidate;
+                    break;
+                }
+            }
+        }
+
+        $plantColumnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE 'plant_id'");
+        if (!$plantColumnCheck || $plantColumnCheck->num_rows === 0) {
+            apiRespond(200, ['status' => 'ok', 'vehicles' => []]);
+        }
+
+        $like = '%' . $q . '%';
+        // Try to include plant name if plants table/column exists (schema differs between deployments).
+        $plantsTableExists = false;
+        $plantsRes = $conn->query("SHOW TABLES LIKE 'plants'");
+        if ($plantsRes && $plantsRes->num_rows > 0) {
+            $plantsTableExists = true;
+        }
+        $plantNameCol = null;
+        if ($plantsTableExists) {
+            foreach (['plant_name', 'name', 'plant'] as $cand) {
+                $colRes = $conn->query("SHOW COLUMNS FROM plants LIKE '{$cand}'");
+                if ($colRes && $colRes->num_rows > 0) {
+                    $plantNameCol = $cand;
+                    break;
+                }
+            }
+        }
+
+        if ($plantsTableExists && $plantNameCol) {
+            $sql = "
+                SELECT v.id,
+                       v.{$column} AS vehicle_no,
+                       v.plant_id AS plant_id,
+                       COALESCE(p.{$plantNameCol}, '') AS plant_name
+                FROM vehicles v
+                LEFT JOIN plants p ON p.id = v.plant_id
+                WHERE v.plant_id IS NOT NULL
+                  AND (
+                        v.{$column} LIKE ?
+                        OR CAST(v.plant_id AS CHAR) LIKE ?
+                        OR COALESCE(p.{$plantNameCol}, '') LIKE ?
+                      )
+                ORDER BY v.{$column}
+                LIMIT 200
+            ";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param('sss', $like, $like, $like);
+        } else {
+            $sql = "
+                SELECT v.id,
+                       v.{$column} AS vehicle_no,
+                       v.plant_id AS plant_id,
+                       '' AS plant_name
+                FROM vehicles v
+                WHERE v.plant_id IS NOT NULL
+                  AND (v.{$column} LIKE ? OR CAST(v.plant_id AS CHAR) LIKE ?)
+                ORDER BY v.{$column}
+                LIMIT 200
+            ";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param('ss', $like, $like);
+        }
+        $stmt->execute();
+        $res = $stmt->get_result();
+
+        $vehicles = [];
+        while ($row = $res->fetch_assoc()) {
+            $number = trim((string)($row['vehicle_no'] ?? ''));
+            if ($number === '') continue;
+            $vehicles[] = [
+                'id' => (int)($row['id'] ?? 0),
+                'vehicle_no' => $number,
+                'plant_id' => (int)($row['plant_id'] ?? 0),
+                'plant_name' => (string)($row['plant_name'] ?? ''),
+            ];
+        }
+        $stmt->close();
+
+        apiRespond(200, ['status' => 'ok', 'vehicles' => $vehicles]);
+    }
+
+    // Supervisor/admin: allow listing vehicles across ALL plants when plantId=0 and q is empty.
+    // Note: capped to avoid very large payloads.
+    if ($plantId === 0 && $q === '' && $isSupervisorOrAdmin) {
+        $column = 'vehicle_no';
+        $columnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE 'vehicle_no'");
+        if (!$columnCheck || $columnCheck->num_rows === 0) {
+            foreach (['number', 'reg_no', 'registration_no'] as $candidate) {
+                $columnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE '{$candidate}'");
+                if ($columnCheck && $columnCheck->num_rows > 0) {
+                    $column = $candidate;
+                    break;
+                }
+            }
+        }
+
+        $plantColumnCheck = $conn->query("SHOW COLUMNS FROM vehicles LIKE 'plant_id'");
+        if (!$plantColumnCheck || $plantColumnCheck->num_rows === 0) {
+            apiRespond(200, ['status' => 'ok', 'vehicles' => []]);
+        }
+
+        // Try to include plant name if plants table/column exists (schema differs between deployments).
+        $plantsTableExists = false;
+        $plantsRes = $conn->query("SHOW TABLES LIKE 'plants'");
+        if ($plantsRes && $plantsRes->num_rows > 0) {
+            $plantsTableExists = true;
+        }
+        $plantNameCol = null;
+        if ($plantsTableExists) {
+            foreach (['plant_name', 'name', 'plant'] as $cand) {
+                $colRes = $conn->query("SHOW COLUMNS FROM plants LIKE '{$cand}'");
+                if ($colRes && $colRes->num_rows > 0) {
+                    $plantNameCol = $cand;
+                    break;
+                }
+            }
+        }
+
+        if ($plantsTableExists && $plantNameCol) {
+            $sql = "
+                SELECT v.id,
+                       v.{$column} AS vehicle_no,
+                       v.plant_id AS plant_id,
+                       COALESCE(p.{$plantNameCol}, '') AS plant_name
+                FROM vehicles v
+                LEFT JOIN plants p ON p.id = v.plant_id
+                WHERE v.plant_id IS NOT NULL
+                ORDER BY v.{$column}
+                LIMIT 500
+            ";
+            $stmt = $conn->prepare($sql);
+        } else {
+            $sql = "
+                SELECT v.id,
+                       v.{$column} AS vehicle_no,
+                       v.plant_id AS plant_id,
+                       '' AS plant_name
+                FROM vehicles v
+                WHERE v.plant_id IS NOT NULL
+                ORDER BY v.{$column}
+                LIMIT 500
+            ";
+            $stmt = $conn->prepare($sql);
+        }
+
+        $stmt->execute();
+        $res = $stmt->get_result();
+
+        $vehicles = [];
+        while ($row = $res->fetch_assoc()) {
+            $number = trim((string)($row['vehicle_no'] ?? ''));
+            if ($number === '') continue;
+            $vehicles[] = [
+                'id' => (int)($row['id'] ?? 0),
+                'vehicle_no' => $number,
+                'plant_id' => (int)($row['plant_id'] ?? 0),
+                'plant_name' => (string)($row['plant_name'] ?? ''),
+            ];
+        }
+        $stmt->close();
+
+        apiRespond(200, ['status' => 'ok', 'vehicles' => $vehicles]);
+    }
 
     $allowedPlantIds = [];
     if ($sessionPlantId > 0) {

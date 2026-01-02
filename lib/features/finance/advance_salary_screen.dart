@@ -1,26 +1,26 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
-import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:pdf/pdf.dart';
+import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/advance_transaction.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/services/profile_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
-import '../../core/models/trip_vehicle.dart';
 import '../../core/services/trip_repository.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/widgets/app_loader.dart';
 
 class AdvanceSalaryScreen extends StatefulWidget {
   final AppUser user;
@@ -31,24 +31,79 @@ class AdvanceSalaryScreen extends StatefulWidget {
   State<AdvanceSalaryScreen> createState() => _AdvanceSalaryScreenState();
 }
 
+enum _ReceiptSource { camera, gallery, pdf }
+
 class _DescriptionOption {
   const _DescriptionOption({
     required this.label,
     this.vehicleMandatory = false,
+    this.driverMandatory = false,
   });
 
   final String label;
   final bool vehicleMandatory;
+  final bool driverMandatory;
 }
 
 class _VehicleOption {
-  const _VehicleOption({required this.id, required this.number});
+  const _VehicleOption({
+    required this.id,
+    required this.number,
+    this.plantId,
+    this.plantName = '',
+  });
 
   final int id;
   final String number;
+  final int? plantId;
+  final String plantName;
+
+  String get displayLabel =>
+      plantName.trim().isEmpty ? number : '$number (${plantName.trim()})';
 }
 
 class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
+  static final NumberFormat _inrNumber = NumberFormat.decimalPattern('en_IN');
+
+  String _selectedMonthCompactLabel() {
+    if (_selectedMonth == 'All Months') return 'All';
+    final year = (_selectedYear ?? DateTime.now().year) % 100;
+    final yy = year.toString().padLeft(2, '0');
+    final m = _selectedMonth.length >= 3
+        ? _selectedMonth.substring(0, 3)
+        : _selectedMonth;
+    return '$m $yy';
+  }
+
+  String _formatInrSigned(double value) {
+    final absValue = value.abs();
+    final rounded = absValue.round();
+    final formatted = _inrNumber.format(rounded);
+    return value < 0 ? '-₹$formatted' : '₹$formatted';
+  }
+
+  String _formatInr(double value) {
+    final rounded = value.round();
+    return '₹${_inrNumber.format(rounded)}';
+  }
+
+  String _normalizeCategoryKey(String input) {
+    return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _isEditLockedTransaction(AdvanceTransaction transaction) {
+    final raw = (transaction.category ?? '').trim();
+    final key = _normalizeCategoryKey(raw);
+    if (key.isEmpty) return false;
+    const blocked = <String>{
+      'home',
+      'charges',
+      'advanceoffice',
+      'advance',
+    };
+    return blocked.contains(key);
+  }
+
   static const List<String> _monthNames = <String>[
     'January',
     'February',
@@ -82,8 +137,12 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   List<_DescriptionOption> _descriptionOptions = const [];
   bool _isDescriptionLoading = false;
+  // Used in _loadTransactionDescriptions() for debugging / future UI use.
+  // ignore: unused_field
   String? _descriptionLoadError;
   List<_VehicleOption> _vehicleOptions = const [];
+  // Used in _loadVehiclesForKhata() for debugging / future UI use.
+  // ignore: unused_field
   bool _isVehicleListLoading = false;
   String? _vehicleLoadError;
 
@@ -149,7 +208,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   Future<void> _loadBalance() async {
     try {
-      final driverId = widget.user.driverId ?? widget.user.id;
+      final driverId = (widget.user.driverId ?? '').toString();
+      if (driverId.trim().isEmpty) {
+        setState(() {
+          _currentBalance = 0.0;
+        });
+        return;
+      }
       print('DEBUG: Loading balance for driverId: $driverId');
 
       final response = await http.post(
@@ -186,12 +251,20 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   Future<void> _loadTransactions() async {
     try {
-      final driverId = widget.user.driverId ?? widget.user.id;
+      final driverId = (widget.user.driverId ?? '').toString();
+      if (driverId.trim().isEmpty) {
+        setState(() {
+          _transactions = [];
+          _filteredTransactions = [];
+          _currentBalance = 0.0;
+        });
+        return;
+      }
       print('DEBUG: Loading transactions for driverId: $driverId');
       print('DEBUG: User driverId: ${widget.user.driverId}');
       print('DEBUG: User id: ${widget.user.id}');
       print(
-        'DEBUG: Request body: ${jsonEncode({'driverId': driverId, 'limit': 50})}',
+        'DEBUG: Request body: ${jsonEncode({'driverId': driverId, 'limit': 5000})}',
       );
 
       final response = await http.post(
@@ -199,7 +272,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           'https://sstranswaysindia.com/api/mobile/get_advance_transactions.php',
         ),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'driverId': driverId, 'limit': 50}),
+        body: jsonEncode({'driverId': driverId, 'limit': 5000}),
       );
 
       print('DEBUG: Transactions API response status: ${response.statusCode}');
@@ -252,6 +325,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     return null;
   }
 
+  // Previously used to filter supervisor vehicles by supervised plants.
+  // Kept for potential future use.
+  // ignore: unused_element
   Set<int> _parseSupervisorPlantIds() {
     final ids = <int>{};
     for (final raw in widget.user.supervisedPlantIds) {
@@ -268,7 +344,44 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     return ids;
   }
 
-  List<_VehicleOption> _buildVehicleOptionsFromAvailable(Set<int> allowedPlants) {
+  String _plantNameForId(int? plantId) {
+    if (plantId == null || plantId <= 0) {
+      return '';
+    }
+
+    // Try supervisedPlants array (for supervisors)
+    for (final p in widget.user.supervisedPlants) {
+      final rawId = p['id'] ?? p['plantId'] ?? p['plant_id'];
+      final id = int.tryParse(rawId?.toString() ?? '');
+      if (id == plantId) {
+        final name =
+            (p['name'] ?? p['plantName'] ?? p['plant_name'] ?? p['plant'] ?? '')
+                .toString()
+                .trim();
+        if (name.isNotEmpty) return name;
+      }
+    }
+
+    // Try current user fields (for drivers)
+    final inferred = _inferPlantId();
+    if (inferred == plantId) {
+      final nameCandidates = <String?>[
+        widget.user.assignmentPlantName,
+        widget.user.plantName,
+        widget.user.defaultPlantName,
+      ];
+      for (final n in nameCandidates) {
+        final name = (n ?? '').trim();
+        if (name.isNotEmpty) return name;
+      }
+    }
+
+    return 'Plant $plantId';
+  }
+
+  List<_VehicleOption> _buildVehicleOptionsFromAvailable(
+    Set<int> allowedPlants,
+  ) {
     final unique = <int, _VehicleOption>{};
     for (final driverVehicle in widget.user.availableVehicles) {
       final id = int.tryParse(driverVehicle.id) ?? 0;
@@ -277,10 +390,17 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         continue;
       }
       final plantId = driverVehicle.plantId;
-      if (allowedPlants.isNotEmpty && plantId != null && !allowedPlants.contains(plantId)) {
+      if (allowedPlants.isNotEmpty &&
+          plantId != null &&
+          !allowedPlants.contains(plantId)) {
         continue;
       }
-      unique[id] = _VehicleOption(id: id, number: number);
+      unique[id] = _VehicleOption(
+        id: id,
+        number: number,
+        plantId: plantId,
+        plantName: _plantNameForId(plantId),
+      );
     }
     return unique.values.toList(growable: false);
   }
@@ -293,10 +413,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     return '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
-  void _onMonthSelected(String month) {
-    _applyMonthYear(month: month, year: _selectedYear);
-  }
-
   void _applyMonthYear({required String month, int? year}) {
     setState(() {
       _selectedMonth = month;
@@ -306,7 +422,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _filterTransactions() {
-    final currentDriverId = widget.user.driverId ?? widget.user.id;
+    final currentDriverId = (widget.user.driverId ?? '').toString();
+    if (currentDriverId.trim().isEmpty) {
+      setState(() {
+        _filteredTransactions = const [];
+      });
+      return;
+    }
 
     // First filter by driver ID to ensure only current driver's transactions
     final driverFilteredTransactions = _transactions.where((transaction) {
@@ -346,9 +468,76 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       ).compareTo(_parseTransactionDate(a.createdAt)),
     );
 
+    // IMPORTANT: Month-wise balance should NOT include previous months.
+    // Recompute running balance within the currently filtered set
+    // (which is already month/year constrained).
+    final recomputed = _recomputeRunningBalanceForFilteredMonth(filtered);
+
+    double monthBalance = 0.0;
+    for (final t in recomputed) {
+      if (t.type == 'advance_received') {
+        monthBalance += t.amount;
+      } else if (t.type == 'expense') {
+        monthBalance -= t.amount;
+      }
+    }
+
     setState(() {
-      _filteredTransactions = filtered;
+      _filteredTransactions = recomputed;
+      // Show balance for the currently selected month/year (default: current month).
+      _currentBalance = monthBalance;
     });
+  }
+
+  List<AdvanceTransaction> _recomputeRunningBalanceForFilteredMonth(
+    List<AdvanceTransaction> txns,
+  ) {
+    if (txns.isEmpty) return txns;
+
+    int idAsInt(AdvanceTransaction t) => int.tryParse(t.id) ?? 0;
+
+    // Compute balances in chronological order (oldest -> newest) so "Bal."
+    // is the cumulative month balance up to that transaction.
+    final asc = List<AdvanceTransaction>.from(txns)
+      ..sort((a, b) {
+        final d = _parseTransactionDate(
+          a.createdAt,
+        ).compareTo(_parseTransactionDate(b.createdAt));
+        if (d != 0) return d;
+        return idAsInt(a).compareTo(idAsInt(b));
+      });
+
+    final balanceById = <String, double>{};
+    double running = 0.0;
+    for (final t in asc) {
+      if (t.type == 'advance_received') {
+        running += t.amount;
+      } else if (t.type == 'expense') {
+        running -= t.amount;
+      }
+      balanceById[t.id] = running;
+    }
+
+    // Keep UI order (DESC) but replace runningBalance with month-wise values.
+    return txns
+        .map(
+          (t) => AdvanceTransaction(
+            id: t.id,
+            driverId: t.driverId,
+            type: t.type,
+            amount: t.amount,
+            description: t.description,
+            createdAt: t.createdAt,
+            vehicleId: t.vehicleId,
+            vehiclePlantId: t.vehiclePlantId,
+            counterpartyDriverId: t.counterpartyDriverId,
+            counterpartyPlantId: t.counterpartyPlantId,
+            runningBalance: balanceById[t.id],
+            receiptPath: t.receiptPath,
+            category: t.category,
+          ),
+        )
+        .toList(growable: false);
   }
 
   int _getMonthIndex(String month) {
@@ -394,12 +583,27 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   bool _isVehicleMandatory(String? label) {
-    if (label == null || label.isEmpty) {
-      return false;
+    if (label == null || label.isEmpty) return false;
+    for (final option in _descriptionOptions) {
+      if (option.label == label) return option.vehicleMandatory;
     }
+    return false;
+  }
+
+  bool _isDriverMandatory(String? label, {required bool isAdvanceReceived}) {
+    if (label == null || label.isEmpty) return false;
     for (final option in _descriptionOptions) {
       if (option.label == label) {
-        return option.vehicleMandatory;
+        // explicit driver flag or legacy heuristics (advance or incentive when you gave)
+        final lower = option.label.toLowerCase();
+        final isAdvance = lower.contains('advance');
+        final isIncentive = lower.contains('incentive');
+        final isDa = lower.trim() == 'da';
+        final isMedical = lower.trim() == 'medical';
+        final isExtra = lower.trim() == 'extra';
+        return option.driverMandatory ||
+            (!isAdvanceReceived && (isIncentive || isDa || isMedical || isExtra)) ||
+            isAdvance;
       }
     }
     return false;
@@ -576,17 +780,41 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     String type,
     double amount,
     String description,
-    DateTime transactionDate,
-  ) async {
+    DateTime transactionDate, {
+    String? targetDriverId,
+    int? counterpartyDriverId,
+    int? counterpartyPlantId,
+    int? vehicleId,
+    int? vehiclePlantId,
+    String? category,
+  }) async {
     try {
-      final driverId = widget.user.driverId ?? widget.user.id;
+      final driverId = targetDriverId ?? widget.user.driverId ?? widget.user.id;
       final requestBody = {
         'driverId': driverId,
+        'userId': widget.user.id,
         'type': type,
         'amount': amount,
         'description': description,
         'timestamp': transactionDate.toIso8601String(),
       };
+      // Also send the base category (selected description label) separately,
+      // so backend can store it in advance_transactions.category.
+      if (category != null && category.trim().isNotEmpty) {
+        requestBody['category'] = category.trim();
+      }
+      if (vehicleId != null && vehicleId > 0) {
+        requestBody['vehicleId'] = vehicleId;
+      }
+      if (vehiclePlantId != null && vehiclePlantId > 0) {
+        requestBody['vehiclePlantId'] = vehiclePlantId;
+      }
+      if (counterpartyDriverId != null && counterpartyDriverId > 0) {
+        requestBody['counterpartyDriverId'] = counterpartyDriverId;
+      }
+      if (counterpartyPlantId != null && counterpartyPlantId > 0) {
+        requestBody['counterpartyPlantId'] = counterpartyPlantId;
+      }
 
       final response = await http.post(
         Uri.parse(
@@ -640,16 +868,16 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         pdf.addPage(
           pw.Page(
             build: (pw.Context context) {
-              return pw.Center(
-                child: pw.Image(pdfImage),
-              );
+              return pw.Center(child: pw.Image(pdfImage));
             },
           ),
         );
       }
 
       final output = await getTemporaryDirectory();
-      final file = File('${output.path}/receipts_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      final file = File(
+        '${output.path}/receipts_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
       await file.writeAsBytes(await pdf.save());
       return file.path;
     } catch (e) {
@@ -658,40 +886,51 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     }
   }
 
-  Future<ImageSource?> _showReceiptSourceSheet() {
-    return showModalBottomSheet<ImageSource>(
+  Future<_ReceiptSource?> _showReceiptSourceSheet() {
+    return showModalBottomSheet<_ReceiptSource>(
       context: context,
       useRootNavigator: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              child: Text(
-                'Attach receipt',
-                style: Theme.of(sheetContext)
-                    .textTheme
-                    .titleMedium
-                    ?.copyWith(fontWeight: FontWeight.w600),
+      builder: (sheetContext) => Material(
+        color: Colors.white,
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 16,
+                ),
+                child: Text(
+                  'Attach receipt',
+                  style: Theme.of(
+                    sheetContext,
+                  ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                ),
               ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Capture photo'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.camera),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Choose from gallery (Multiple)'),
-              onTap: () => Navigator.pop(sheetContext, ImageSource.gallery),
-            ),
-            const SizedBox(height: 16),
-          ],
+              ListTile(
+                leading: const Icon(Icons.camera_alt_outlined),
+                title: const Text('Capture photo'),
+                onTap: () => Navigator.pop(sheetContext, _ReceiptSource.camera),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_outlined),
+                title: const Text('Choose from gallery (Multiple)'),
+                onTap: () => Navigator.pop(sheetContext, _ReceiptSource.gallery),
+              ),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf_outlined),
+                title: const Text('Choose PDF file'),
+                onTap: () => Navigator.pop(sheetContext, _ReceiptSource.pdf),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
         ),
       ),
     );
@@ -720,7 +959,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   Future<void> _handleReceiptSelection({
-    required ImageSource source,
+    required _ReceiptSource source,
     required StateSetter setSheetState,
     required ValueChanged<String> onPathSelected,
   }) async {
@@ -729,7 +968,29 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     });
 
     try {
-      if (source == ImageSource.camera) {
+      if (source == _ReceiptSource.pdf) {
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+          withData: false,
+        );
+        final file = result?.files.single;
+        final path = file?.path;
+        if (path == null || path.isEmpty) {
+          showAppToast(
+            context,
+            'Unable to pick PDF on this device.',
+            isError: true,
+          );
+          return;
+        }
+        setSheetState(() {
+          onPathSelected(path);
+        });
+        return;
+      }
+
+      if (source == _ReceiptSource.camera) {
         final XFile? image = await _imagePicker.pickImage(
           source: ImageSource.camera,
           maxWidth: 1920,
@@ -780,11 +1041,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       }
       showAppToast(context, message, isError: true);
     } catch (error) {
-      showAppToast(
-        context,
-        'Error selecting image: $error',
-        isError: true,
-      );
+      showAppToast(context, 'Error selecting image: $error', isError: true);
     } finally {
       setSheetState(() {
         _isUploadingPhoto = false;
@@ -793,7 +1050,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _showAddTransactionDialog(bool isAdvanceReceived) {
-    print('DEBUG: _showAddTransactionDialog called. isAdvanceReceived: $isAdvanceReceived');
+    print(
+      'DEBUG: _showAddTransactionDialog called. isAdvanceReceived: $isAdvanceReceived',
+    );
     print('DEBUG: _isDescriptionLoading: $_isDescriptionLoading');
     print('DEBUG: _descriptionOptions length: ${_descriptionOptions.length}');
 
@@ -819,326 +1078,965 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
     final amountController = TextEditingController();
     final extraNotesController = TextEditingController();
+    final advanceDriverSearchController = TextEditingController();
+    final vehicleSearchController = TextEditingController();
+    bool isVehicleRemoteLoading = false;
+    String? vehicleRemoteError;
+    Timer? vehicleDebounce;
+    String? advanceSelectedDriverId;
+    String advanceSelectedDriverName = '';
+    String advanceSelectedDriverPlant = '';
+    int? advanceSelectedDriverPlantId;
+    bool showAdvanceDriverList = false;
+    List<Map<String, dynamic>> advanceFilteredDrivers = List.from(_driversList);
+    bool showVehicleList = false;
+    List<_VehicleOption> filteredVehicles = List.from(_vehicleOptions);
     DateTime selectedDate = DateTime.now();
     String? selectedReceiptPath;
     String? selectedDescriptionLabel = _descriptionOptions.isNotEmpty
         ? _descriptionOptions.first.label
         : null;
+    // ignore: unused_local_variable
     int? selectedVehicleId;
     String? selectedVehicleNumber;
+    int? selectedVehiclePlantId;
+    String? selectedVehiclePlantName;
 
     // Try to unfocus to prevent MouseTracker issues
     FocusScope.of(context).unfocus();
 
     Future.delayed(const Duration(milliseconds: 50), () {
       if (!mounted) return;
-      
+
       showModalBottomSheet<void>(
         context: context,
         backgroundColor: Colors.white, // Changed to white for visibility
         isScrollControlled: true,
         builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> pickReceipt() async {
-              final ImageSource? source = await _showReceiptSourceSheet();
-              if (source == null) return;
-              await _handleReceiptSelection(
-                source: source,
-                setSheetState: setSheetState,
-                onPathSelected: (path) {
-                  selectedReceiptPath = path;
-                },
-              );
-            }
-
-            Future<void> handleDateChange() async {
-              final date = await showDatePicker(
-                context: context,
-                initialDate: selectedDate,
-                firstDate: DateTime.now().subtract(const Duration(days: 365)),
-                lastDate: DateTime.now(),
-              );
-              if (date != null) {
-                final time = await showTimePicker(
-                  context: context,
-                  initialTime: TimeOfDay.fromDateTime(selectedDate),
+          return StatefulBuilder(
+            builder: (context, setSheetState) {
+              Future<void> pickReceipt() async {
+                final _ReceiptSource? source = await _showReceiptSourceSheet();
+                if (source == null) return;
+                await _handleReceiptSelection(
+                  source: source,
+                  setSheetState: setSheetState,
+                  onPathSelected: (path) {
+                    selectedReceiptPath = path;
+                  },
                 );
-                if (time != null) {
-                  setSheetState(() {
-                    selectedDate = DateTime(
-                      date.year,
-                      date.month,
-                      date.day,
-                      time.hour,
-                      time.minute,
-                    );
-                  });
+              }
+
+              Future<void> handleDateChange() async {
+                final date = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDate,
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now(),
+                );
+                if (date != null) {
+                  final time = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.fromDateTime(selectedDate),
+                  );
+                  if (time != null) {
+                    setSheetState(() {
+                      selectedDate = DateTime(
+                        date.year,
+                        date.month,
+                        date.day,
+                        time.hour,
+                        time.minute,
+                      );
+                    });
+                  }
                 }
               }
-            }
 
-            Future<T?> showSelectionDialog<T>({
-              required String title,
-              required List<T> items,
-              required String Function(T) labelBuilder,
-            }) async {
-              return showDialog<T>(
-                context: context,
-                builder: (context) => Dialog(
-                  child: Container(
-                    constraints: const BoxConstraints(maxHeight: 400),
-                    color: Colors.white,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            title,
-                            style: Theme.of(context).textTheme.titleLarge,
+              Future<T?> showSelectionDialog<T>({
+                required String title,
+                required List<T> items,
+                required String Function(T) labelBuilder,
+              }) async {
+                return showDialog<T>(
+                  context: context,
+                  builder: (context) => Dialog(
+                    child: Container(
+                      constraints: const BoxConstraints(maxHeight: 400),
+                      color: Colors.white,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              title,
+                              style: Theme.of(context).textTheme.titleLarge,
+                            ),
                           ),
-                        ),
-                        const Divider(height: 1),
-                        Flexible(
-                          child: ListView.builder(
-                            shrinkWrap: true,
-                            itemCount: items.length,
-                            itemBuilder: (context, index) {
-                              final item = items[index];
-                              return ListTile(
-                                title: Text(labelBuilder(item)),
-                                onTap: () => Navigator.pop(context, item),
-                              );
-                            },
+                          const Divider(height: 1),
+                          Flexible(
+                            child: ListView.builder(
+                              shrinkWrap: true,
+                              itemCount: items.length,
+                              itemBuilder: (context, index) {
+                                final item = items[index];
+                                return ListTile(
+                                  title: Text(labelBuilder(item)),
+                                  onTap: () => Navigator.pop(context, item),
+                                );
+                              },
+                            ),
                           ),
-                        ),
-                        const Divider(height: 1),
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text('Cancel'),
-                        ),
-                      ],
+                          const Divider(height: 1),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context),
+                            child: const Text('Cancel'),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
+                );
+              }
+
+              final bool vehicleFieldNeeded =
+                  !isAdvanceReceived &&
+                  _isVehicleMandatory(selectedDescriptionLabel);
+              final bool isAdvanceCategory = (selectedDescriptionLabel ?? '')
+                  .toLowerCase()
+                  .contains('advance');
+              final bool needsDriverSelection = _isDriverMandatory(
+                selectedDescriptionLabel,
+                isAdvanceReceived: isAdvanceReceived,
               );
-            }
+              final bool requiresVehicleSelection =
+                  vehicleFieldNeeded ||
+                  _isVehicleMandatory(selectedDescriptionLabel);
+              final bool vehicleSelectedOk = !requiresVehicleSelection
+                  ? true
+                  : ((selectedVehicleNumber ?? '').trim().isNotEmpty &&
+                        selectedVehicleId != null);
+              void clearAdvanceDriver() {
+                advanceSelectedDriverId = null;
+                advanceSelectedDriverName = '';
+                advanceSelectedDriverPlant = '';
+                advanceSelectedDriverPlantId = null;
+                advanceDriverSearchController.clear();
+                advanceFilteredDrivers = List.from(_driversList);
+                showAdvanceDriverList = false;
+                setSheetState(() {});
+              }
 
-            final bool vehicleFieldNeeded = !isAdvanceReceived &&
-                _isVehicleMandatory(selectedDescriptionLabel);
-            final bool requiresVehicleSelection =
-                vehicleFieldNeeded && widget.user.role != UserRole.supervisor;
-
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
-              ),
-              child: Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(context).viewInsets.bottom,
                 ),
-                child: SafeArea(
-                  top: false,
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              isAdvanceReceived ? 'You Got ₹' : 'You Gave ₹',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.bold),
-                            ),
-                            IconButton(
-                              onPressed: () => Navigator.of(sheetContext).pop(),
-                              icon: const Icon(Icons.close),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: amountController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Amount',
-                            prefixText: '₹',
-                            border: OutlineInputBorder(),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                isAdvanceReceived ? 'You Got ₹' : 'You Gave ₹',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.bold),
+                              ),
+                              IconButton(
+                                onPressed: () =>
+                                    Navigator.of(sheetContext).pop(),
+                                icon: const Icon(Icons.close),
+                              ),
+                            ],
                           ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          readOnly: true,
-                          controller: TextEditingController(
-                            text: selectedDescriptionLabel,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Description',
-                            border: const OutlineInputBorder(),
-                            enabledBorder: const OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.grey),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: amountController,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'Amount',
+                              prefixText: '₹',
+                              border: OutlineInputBorder(),
                             ),
-                            focusedBorder: const OutlineInputBorder(
-                              borderSide: BorderSide(color: Colors.blue, width: 2),
-                            ),
-                            suffixIcon: const Icon(Icons.arrow_drop_down),
-                            filled: true,
-                            fillColor: Colors.white,
                           ),
-                          onTap: _descriptionOptions.isEmpty
-                              ? null
-                              : () async {
-                                  final selected = await showSelectionDialog<_DescriptionOption>(
-                                    title: 'Select Description',
-                                    items: _descriptionOptions,
-                                    labelBuilder: (option) => option.label,
-                                  );
-                                  if (selected != null) {
-                                    setSheetState(() {
-                                      selectedDescriptionLabel = selected.label;
-                                      // Reset vehicle selection when description changes
-                                      selectedVehicleId = null;
-                                      selectedVehicleNumber = null;
-                                    });
-                                  }
-                                },
-                        ),
-                        if (vehicleFieldNeeded) ...[
                           const SizedBox(height: 16),
                           TextFormField(
                             readOnly: true,
-                            controller: TextEditingController(text: selectedVehicleNumber),
+                            controller: TextEditingController(
+                              text: selectedDescriptionLabel,
+                            ),
                             decoration: InputDecoration(
-                              labelText: 'Vehicle Number${requiresVehicleSelection ? ' *' : ''}',
+                              labelText: 'Description',
                               border: const OutlineInputBorder(),
                               enabledBorder: const OutlineInputBorder(
                                 borderSide: BorderSide(color: Colors.grey),
                               ),
                               focusedBorder: const OutlineInputBorder(
-                                borderSide: BorderSide(color: Colors.blue, width: 2),
+                                borderSide: BorderSide(
+                                  color: Colors.blue,
+                                  width: 2,
+                                ),
                               ),
-                              helperText: requiresVehicleSelection
-                                  ? 'Vehicle number is required for this description.'
-                                  : (_vehicleOptions.isEmpty
-                                      ? 'No vehicles available for your plant.'
-                                      : null),
-                              helperMaxLines: 2,
-                              errorText: _vehicleLoadError,
                               suffixIcon: const Icon(Icons.arrow_drop_down),
                               filled: true,
                               fillColor: Colors.white,
                             ),
-                            onTap: _vehicleOptions.isEmpty
+                            onTap: _descriptionOptions.isEmpty
                                 ? null
                                 : () async {
-                                    final selected = await showSelectionDialog<_VehicleOption>(
-                                      title: 'Select Vehicle',
-                                      items: _vehicleOptions,
-                                      labelBuilder: (vehicle) => vehicle.number,
-                                    );
+                                    // Safety net: never show DRIVETRACK (or variants) in the picker.
+                                    String normalize(String s) => s
+                                        .toLowerCase()
+                                        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
+                                    final visibleDescriptions = _descriptionOptions
+                                        .where(
+                                          (opt) =>
+                                              normalize(opt.label) != 'drivetrack',
+                                        )
+                                        .toList(growable: false);
+                                    final selected =
+                                        await showSelectionDialog<
+                                          _DescriptionOption
+                                        >(
+                                          title: 'Select Description',
+                                          items: visibleDescriptions,
+                                          labelBuilder: (option) =>
+                                              option.label,
+                                        );
                                     if (selected != null) {
                                       setSheetState(() {
-                                        selectedVehicleId = selected.id;
-                                        selectedVehicleNumber = selected.number;
+                                        selectedDescriptionLabel =
+                                            selected.label;
+                                        // Reset vehicle selection when description changes
+                                        selectedVehicleId = null;
+                                        selectedVehicleNumber = null;
+                                        selectedVehiclePlantId = null;
+                                        selectedVehiclePlantName = null;
+                                        vehicleSearchController.clear();
+                                        filteredVehicles = List.from(
+                                          _vehicleOptions,
+                                        );
+                                        showVehicleList = false;
+                                        // Keep/clear driver selection in sync with the same rule used by the UI + submit validation.
+                                        final newlyNeedsDriver =
+                                            _isDriverMandatory(
+                                              selected.label,
+                                              isAdvanceReceived:
+                                                  isAdvanceReceived,
+                                            );
+                                        if (!newlyNeedsDriver) {
+                                          clearAdvanceDriver();
+                                        }
                                       });
                                     }
                                   },
                           ),
-                        ],
-                        const SizedBox(height: 16),
-                        TextField(
-                          controller: extraNotesController,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                            labelText: 'Additional description (optional)',
-                            hintText: 'Add more details for this entry',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.grey.withOpacity(0.3),
-                            ),
-                          ),
-                          child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                            ),
-                            leading: const Icon(Icons.calendar_today),
-                            title: Text('Date: ${_formatDate(selectedDate)}'),
-                            subtitle: Text(_formatTime(selectedDate)),
-                            trailing: const Icon(Icons.edit),
-                            onTap: handleDateChange,
-                          ),
-                        ),
-                        if (!isAdvanceReceived) ...[
-                          const SizedBox(height: 16),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              border: Border.all(
-                                color: Colors.grey.withOpacity(0.3),
+                          if (vehicleFieldNeeded) ...[
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Select Vehicle *',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
                               ),
-                              borderRadius: BorderRadius.circular(8),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Receipt (Optional)',
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: vehicleSearchController,
+                              enabled:
+                                  !_isVehicleListLoading &&
+                                  _vehicleLoadError == null &&
+                                  _vehicleOptions.isNotEmpty,
+                              decoration: InputDecoration(
+                                hintText:
+                                    _vehicleLoadError ??
+                                    (_isVehicleListLoading ||
+                                            _vehicleOptions.isEmpty
+                                        ? 'Loading vehicles...'
+                                        : 'Type vehicle number to search...'),
+                                border: const OutlineInputBorder(),
+                                prefixIcon: _vehicleLoadError != null
+                                    ? const Icon(
+                                        Icons.error_outline,
+                                        color: Colors.red,
+                                      )
+                                    : (isVehicleRemoteLoading ||
+                                          _isVehicleListLoading ||
+                                          _vehicleOptions.isEmpty)
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(12),
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: AppLoader(size: 20),
+                                        ),
+                                      )
+                                    : const Icon(Icons.search),
+                                suffixIcon: selectedVehicleId != null
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          setSheetState(() {
+                                            selectedVehicleId = null;
+                                            selectedVehicleNumber = null;
+                                            selectedVehiclePlantId = null;
+                                            selectedVehiclePlantName = null;
+                                            vehicleSearchController.clear();
+                                            filteredVehicles = List.from(
+                                              _vehicleOptions,
+                                            );
+                                            showVehicleList = false;
+                                          });
+                                        },
+                                      )
+                                    : null,
+                              ),
+                              onTap: () {
+                                showVehicleList = true;
+                                filteredVehicles = List.from(_vehicleOptions);
+                                setSheetState(() {});
+                              },
+                              onChanged: (value) {
+                                showVehicleList = true;
+                                final q = value.trim().toLowerCase();
+                                if (q.isEmpty) {
+                                  filteredVehicles = List<_VehicleOption>.from(
+                                    _vehicleOptions,
+                                  );
+                                } else {
+                                  filteredVehicles = _vehicleOptions
+                                      .where(
+                                        (v) =>
+                                            v.number.toLowerCase().contains(
+                                              q,
+                                            ) ||
+                                            v.plantName.toLowerCase().contains(
+                                              q,
+                                            ),
+                                      )
+                                      .toList(growable: false);
+                                }
+                                vehicleRemoteError = null;
+                                setSheetState(() {});
+
+                                // Supervisor: also search vehicles across ALL plants using backend search (plantId=0).
+                                if (widget.user.role == UserRole.supervisor) {
+                                  final query = value.trim();
+                                  final isNumeric = RegExp(
+                                    r'^\d+$',
+                                  ).hasMatch(query);
+                                  if (query.isNotEmpty &&
+                                      (query.length >= 2 ||
+                                          (isNumeric && query.isNotEmpty))) {
+                                    vehicleDebounce?.cancel();
+                                    vehicleDebounce = Timer(
+                                      const Duration(milliseconds: 350),
+                                      () async {
+                                        isVehicleRemoteLoading = true;
+                                        vehicleRemoteError = null;
+                                        setSheetState(() {});
+                                        try {
+                                          final response = await http.post(
+                                            Uri.parse(
+                                              'https://sstranswaysindia.com/TripDetails/api/mobile/vehicles.php',
+                                            ),
+                                            headers: const {
+                                              'Content-Type':
+                                                  'application/json',
+                                            },
+                                            body: jsonEncode(<String, dynamic>{
+                                              'role': 'supervisor',
+                                              'userId': int.tryParse(
+                                                widget.user.id,
+                                              ),
+                                              'driverId': int.tryParse(
+                                                widget.user.driverId ?? '',
+                                              ),
+                                              'plantId': 0,
+                                              'q': query,
+                                            }),
+                                          );
+                                          if (response.statusCode < 300) {
+                                            final data =
+                                                jsonDecode(response.body)
+                                                    as Map<String, dynamic>? ??
+                                                const <String, dynamic>{};
+                                            final status =
+                                                (data['status'] ?? '')
+                                                    .toString()
+                                                    .trim()
+                                                    .toLowerCase();
+                                            if (status == 'ok') {
+                                              final rows =
+                                                  data['vehicles']
+                                                      as List<dynamic>? ??
+                                                  const [];
+                                              final remote = <_VehicleOption>[];
+                                              for (final row in rows) {
+                                                if (row
+                                                    is! Map<String, dynamic>)
+                                                  continue;
+                                                final id =
+                                                    int.tryParse(
+                                                      row['id']?.toString() ??
+                                                          '',
+                                                    ) ??
+                                                    0;
+                                                final number =
+                                                    (row['vehicle_no'] ??
+                                                            row['number'] ??
+                                                            row['vehicleNumber'] ??
+                                                            '')
+                                                        .toString()
+                                                        .trim();
+                                                if (id <= 0 || number.isEmpty)
+                                                  continue;
+                                                final plantId =
+                                                    int.tryParse(
+                                                      row['plant_id']
+                                                              ?.toString() ??
+                                                          '',
+                                                    ) ??
+                                                    0;
+                                                final plantName =
+                                                    (row['plant_name'] ??
+                                                            row['plantName'] ??
+                                                            '')
+                                                        .toString()
+                                                        .trim();
+                                                remote.add(
+                                                  _VehicleOption(
+                                                    id: id,
+                                                    number: number,
+                                                    plantId: plantId > 0
+                                                        ? plantId
+                                                        : null,
+                                                    plantName: plantName,
+                                                  ),
+                                                );
+                                              }
+                                              // Merge local + remote results
+                                              final merged =
+                                                  <int, _VehicleOption>{
+                                                    for (final v
+                                                        in filteredVehicles)
+                                                      v.id: v,
+                                                    for (final v in remote)
+                                                      v.id: v,
+                                                  };
+                                              filteredVehicles = merged.values
+                                                  .toList(growable: false);
+                                            }
+                                          }
+                                        } catch (e) {
+                                          vehicleRemoteError = e.toString();
+                                        } finally {
+                                          isVehicleRemoteLoading = false;
+                                          setSheetState(() {});
+                                        }
+                                      },
+                                    );
+                                  }
+                                }
+                              },
+                            ),
+                            if (_vehicleLoadError != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  _vehicleLoadError!,
                                   style: TextStyle(
-                                    fontSize: 14,
+                                    color: Colors.red.shade600,
+                                    fontSize: 12,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                Row(
+                              ),
+                            if (vehicleRemoteError != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  vehicleRemoteError!,
+                                  style: TextStyle(
+                                    color: Colors.red.shade600,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            if (showVehicleList && filteredVehicles.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                constraints: const BoxConstraints(
+                                  maxHeight: 200,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.white,
+                                ),
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: filteredVehicles.length,
+                                  itemBuilder: (context, index) {
+                                    final v = filteredVehicles[index];
+                                    final isSelected =
+                                        selectedVehicleId == v.id;
+                                    return ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        Icons.directions_bus,
+                                        color: isSelected
+                                            ? Colors.green
+                                            : Colors.grey,
+                                        size: 20,
+                                      ),
+                                      title: Text(
+                                        v.displayLabel,
+                                        style: TextStyle(
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color: isSelected
+                                              ? Colors.green.shade700
+                                              : Colors.black,
+                                        ),
+                                      ),
+                                      trailing: isSelected
+                                          ? Icon(
+                                              Icons.check_circle,
+                                              color: Colors.green.shade600,
+                                              size: 20,
+                                            )
+                                          : null,
+                                      onTap: () {
+                                        selectedVehicleId = v.id;
+                                        selectedVehicleNumber = v.number;
+                                        selectedVehiclePlantId = v.plantId;
+                                        selectedVehiclePlantName = v.plantName;
+                                        vehicleSearchController.text =
+                                            v.displayLabel;
+                                        showVehicleList = false;
+                                        setSheetState(() {});
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            if (showVehicleList &&
+                                filteredVehicles.isEmpty &&
+                                vehicleSearchController.text.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey.shade50,
+                                ),
+                                child: Text(
+                                  'No vehicles found for "${vehicleSearchController.text}"',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ),
+                          ],
+                          if (needsDriverSelection) ...[
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Select Driver *',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: advanceDriverSearchController,
+                              enabled:
+                                  _driversList.isNotEmpty &&
+                                  _driverLoadErrorMessage == null,
+                              decoration: InputDecoration(
+                                hintText:
+                                    _driverLoadErrorMessage ??
+                                    (_driversList.isEmpty
+                                        ? 'Loading drivers...'
+                                        : 'Type driver name to search...'),
+                                border: const OutlineInputBorder(),
+                                prefixIcon: _driverLoadErrorMessage != null
+                                    ? const Icon(
+                                        Icons.error_outline,
+                                        color: Colors.red,
+                                      )
+                                    : _driversList.isEmpty
+                                    ? const Padding(
+                                        padding: EdgeInsets.all(12),
+                                        child: SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: AppLoader(size: 20),
+                                        ),
+                                      )
+                                    : const Icon(Icons.search),
+                                suffixIcon: advanceSelectedDriverId != null
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: clearAdvanceDriver,
+                                      )
+                                    : null,
+                              ),
+                              onTap: () {
+                                showAdvanceDriverList = true;
+                                setSheetState(() {});
+                              },
+                              onChanged: (value) {
+                                showAdvanceDriverList = true;
+                                advanceFilteredDrivers = _driversList
+                                    .where(
+                                      (driver) => driver['name']
+                                          .toString()
+                                          .toLowerCase()
+                                          .contains(value.toLowerCase()),
+                                    )
+                                    .toList();
+                                setSheetState(() {});
+                              },
+                            ),
+                            if (_driverLoadErrorMessage != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(
+                                  _driverLoadErrorMessage!,
+                                  style: TextStyle(
+                                    color: Colors.red.shade600,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            if (showAdvanceDriverList &&
+                                advanceFilteredDrivers.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                constraints: const BoxConstraints(
+                                  maxHeight: 200,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.white,
+                                ),
+                                child: ListView.builder(
+                                  shrinkWrap: true,
+                                  itemCount: advanceFilteredDrivers.length,
+                                  itemBuilder: (context, index) {
+                                    final driver =
+                                        advanceFilteredDrivers[index];
+                                    final isSelected =
+                                        advanceSelectedDriverId ==
+                                        driver['id'].toString();
+                                    final plantName = (driver['plant'] ?? '')
+                                        .toString();
+                                    final rawPlantId = driver['plant_id'] ??
+                                        driver['plantId'] ??
+                                        driver['plantID'] ??
+                                        driver['plant_id_fk'];
+                                    final plantId = int.tryParse(
+                                      rawPlantId?.toString() ?? '',
+                                    );
+                                    return ListTile(
+                                      dense: true,
+                                      leading: Icon(
+                                        Icons.person,
+                                        color: isSelected
+                                            ? Colors.green
+                                            : Colors.grey,
+                                        size: 20,
+                                      ),
+                                      title: Text(
+                                        driver['name'],
+                                        style: TextStyle(
+                                          fontWeight: isSelected
+                                              ? FontWeight.bold
+                                              : FontWeight.normal,
+                                          color: isSelected
+                                              ? Colors.green.shade700
+                                              : Colors.black,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        plantName.isNotEmpty
+                                            ? 'ID: ${driver['id']} • Plant: $plantName'
+                                            : 'ID: ${driver['id']}',
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                      trailing: isSelected
+                                          ? Icon(
+                                              Icons.check_circle,
+                                              color: Colors.green.shade600,
+                                              size: 20,
+                                            )
+                                          : null,
+                                      onTap: () {
+                                        advanceSelectedDriverId = driver['id']
+                                            .toString();
+                                        advanceSelectedDriverName =
+                                            driver['name'].toString();
+                                        advanceSelectedDriverPlant = plantName;
+                                        advanceSelectedDriverPlantId =
+                                            (plantId != null && plantId > 0)
+                                                ? plantId
+                                                : null;
+                                        showAdvanceDriverList = false;
+                                        setSheetState(() {});
+                                      },
+                                    );
+                                  },
+                                ),
+                              ),
+                            if (showAdvanceDriverList &&
+                                advanceFilteredDrivers.isEmpty &&
+                                advanceDriverSearchController.text.isNotEmpty)
+                              Container(
+                                margin: const EdgeInsets.only(top: 4),
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.grey.shade300,
+                                  ),
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey.shade50,
+                                ),
+                                child: Text(
+                                  'No drivers found for "${advanceDriverSearchController.text}"',
+                                  style: TextStyle(
+                                    color: Colors.grey.shade600,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            if (advanceSelectedDriverId != null &&
+                                advanceSelectedDriverName.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 12),
+                                child: Row(
                                   children: [
-                                    if (selectedReceiptPath != null)
-                                      Expanded(
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blue.withOpacity(0.08),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.person, size: 16),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            advanceSelectedDriverPlant
+                                                    .isNotEmpty
+                                                ? '$advanceSelectedDriverName (ID: $advanceSelectedDriverId • Plant: $advanceSelectedDriverPlant)'
+                                                : '$advanceSelectedDriverName (ID: $advanceSelectedDriverId)',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                          const SizedBox(height: 16),
+                          if (!isAdvanceCategory)
+                            TextField(
+                              controller: extraNotesController,
+                              maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: 'Additional description (optional)',
+                                hintText: 'Add more details for this entry',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          if (!isAdvanceCategory) const SizedBox(height: 16),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: Colors.grey.withOpacity(0.3),
+                              ),
+                            ),
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              leading: const Icon(Icons.calendar_today),
+                              title: Text('Date: ${_formatDate(selectedDate)}'),
+                              subtitle: Text(_formatTime(selectedDate)),
+                              trailing: const Icon(Icons.edit),
+                              onTap: handleDateChange,
+                            ),
+                          ),
+                          if (!isAdvanceReceived) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Colors.grey.withOpacity(0.3),
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    'Receipt (Optional)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      if (selectedReceiptPath != null)
+                                        Expanded(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.green.withOpacity(
+                                                0.1,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(4),
+                                              border: Border.all(
+                                                color: Colors.green.withOpacity(
+                                                  0.3,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Icon(
+                                                  selectedReceiptPath?.endsWith(
+                                                            '.pdf',
+                                                          ) ==
+                                                          true
+                                                      ? Icons.picture_as_pdf
+                                                      : Icons.receipt,
+                                                  size: 16,
+                                                  color: Colors.green,
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  selectedReceiptPath?.endsWith(
+                                                            '.pdf',
+                                                          ) ==
+                                                          true
+                                                      ? 'PDF Selected'
+                                                      : 'Receipt Selected',
+                                                  style: const TextStyle(
+                                                    fontSize: 12,
+                                                    color: Colors.green,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      if (selectedReceiptPath != null)
+                                        const SizedBox(width: 12),
+                                      GestureDetector(
+                                        onTap: _isUploadingPhoto
+                                            ? null
+                                            : pickReceipt,
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 8,
                                             vertical: 4,
                                           ),
                                           decoration: BoxDecoration(
-                                            color: Colors.green.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(4),
+                                            color: _isUploadingPhoto
+                                                ? Colors.grey.withOpacity(0.3)
+                                                : Colors.blue.withOpacity(0.1),
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
                                             border: Border.all(
-                                              color: Colors.green.withOpacity(0.3),
+                                              color: _isUploadingPhoto
+                                                  ? Colors.grey.withOpacity(0.3)
+                                                  : Colors.blue.withOpacity(
+                                                      0.3,
+                                                    ),
                                             ),
                                           ),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(
-                                                selectedReceiptPath?.endsWith('.pdf') == true
-                                                    ? Icons.picture_as_pdf
-                                                    : Icons.receipt,
-                                                size: 16,
-                                                color: Colors.green,
-                                              ),
+                                              if (_isUploadingPhoto)
+                                                const SizedBox(
+                                                  width: 12,
+                                                  height: 12,
+                                                  child: AppLoader(size: 12),
+                                                )
+                                              else
+                                                Icon(
+                                                  selectedReceiptPath != null
+                                                      ? Icons.edit
+                                                      : Icons.attach_file,
+                                                  size: 16,
+                                                  color: _isUploadingPhoto
+                                                      ? Colors.grey
+                                                      : Colors.blue,
+                                                ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                selectedReceiptPath?.endsWith('.pdf') == true
-                                                    ? 'PDF Selected'
-                                                    : 'Receipt Selected',
-                                                style: const TextStyle(
+                                                _isUploadingPhoto
+                                                    ? 'Selecting...'
+                                                    : (selectedReceiptPath !=
+                                                              null
+                                                          ? 'Change'
+                                                          : 'Attach Receipt'),
+                                                style: TextStyle(
                                                   fontSize: 12,
-                                                  color: Colors.green,
+                                                  color: _isUploadingPhoto
+                                                      ? Colors.grey
+                                                      : Colors.blue,
                                                   fontWeight: FontWeight.w500,
                                                 ),
                                               ),
@@ -1146,299 +2044,376 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                           ),
                                         ),
                                       ),
-                                    if (selectedReceiptPath != null)
-                                      const SizedBox(width: 12),
-                                    GestureDetector(
-                                      onTap: _isUploadingPhoto ? null : pickReceipt,
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 4,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: _isUploadingPhoto
-                                              ? Colors.grey.withOpacity(0.3)
-                                              : Colors.blue.withOpacity(0.1),
-                                          borderRadius: BorderRadius.circular(4),
-                                          border: Border.all(
-                                            color: _isUploadingPhoto
-                                                ? Colors.grey.withOpacity(0.3)
-                                                : Colors.blue.withOpacity(0.3),
-                                          ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            if (_isUploadingPhoto)
-                                              const SizedBox(
-                                                width: 12,
-                                                height: 12,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                ),
-                                              )
-                                            else
-                                              Icon(
-                                                selectedReceiptPath != null
-                                                    ? Icons.edit
-                                                    : Icons.attach_file,
-                                                size: 16,
-                                                color: _isUploadingPhoto
-                                                    ? Colors.grey
-                                                    : Colors.blue,
-                                              ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              _isUploadingPhoto
-                                                  ? 'Selecting...'
-                                                  : (selectedReceiptPath != null
-                                                      ? 'Change'
-                                                      : 'Attach Receipt'),
-                                              style: TextStyle(
-                                                fontSize: 12,
-                                                color: _isUploadingPhoto
-                                                    ? Colors.grey
-                                                    : Colors.blue,
-                                                fontWeight: FontWeight.w500,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 24),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed: () => Navigator.of(sheetContext).pop(),
-                                child: const Text('Cancel'),
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed: () async {
-                                  final amount =
-                                      double.tryParse(amountController.text);
-                                  if (amount == null || amount <= 0) {
-                                    showAppToast(
-                                      context,
-                                      'Please enter a valid amount',
-                                      isError: true,
-                                    );
-                                    return;
-                                  }
-                                  final baseDescription =
-                                      selectedDescriptionLabel?.trim() ?? '';
-                                  final extraNotes =
-                                      extraNotesController.text.trim();
-                                  final combinedDescription = () {
-                                    if (baseDescription.isEmpty &&
-                                        extraNotes.isEmpty) {
-                                      return '';
-                                    }
-                                    if (baseDescription.isEmpty) {
-                                      return extraNotes;
-                                    }
-                                    if (extraNotes.isEmpty) {
-                                      return baseDescription;
-                                    }
-                                    return '$baseDescription — $extraNotes';
-                                  }();
-                                  if (combinedDescription.isEmpty) {
-                                    showAppToast(
-                                      context,
-                                      'Please provide a description',
-                                      isError: true,
-                                    );
-                                    return;
-                                  }
-                                  if (requiresVehicleSelection &&
-                                      (selectedVehicleNumber == null ||
-                                          selectedVehicleNumber!.isEmpty)) {
-                                    showAppToast(
-                                      context,
-                                      'Vehicle number is required for this description.',
-                                      isError: true,
-                                    );
-                                    return;
-                                  }
-                                  var finalDescription = combinedDescription;
-                                  if (!isAdvanceReceived &&
-                                      (selectedVehicleNumber?.isNotEmpty ?? false)) {
-                                    finalDescription = finalDescription.isEmpty
-                                        ? 'Vehicle: $selectedVehicleNumber'
-                                        : '$finalDescription (Vehicle: $selectedVehicleNumber)';
-                                  }
-                                  Navigator.of(sheetContext).pop();
-                                  final type = isAdvanceReceived
-                                      ? 'advance_received'
-                                      : 'expense';
-                                  print('🔵 CREATING TRANSACTION');
-                                  print('🔵 Type: $type');
-                                  print('🔵 Amount: $amount');
-                                  print('🔵 Description: $finalDescription');
-                                  print('🔵 Selected Receipt Path: $selectedReceiptPath');
-                                  final transactionId = await _addTransactionWithDate(
-                                    type,
-                                    amount,
-                                    finalDescription,
-                                    selectedDate,
-                                  );
-                                  print('🔵 Transaction ID returned: $transactionId');
-                                  if (!isAdvanceReceived &&
-                                      selectedReceiptPath != null &&
-                                      transactionId != null) {
-                                    try {
-                                      print('🔵 RECEIPT UPLOAD START');
-                                      print('🔵 Transaction ID: $transactionId');
-                                      print(
-                                        '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
-                                      );
-                                      print('🔵 File path: $selectedReceiptPath');
-                                      final file = File(selectedReceiptPath!);
-                                      final fileExists = await file.exists();
-                                      print('🔵 File exists: $fileExists');
-                                      if (fileExists) {
-                                        final fileSize = await file.length();
-                                        print('🔵 File size: $fileSize bytes');
-                                      }
-                                      final response =
-                                          await _financeRepository.uploadReceipt(
-                                        transactionId: transactionId,
-                                        driverId: widget.user.driverId ?? widget.user.id,
-                                        filePath: selectedReceiptPath!,
-                                      );
-                                      print('🟢 Upload response: $response');
-                                      if (response['status'] == 'ok') {
-                                        showAppToast(
-                                          context,
-                                          'Receipt uploaded successfully',
-                                        );
-                                        print('🟢 Receipt upload SUCCESS');
-                                        if (mounted) {
-                                          await _loadData();
-                                        }
-                                      } else {
-                                        print(
-                                          '🔴 Receipt upload FAILED: ${response['error']}',
-                                        );
-                                        showAppToast(
-                                          context,
-                                          'Receipt upload failed: ${response['error'] ?? 'Unknown error'}',
-                                          isError: true,
-                                        );
-                                      }
-                                    } catch (error) {
-                                      print('🔴 Upload exception: $error');
-                                      print('🔴 Exception type: ${error.runtimeType}');
-                                      showAppToast(
-                                        context,
-                                        'Error uploading receipt: $error',
-                                        isError: true,
-                                      );
-                                    }
-                                    print('🔵 Receipt upload process completed');
-                                  } else {
-                                    print('🔵 Receipt upload SKIPPED');
-                                    print('🔵 isAdvanceReceived: $isAdvanceReceived');
-                                    print('🔵 selectedReceiptPath: $selectedReceiptPath');
-                                    print('🔵 transactionId: $transactionId');
-                                  }
-                                },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                ),
-                                child: const Text('Add'),
+                                    ],
+                                  ),
+                                ],
                               ),
                             ),
                           ],
-                        ),
-                      ],
+                          const SizedBox(height: 24),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () =>
+                                      Navigator.of(sheetContext).pop(),
+                                  child: const Text('Cancel'),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton(
+                                  onPressed: vehicleSelectedOk
+                                      ? () async {
+                                          final amount = double.tryParse(
+                                            amountController.text,
+                                          );
+                                          if (amount == null || amount <= 0) {
+                                            showAppToast(
+                                              context,
+                                              'Please enter a valid amount',
+                                              isError: true,
+                                            );
+                                            return;
+                                          }
+                                          final extraNotes =
+                                              extraNotesController.text.trim();
+
+                                          // Description stored in DB should now be ONLY the extra notes
+                                          // (or an auto-generated text for advance driver flows), not the
+                                          // selected category label. Category itself is stored separately.
+                                          var descriptionText = extraNotes;
+
+                                          if (descriptionText.isEmpty &&
+                                              isAdvanceCategory) {
+                                            final plantSuffix =
+                                                advanceSelectedDriverPlant
+                                                    .isNotEmpty
+                                                ? ' ($advanceSelectedDriverPlant)'
+                                                : '';
+                                            descriptionText =
+                                                'Advance for $advanceSelectedDriverName$plantSuffix';
+                                          }
+                                          if (requiresVehicleSelection &&
+                                              (selectedVehicleNumber == null ||
+                                                  selectedVehicleNumber!
+                                                      .isEmpty)) {
+                                            showAppToast(
+                                              context,
+                                              'Vehicle number is required for this description.',
+                                              isError: true,
+                                            );
+                                            return;
+                                          }
+                                          if (needsDriverSelection &&
+                                              (_driverLoadErrorMessage !=
+                                                      null ||
+                                                  _driversList.isEmpty)) {
+                                            showAppToast(
+                                              context,
+                                              _driverLoadErrorMessage ??
+                                                  'Driver list is unavailable. Please refresh and try again.',
+                                              isError: true,
+                                            );
+                                            return;
+                                          }
+                                          if (needsDriverSelection &&
+                                              advanceSelectedDriverId == null) {
+                                            showAppToast(
+                                              context,
+                                              'Select a driver for this entry.',
+                                              isError: true,
+                                            );
+                                            return;
+                                          }
+                                          var finalDescription =
+                                              descriptionText;
+                                          if (!isAdvanceReceived &&
+                                              (selectedVehicleNumber
+                                                      ?.isNotEmpty ??
+                                                  false)) {
+                                            final plantPart =
+                                                (selectedVehiclePlantName ?? '')
+                                                    .trim();
+                                            final vehiclePart =
+                                                plantPart.isNotEmpty
+                                                ? '$selectedVehicleNumber ($plantPart)'
+                                                : '$selectedVehicleNumber';
+                                            finalDescription =
+                                                finalDescription.isEmpty
+                                                ? 'Vehicle: $vehiclePart'
+                                                : '$finalDescription (Vehicle: $vehiclePart)';
+                                          }
+
+                                          // Ensure "ADVANCE" prefix for advance entries
+                                          if (isAdvanceCategory) {
+                                            var rest = finalDescription.trim();
+
+                                            // If "advance" is already at start, drop it (we'll re-add as uppercase).
+                                            rest = rest.replaceFirst(
+                                              RegExp(
+                                                r'^advance\b\s*[-–—:]*\s*',
+                                                caseSensitive: false,
+                                              ),
+                                              '',
+                                            );
+
+                                            // If "advance" is at end (e.g. "... - ADVANCE"), drop it and move to start.
+                                            rest = rest.replaceFirst(
+                                              RegExp(
+                                                r'[-–—:]*\s*advance\b\s*$',
+                                                caseSensitive: false,
+                                              ),
+                                              '',
+                                            );
+
+                                            rest = rest.trim();
+                                            finalDescription = rest.isEmpty
+                                                ? 'ADVANCE -'
+                                                : 'ADVANCE - $rest';
+                                          }
+                                          Navigator.of(sheetContext).pop();
+                                          final type = isAdvanceReceived
+                                              ? 'advance_received'
+                                              : 'expense';
+                                          print('🔵 CREATING TRANSACTION');
+                                          print('🔵 Type: $type');
+                                          print('🔵 Amount: $amount');
+                                          print(
+                                            '🔵 Description: $finalDescription',
+                                          );
+                                          print(
+                                            '🔵 Selected Receipt Path: $selectedReceiptPath',
+                                          );
+
+                                          // If this is an advance entry with a target driver, treat it like a fund transfer
+                                          if (isAdvanceCategory &&
+                                              advanceSelectedDriverId != null) {
+                                            final currentDriverId =
+                                                widget.user.driverId ??
+                                                widget.user.id;
+                                            final receiverId = isAdvanceReceived
+                                                ? currentDriverId
+                                                : advanceSelectedDriverId!;
+                                            final transferSenderId =
+                                                isAdvanceReceived
+                                                ? advanceSelectedDriverId!
+                                                : currentDriverId;
+
+                                            try {
+                                              final transferDescription =
+                                                  isAdvanceCategory
+                                                  ? 'Advance'
+                                                  : finalDescription;
+                                              await _financeRepository
+                                                  .submitFundTransfer(
+                                                    driverId: receiverId,
+                                                    senderId: transferSenderId,
+                                                    amount: amount,
+                                                    description:
+                                                        transferDescription,
+                                                    category: isAdvanceCategory
+                                                        ? selectedDescriptionLabel
+                                                        : null,
+                                                    senderName:
+                                                        widget.user.displayName,
+                                                    timestamp: selectedDate
+                                                        .toIso8601String(),
+                                                  );
+                                              await _loadData();
+                                              showAppToast(
+                                                context,
+                                                'Advance recorded for $advanceSelectedDriverName',
+                                              );
+                                            } catch (e) {
+                                              showAppToast(
+                                                context,
+                                                'Failed to save advance: $e',
+                                                isError: true,
+                                              );
+                                            }
+                                            return;
+                                          }
+
+                                          final transactionId =
+                                              await _addTransactionWithDate(
+                                                type,
+                                                amount,
+                                                descriptionText.isEmpty
+                                                    ? finalDescription
+                                                    : descriptionText,
+                                                selectedDate,
+                                                // For driver-required categories like SALARY/UNIFORM,
+                                                // store the entry in the current user's Khata Book,
+                                                // and attach the selected driver as counterparty.
+                                                counterpartyDriverId:
+                                                    needsDriverSelection
+                                                    ? int.tryParse(
+                                                        advanceSelectedDriverId ??
+                                                            '',
+                                                      )
+                                                    : null,
+                                                counterpartyPlantId:
+                                                    needsDriverSelection
+                                                    ? advanceSelectedDriverPlantId
+                                                    : null,
+                                                vehicleId: selectedVehicleId,
+                                                vehiclePlantId:
+                                                    selectedVehiclePlantId,
+                                                // Store the base description label separately as category
+                                                category:
+                                                    selectedDescriptionLabel,
+                                              );
+                                          print(
+                                            '🔵 Transaction ID returned: $transactionId',
+                                          );
+                                          if (!isAdvanceReceived &&
+                                              selectedReceiptPath != null &&
+                                              transactionId != null) {
+                                            try {
+                                              print('🔵 RECEIPT UPLOAD START');
+                                              print(
+                                                '🔵 Transaction ID: $transactionId',
+                                              );
+                                              print(
+                                                '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
+                                              );
+                                              print(
+                                                '🔵 File path: $selectedReceiptPath',
+                                              );
+                                              final file = File(
+                                                selectedReceiptPath!,
+                                              );
+                                              final fileExists = await file
+                                                  .exists();
+                                              print(
+                                                '🔵 File exists: $fileExists',
+                                              );
+                                              if (fileExists) {
+                                                final fileSize = await file
+                                                    .length();
+                                                print(
+                                                  '🔵 File size: $fileSize bytes',
+                                                );
+                                              }
+                                              final response =
+                                                  await _financeRepository
+                                                      .uploadReceipt(
+                                                        transactionId:
+                                                            transactionId,
+                                                        driverId:
+                                                            widget
+                                                                .user
+                                                                .driverId ??
+                                                            widget.user.id,
+                                                        filePath:
+                                                            selectedReceiptPath!,
+                                                      );
+                                              print(
+                                                '🟢 Upload response: $response',
+                                              );
+                                              if (response['status'] == 'ok') {
+                                                showAppToast(
+                                                  context,
+                                                  'Receipt uploaded successfully',
+                                                );
+                                                print(
+                                                  '🟢 Receipt upload SUCCESS',
+                                                );
+                                                if (mounted) {
+                                                  await _loadData();
+                                                }
+                                              } else {
+                                                print(
+                                                  '🔴 Receipt upload FAILED: ${response['error']}',
+                                                );
+                                                showAppToast(
+                                                  context,
+                                                  'Receipt upload failed: ${response['error'] ?? 'Unknown error'}',
+                                                  isError: true,
+                                                );
+                                              }
+                                            } catch (error) {
+                                              print(
+                                                '🔴 Upload exception: $error',
+                                              );
+                                              print(
+                                                '🔴 Exception type: ${error.runtimeType}',
+                                              );
+                                              showAppToast(
+                                                context,
+                                                'Error uploading receipt: $error',
+                                                isError: true,
+                                              );
+                                            }
+                                            print(
+                                              '🔵 Receipt upload process completed',
+                                            );
+                                          } else {
+                                            print('🔵 Receipt upload SKIPPED');
+                                            print(
+                                              '🔵 isAdvanceReceived: $isAdvanceReceived',
+                                            );
+                                            print(
+                                              '🔵 selectedReceiptPath: $selectedReceiptPath',
+                                            );
+                                            print(
+                                              '🔵 transactionId: $transactionId',
+                                            );
+                                          }
+                                        }
+                                      : null,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  child: const Text('Add'),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    ).whenComplete(() {
-      amountController.dispose();
-      extraNotesController.dispose();
-    });
+              );
+            },
+          );
+        },
+      ).whenComplete(() {
+        amountController.dispose();
+        extraNotesController.dispose();
+        advanceDriverSearchController.dispose();
+        vehicleSearchController.dispose();
+        vehicleDebounce?.cancel();
+      });
     });
   }
-
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Khata Book'),
-        backgroundColor: Colors.transparent,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.book, color: Colors.white),
+            const SizedBox(width: 8),
+            const Text('Khata Book', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        centerTitle: true,
+        backgroundColor: const Color(0xFF12355B),
+        foregroundColor: Colors.white,
+        iconTheme: const IconThemeData(color: Colors.white),
         elevation: 0,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedMonth,
-                dropdownColor: Colors.white,
-                icon: const Icon(
-                  Icons.keyboard_arrow_down,
-                  color: Colors.white,
-                ),
-                onChanged: (value) {
-                  if (value != null) {
-                    _onMonthSelected(value);
-                  }
-                },
-                selectedItemBuilder: (context) {
-                  return _monthOptions
-                      .map(
-                        (month) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            month == _selectedMonth
-                                ? _currentFilterLabel()
-                                : month,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      )
-                      .toList();
-                },
-                items: _monthOptions
-                    .map(
-                      (month) => DropdownMenuItem<String>(
-                        value: month,
-                        child: Text(
-                          month,
-                          style: const TextStyle(color: Colors.black87),
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
-            ),
-          ),
-        ],
       ),
-      body: AppGradientBackground(
+      body: Container(
+        color: Colors.grey[200],
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: AppLoader())
             : RefreshIndicator(
                 onRefresh: _loadData,
                 child: SingleChildScrollView(
@@ -1499,10 +2474,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 ),
               ),
               const SizedBox(height: 4),
-              const Text(
-                'View settings',
-                style: TextStyle(color: Colors.grey, fontSize: 12),
-              ),
             ],
           ),
         ),
@@ -1517,11 +2488,16 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   Widget _buildBalanceCard() {
+    final isPositive = _currentBalance >= 0;
+    final bgColor = isPositive
+        ? const Color(0xFFE8F5E9) // light green
+        : const Color(0xFFFFEBEE); // light red
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: bgColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -1537,39 +2513,62 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
-                'You will get',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
-              ),
-              TextButton.icon(
-                onPressed: _showFundTransferDialog,
-                style: TextButton.styleFrom(foregroundColor: Colors.blue),
-                icon: const Icon(Icons.sync_alt, size: 18),
-                label: const Text('Fund Transfer'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                '₹${_currentBalance.toStringAsFixed(0)}',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.red,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isPositive ? 'You will get' : 'You will give',
+                      style: const TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatInrSigned(_currentBalance),
+                      style: TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.bold,
+                        color: isPositive ? Colors.green : Colors.red,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              ElevatedButton.icon(
-                onPressed: _showMonthSelector,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey.shade100,
-                  foregroundColor: Colors.black87,
-                  elevation: 0,
-                ),
-                icon: const Icon(Icons.calendar_today, size: 16),
-                label: const Text('SET MONTH'),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    onPressed: _showFundTransferDialog,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.blue,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: const Icon(Icons.sync_alt, size: 18),
+                    label: const Text('Fund Transfer'),
+                  ),
+                  const SizedBox(height: 6),
+                  ElevatedButton.icon(
+                    onPressed: _showMonthSelector,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey.shade100,
+                      foregroundColor: Colors.black87,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text(_selectedMonthCompactLabel()),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1600,51 +2599,95 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     final sortedDates = groupedTransactions.keys.toList()
       ..sort((a, b) => b.compareTo(a));
 
+    double youGaveTotal = 0.0;
+    double youGotTotal = 0.0;
+    for (final t in _filteredTransactions) {
+      if (t.type == 'expense') {
+        youGaveTotal += t.amount;
+      } else if (t.type == 'advance_received') {
+        youGotTotal += t.amount;
+      }
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
-              'ENTRIES',
-              style: TextStyle(
+            Text(
+              'ENTRIES (${_filteredTransactions.length})',
+              style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
                 color: Colors.grey,
               ),
             ),
-            const Row(
-              children: [
-                Text(
-                  'YOU GAVE',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.red,
+            Expanded(
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'YOU GAVE',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.red,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _formatInr(youGaveTotal),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                SizedBox(width: 20),
-                Text(
-                  'YOU GOT',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.green,
+                  Expanded(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'YOU GOT',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.green,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _formatInr(youGotTotal),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-            if (_selectedMonth != 'All Months' || _selectedYear != null)
-              Text(
-                _currentFilterLabel(),
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: Colors.blue,
-                ),
+                ],
               ),
+            ),
           ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Tip: Tap any entry row to view full details & edit.',
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.blueGrey.shade700,
+            fontWeight: FontWeight.w600,
+          ),
         ),
         const SizedBox(height: 8),
         // Display transactions grouped by date
@@ -1660,28 +2703,32 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               ...transactions.map((transaction) {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // ENTRIES Column (Left) - Date, Time, Balance, Description
-                      Expanded(flex: 3, child: _buildEntryCard(transaction)),
-                      const SizedBox(width: 8),
-                      // YOU GAVE Column (Middle) - Red amounts
-                      Expanded(
-                        flex: 1,
-                        child: transaction.type == 'expense'
-                            ? _buildAmountCard(transaction, isYouGot: false)
-                            : const SizedBox(height: 60),
-                      ),
-                      const SizedBox(width: 8),
-                      // YOU GOT Column (Right) - Green amounts
-                      Expanded(
-                        flex: 1,
-                        child: transaction.type == 'advance_received'
-                            ? _buildAmountCard(transaction, isYouGot: true)
-                            : const SizedBox(height: 60),
-                      ),
-                    ],
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () => _showTransactionDetail(transaction),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ENTRIES Column (Left) - Date, Time, Balance, Description
+                        Expanded(flex: 3, child: _buildEntryCard(transaction)),
+                        const SizedBox(width: 8),
+                        // YOU GAVE Column (Middle) - Red amounts
+                        Expanded(
+                          flex: 1,
+                          child: transaction.type == 'expense'
+                              ? _buildAmountCard(transaction, isYouGot: false)
+                              : const SizedBox(height: 60),
+                        ),
+                        const SizedBox(width: 8),
+                        // YOU GOT Column (Right) - Green amounts
+                        Expanded(
+                          flex: 1,
+                          child: transaction.type == 'advance_received'
+                              ? _buildAmountCard(transaction, isYouGot: true)
+                              : const SizedBox(height: 60),
+                        ),
+                      ],
+                    ),
                   ),
                 );
               }),
@@ -1750,6 +2797,28 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     // Get current user's driver ID - use driverId if available, otherwise use user ID
     final currentDriverId = widget.user.driverId ?? widget.user.id;
     final canDelete = _canDeleteTransaction(transaction, currentDriverId);
+
+    String buildMetaLine() {
+      final parts = <String>[];
+      if (transaction.vehicleId != null && transaction.vehicleId! > 0) {
+        parts.add('Vehicle ID: ${transaction.vehicleId}');
+      }
+      if (transaction.vehiclePlantId != null &&
+          transaction.vehiclePlantId! > 0) {
+        parts.add('Vehicle Plant ID: ${transaction.vehiclePlantId}');
+      }
+      if (transaction.counterpartyDriverId != null &&
+          transaction.counterpartyDriverId! > 0) {
+        parts.add('Driver ID: ${transaction.counterpartyDriverId}');
+      }
+      if (transaction.counterpartyPlantId != null &&
+          transaction.counterpartyPlantId! > 0) {
+        parts.add('Driver Plant ID: ${transaction.counterpartyPlantId}');
+      }
+      return parts.join(' • ');
+    }
+
+    final metaLine = buildMetaLine();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1846,9 +2915,565 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 ),
             ],
           ),
+          if (metaLine.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              metaLine,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade700,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  void _showTransactionDetail(AdvanceTransaction transaction) {
+    final createdAt = _parseTransactionDate(transaction.createdAt);
+    final isEditLocked = _isEditLockedTransaction(transaction);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        transaction.type == 'expense'
+                            ? 'Expense'
+                            : 'Advance Received',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Amount: ${_formatInr(transaction.amount)}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Date: ${_formatDateTime(transaction.createdAt)}',
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 6),
+                  if (transaction.runningBalance != null)
+                    Text(
+                      'Running Balance: ${transaction.formattedBalance}',
+                      style: const TextStyle(fontSize: 14, color: Colors.red),
+                    ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Description:',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey.shade800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatTransactionDescription(transaction),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  if (transaction.category != null &&
+                      transaction.category!.trim().isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Category: ${transaction.category}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                  if (transaction.vehicleId != null ||
+                      transaction.vehiclePlantId != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Vehicle: '
+                      '${transaction.vehicleId ?? '-'}'
+                      '${transaction.vehiclePlantId != null ? ' • Plant ${transaction.vehiclePlantId}' : ''}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                  if (transaction.counterpartyDriverId != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      'Counterparty Driver ID: ${transaction.counterpartyDriverId}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  if (transaction.receiptPath != null &&
+                      transaction.receiptPath!.isNotEmpty)
+                    ElevatedButton.icon(
+                      onPressed: () => _viewReceipt(transaction.receiptPath!),
+                      icon: const Icon(Icons.receipt_long),
+                      label: const Text('View Receipt'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green.shade600,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: isEditLocked
+                              ? null
+                              : () {
+                                  Navigator.of(context).pop();
+                                  _showEditTransactionSheet(
+                                    transaction,
+                                    createdAt,
+                                  );
+                                },
+                          icon: const Icon(Icons.edit),
+                          label: const Text('Edit Transaction'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            _confirmDeleteTransaction(transaction);
+                          },
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Delete'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red,
+                            side: const BorderSide(color: Colors.red),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showEditTransactionSheet(
+    AdvanceTransaction transaction,
+    DateTime initialDate,
+  ) {
+    if (_isEditLockedTransaction(transaction)) {
+      showAppToast(
+        context,
+        'This category cannot be edited.',
+        isError: true,
+      );
+      return;
+    }
+    final amountController = TextEditingController(
+      text: transaction.amount.toStringAsFixed(0),
+    );
+    final descriptionController = TextEditingController(
+      text: transaction.description,
+    );
+    DateTime selectedDate = initialDate;
+    String? selectedDescriptionLabel =
+        transaction.category?.trim().isNotEmpty == true
+        ? transaction.category
+        : (_descriptionOptions.isNotEmpty
+              ? _descriptionOptions.first.label
+              : transaction.description);
+
+    Future<_DescriptionOption?> pickCategory() async {
+      if (_descriptionOptions.isEmpty) return null;
+      final hasVehicle =
+          transaction.vehicleId != null && transaction.vehicleId! > 0;
+      final hasCounterpartyDriver =
+          transaction.counterpartyDriverId != null &&
+          transaction.counterpartyDriverId! > 0;
+      final hasCounterparty = hasCounterpartyDriver;
+
+      // Rules requested:
+      // - If vehicle is present: show only vehicle_mandatory=Y categories.
+      // - Else if counterparty driver is present: show only the same driver-required
+      //   categories used in "You Gave" flow.
+      // - Else (no vehicle + no driver): show only the current category (e.g. EXTRA).
+      final options = hasVehicle
+          ? _descriptionOptions.where((opt) => opt.vehicleMandatory).toList()
+          : (hasCounterparty
+                ? _descriptionOptions
+                      .where(
+                        (opt) => _isDriverMandatory(
+                          opt.label,
+                          isAdvanceReceived: false, // "You Gave" rules
+                        ),
+                      )
+                      .toList()
+                : () {
+                    final current = (selectedDescriptionLabel ?? '').trim();
+                    if (current.isEmpty) return _descriptionOptions.toList();
+                    final match = _descriptionOptions
+                        .where((opt) => opt.label == current)
+                        .toList();
+                    return match.isNotEmpty
+                        ? match
+                        : <_DescriptionOption>[
+                            _DescriptionOption(label: current),
+                          ];
+                  }());
+
+      if (options.isEmpty) {
+        // Fallback: if vehicle categories are not configured, don't block editing.
+        // (Better than showing an empty dialog.)
+        return showDialog<_DescriptionOption>(
+          context: context,
+          builder: (ctx) => SimpleDialog(
+            title: const Text('Select Category'),
+            children: _descriptionOptions
+                .map(
+                  (opt) => SimpleDialogOption(
+                    onPressed: () => Navigator.of(ctx).pop(opt),
+                    child: Text(opt.label),
+                  ),
+                )
+                .toList(),
+          ),
+        );
+      }
+      return showDialog<_DescriptionOption>(
+        context: context,
+        builder: (ctx) => SimpleDialog(
+          title: Text(
+            hasVehicle
+                ? 'Select Category (Vehicle)'
+                : (hasCounterparty
+                      ? 'Select Category (Driver)'
+                      : 'Select Category'),
+          ),
+          children: options
+              .map(
+                (opt) => SimpleDialogOption(
+                  onPressed: () => Navigator.of(ctx).pop(opt),
+                  child: Text(opt.label),
+                ),
+              )
+              .toList(),
+        ),
+      );
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 16,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+          ),
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              Future<void> pickDateTime() async {
+                final date = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDate,
+                  firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                  lastDate: DateTime.now(),
+                );
+                if (date != null) {
+                  final time = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.fromDateTime(selectedDate),
+                  );
+                  if (time != null) {
+                    setSheetState(() {
+                      selectedDate = DateTime(
+                        date.year,
+                        date.month,
+                        date.day,
+                        time.hour,
+                        time.minute,
+                      );
+                    });
+                  }
+                }
+              }
+
+              String? vehicleLabelFor(int? id) {
+                if (id == null || id <= 0) return null;
+                final match = _vehicleOptions.where((v) => v.id == id).toList();
+                if (match.isNotEmpty) return match.first.displayLabel;
+                return 'Vehicle #$id';
+              }
+
+              String? driverLabelFor(String? id) {
+                if (id == null || id.isEmpty) return null;
+                final match = _driversList.firstWhere(
+                  (d) =>
+                      d['id']?.toString() == id ||
+                      d['driver_id']?.toString() == id ||
+                      d['driverId']?.toString() == id,
+                  orElse: () => {},
+                );
+                if (match.isEmpty) return 'Driver #$id';
+                return match['name']?.toString() ??
+                    match['driver_name']?.toString() ??
+                    match['driverName']?.toString() ??
+                    'Driver #$id';
+              }
+
+              final vehicleLabel = vehicleLabelFor(transaction.vehicleId);
+              final driverLabel = driverLabelFor(
+                (transaction.counterpartyDriverId ?? transaction.driverId)
+                    .toString(),
+              );
+              final driverIdDisplay =
+                  (transaction.counterpartyDriverId ??
+                          int.tryParse(transaction.driverId))
+                      ?.toString();
+              final vehicleIdDisplay =
+                  transaction.vehicleId != null && transaction.vehicleId! > 0
+                  ? transaction.vehicleId.toString()
+                  : null;
+
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Edit Transaction',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: amountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: 'Amount',
+                        prefixText: '₹ ',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      readOnly: true,
+                      controller: TextEditingController(
+                        text: selectedDescriptionLabel,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Category',
+                        suffixIcon: _descriptionOptions.isNotEmpty
+                            ? const Icon(Icons.arrow_drop_down)
+                            : null,
+                      ),
+                      onTap: _descriptionOptions.isEmpty
+                          ? null
+                          : () async {
+                              final selected = await pickCategory();
+                              if (selected != null) {
+                                setSheetState(
+                                  () =>
+                                      selectedDescriptionLabel = selected.label,
+                                );
+                              }
+                            },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: descriptionController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                      ),
+                    ),
+                    if (vehicleLabel != null || driverLabel != null)
+                      const SizedBox(height: 12),
+                    if (vehicleLabel != null)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.directions_bus, size: 20),
+                        title: const Text(
+                          'Vehicle',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          vehicleIdDisplay != null
+                              ? '$vehicleLabel (ID: $vehicleIdDisplay)'
+                              : vehicleLabel,
+                        ),
+                      ),
+                    if (driverLabel != null)
+                      ListTile(
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        leading: const Icon(Icons.person, size: 20),
+                        title: const Text(
+                          'Driver',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: Text(
+                          driverIdDisplay != null
+                              ? '$driverLabel (ID: $driverIdDisplay)'
+                              : driverLabel,
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Date: ${_formatDateTime(selectedDate.toIso8601String())}',
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: pickDateTime,
+                          icon: const Icon(Icons.calendar_today, size: 18),
+                          label: const Text('Change'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () async {
+                          final amount = double.tryParse(
+                            amountController.text.trim(),
+                          );
+                          final description = descriptionController.text.trim();
+                          if (amount == null || amount <= 0) {
+                            showAppToast(
+                              context,
+                              'Enter a valid amount',
+                              isError: true,
+                            );
+                            return;
+                          }
+                          if (description.isEmpty) {
+                            showAppToast(
+                              context,
+                              'Enter a description',
+                              isError: true,
+                            );
+                            return;
+                          }
+
+                          Navigator.of(context).pop(); // close sheet
+                          await _replaceTransaction(
+                            transaction,
+                            type: transaction.type,
+                            amount: amount,
+                            description: description,
+                            date: selectedDate,
+                            category: selectedDescriptionLabel,
+                          );
+                        },
+                        icon: const Icon(Icons.save),
+                        label: const Text('Save Changes'),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _replaceTransaction(
+    AdvanceTransaction original, {
+    required String type,
+    required double amount,
+    required String description,
+    required DateTime date,
+    String? category,
+  }) async {
+    try {
+      setState(() => _isLoading = true);
+      await _financeRepository.deleteTransaction(original.id);
+      await _addTransactionWithDate(
+        type,
+        amount,
+        description,
+        date,
+        targetDriverId: original.driverId,
+        vehicleId: original.vehicleId,
+        vehiclePlantId: original.vehiclePlantId,
+        category: category ?? original.category,
+      );
+      await _loadData();
+      if (mounted) {
+        showAppToast(context, 'Transaction updated.');
+      }
+    } catch (error) {
+      if (mounted) {
+        showAppToast(
+          context,
+          'Failed to update transaction: $error',
+          isError: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   // Amount Card for YOU GAVE/YOU GOT columns
@@ -1948,9 +3573,38 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   String _formatTransactionDescription(AdvanceTransaction transaction) {
+    // Base description comes from DB (extra notes / auto text).
     var description = transaction.description.trim();
     description = _replaceDriverIdPlaceholders(description);
+    description = _normalizeAdvanceLabel(description);
+
+    // If category is present, show it before the description (for UI only).
+    final category = transaction.category?.trim() ?? '';
+    if (category.isNotEmpty) {
+      if (description.isEmpty) return category;
+      return '$category - $description';
+    }
     return description;
+  }
+
+  String _normalizeAdvanceLabel(String description) {
+    var text = description.trim();
+    if (text.isEmpty) return text;
+
+    final hasAdvance = RegExp(
+      r'\badvance\b',
+      caseSensitive: false,
+    ).hasMatch(text);
+    if (!hasAdvance) return text;
+
+    // Remove ALL "advance" tokens anywhere, then prefix once at start.
+    text = text.replaceAll(RegExp(r'\badvance\b', caseSensitive: false), '');
+
+    // Clean up leftover separators/spaces (common patterns: " - ", ":", "—")
+    text = text.replaceAll(RegExp(r'\s*[-–—:]\s*'), ' ');
+    text = text.replaceAll(RegExp(r'\s{2,}'), ' ').trim();
+
+    return text.isEmpty ? 'ADVANCE -' : 'ADVANCE - $text';
   }
 
   String _replaceDriverIdPlaceholders(String description) {
@@ -2031,7 +3685,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   void _ensureCurrentUserCached() {
     final driverKey = widget.user.driverId ?? widget.user.id;
     final displayName = widget.user.displayName.trim();
-    if (driverKey == null || driverKey.toString().isEmpty) {
+    if (driverKey.toString().isEmpty) {
       return;
     }
     if (displayName.isEmpty) {
@@ -2063,7 +3717,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
             const SizedBox(height: 8),
             Text('Counterparty: ${counterparty ?? 'Unknown'}'),
             const SizedBox(height: 8),
-            Text('Description:\n${transaction.description}'),
+            Text('Description:\n${_formatTransactionDescription(transaction)}'),
             const SizedBox(height: 12),
             Text('Created at: ${_formatDateTime(transaction.createdAt)}'),
           ],
@@ -2207,9 +3861,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                 child: SizedBox(
                                   width: 20,
                                   height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
+                                  child: AppLoader(size: 20),
                                 ),
                               )
                             : const Icon(Icons.search),
@@ -2273,6 +3925,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                             final driver = _filteredDriversList[index];
                             final isSelected =
                                 _selectedDriverId == driver['id'].toString();
+                            final plantName = (driver['plant'] ?? '')
+                                .toString();
 
                             return ListTile(
                               dense: true,
@@ -2293,7 +3947,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                 ),
                               ),
                               subtitle: Text(
-                                'ID: ${driver['id']}',
+                                plantName.isNotEmpty
+                                    ? 'ID: ${driver['id']} • Plant: $plantName'
+                                    : 'ID: ${driver['id']}',
                                 style: const TextStyle(fontSize: 12),
                               ),
                               trailing: isSelected
@@ -2585,7 +4241,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 children: [
                   Text('Amount: ${transaction.formattedAmount}'),
                   Text('Type: ${transaction.type}'),
-                  Text('Description: ${transaction.description}'),
+                  Text(
+                    'Description: ${_formatTransactionDescription(transaction)}',
+                  ),
                   if (isFundTransfer) ...[
                     const SizedBox(height: 4),
                     Container(
@@ -2643,7 +4301,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(child: CircularProgressIndicator()),
+        builder: (context) => const Center(child: AppLoader()),
       );
 
       // Call delete API
@@ -2857,9 +4515,15 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                       rawFlag == true ||
                       (rawFlag is String &&
                           rawFlag.trim().toLowerCase() == 'y');
+                  final rawDriver = item['driverMandatory'];
+                  final driverMandatory =
+                      rawDriver == true ||
+                      (rawDriver is String &&
+                          rawDriver.trim().toLowerCase() == 'y');
                   return _DescriptionOption(
                     label: label,
                     vehicleMandatory: mandatory,
+                    driverMandatory: driverMandatory,
                   );
                 }
                 final label = item.toString().trim();
@@ -2870,9 +4534,67 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               })
               .whereType<_DescriptionOption>()
               .toList(growable: false);
+
+          // Apply client-side category rules:
+          // - Force driver mandatory for incentive-like categories and the listed expense categories.
+          // - Hide categories containing "safety" or "advance office".
+          const _forceDriverKeywords = <String>[
+            'incentive',
+            'shoes',
+            'salary',
+            'training',
+            'travel',
+            'travel and uniform',
+            'uniform',
+            'driver name',
+          ];
+          const _hideKeywords = <String>[
+            'safety',
+            'advance office',
+            // Hide both "DRIVETRACK" and variants like "DRIVE TRACK" / "DRIVE_TRACK".
+            'drivetrack',
+            'drive track',
+            'drive_track',
+          ];
+
+          String _normalizeKey(String input) =>
+              input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+
+          final _hideNormalized = _hideKeywords.map(_normalizeKey).toList(
+            growable: false,
+          );
+
+          List<_DescriptionOption> normalized = descriptions
+              .where(
+                (opt) {
+                  final rawLower = opt.label.toLowerCase();
+                  final compact = _normalizeKey(opt.label);
+                  // Keep legacy contains check + robust normalized check.
+                  final legacyHit = _hideKeywords.any((h) => rawLower.contains(h));
+                  final normalizedHit =
+                      _hideNormalized.any((h) => h.isNotEmpty && compact.contains(h));
+                  return !(legacyHit || normalizedHit);
+                },
+              )
+              .map((opt) {
+                final lower = opt.label.toLowerCase();
+                final forceDriver = _forceDriverKeywords.any(
+                  (k) => lower.contains(k),
+                );
+                if (forceDriver && !opt.driverMandatory) {
+                  return _DescriptionOption(
+                    label: opt.label,
+                    vehicleMandatory: opt.vehicleMandatory,
+                    driverMandatory: true,
+                  );
+                }
+                return opt;
+              })
+              .toList(growable: false);
+
           if (!mounted) return;
           setState(() {
-            _descriptionOptions = descriptions;
+            _descriptionOptions = normalized;
           });
         } else {
           final errorMessage =
@@ -2908,7 +4630,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   Future<void> _loadVehiclesForKhata() async {
     final isSupervisor = widget.user.role == UserRole.supervisor;
-    final supervisorPlantIds = isSupervisor ? _parseSupervisorPlantIds() : <int>{};
 
     setState(() {
       _isVehicleListLoading = true;
@@ -2918,55 +4639,75 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     try {
       final repository = TripRepository();
       if (isSupervisor) {
-        final cachedOptions = _buildVehicleOptionsFromAvailable(supervisorPlantIds);
-        if (cachedOptions.isNotEmpty) {
-          if (!mounted) return;
-          setState(() {
-            _vehicleOptions = cachedOptions;
-            _vehicleLoadError = null;
-            _isVehicleListLoading = false;
-          });
-          return;
-        }
+        // For supervisor role, show ALL vehicles across all plants.
+        // 1) Start with cached vehicles from login (if any).
+        final merged = <int, _VehicleOption>{
+          for (final v in _buildVehicleOptionsFromAvailable(const <int>{}))
+            v.id: v,
+        };
 
-        final inferredPlantId = _inferPlantId();
-        final targetPlantIds = supervisorPlantIds.isNotEmpty
-            ? supervisorPlantIds
-            : {
-                if (inferredPlantId != null) inferredPlantId,
-              };
-
-        if (targetPlantIds.isEmpty) {
-          if (!mounted) return;
-          setState(() {
-            _vehicleOptions = const [];
-            _vehicleLoadError = 'No supervised plants assigned.';
-            _isVehicleListLoading = false;
-          });
-          return;
-        }
-
-        final merged = <int, _VehicleOption>{};
-        for (final plantId in targetPlantIds) {
-          final vehicles = await repository.fetchVehiclesForPlant(
-            user: widget.user,
-            plantId: plantId.toString(),
+        // 2) Fetch global list from backend (plantId=0, empty q) and merge.
+        try {
+          final response = await http.post(
+            Uri.parse(
+              'https://sstranswaysindia.com/TripDetails/api/mobile/vehicles.php',
+            ),
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode(<String, dynamic>{
+              'role': 'supervisor',
+              'userId': int.tryParse(widget.user.id),
+              'driverId': int.tryParse(widget.user.driverId ?? ''),
+              'plantId': 0,
+              // Use global search mode to get cross-plant vehicles even if the server
+              // doesn't yet support plantId=0 listing without a query.
+              // '%' matches everything and the API is capped (currently 200).
+              'q': '%',
+            }),
           );
-          for (final vehicle in vehicles) {
-            if (vehicle.id > 0 && vehicle.number.isNotEmpty) {
-              merged[vehicle.id] = _VehicleOption(
-                id: vehicle.id,
-                number: vehicle.number,
-              );
+          if (response.statusCode < 300) {
+            final data =
+                jsonDecode(response.body) as Map<String, dynamic>? ??
+                const <String, dynamic>{};
+            final status = (data['status'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+            if (status == 'ok') {
+              final rows = data['vehicles'] as List<dynamic>? ?? const [];
+              for (final row in rows) {
+                if (row is! Map<String, dynamic>) continue;
+                final id = int.tryParse(row['id']?.toString() ?? '') ?? 0;
+                final number =
+                    (row['vehicle_no'] ??
+                            row['number'] ??
+                            row['vehicleNumber'] ??
+                            '')
+                        .toString()
+                        .trim();
+                if (id <= 0 || number.isEmpty) continue;
+                final plantId =
+                    int.tryParse(row['plant_id']?.toString() ?? '') ?? 0;
+                final plantName = (row['plant_name'] ?? row['plantName'] ?? '')
+                    .toString()
+                    .trim();
+                merged[id] = _VehicleOption(
+                  id: id,
+                  number: number,
+                  plantId: plantId > 0 ? plantId : null,
+                  plantName: plantName,
+                );
+              }
             }
           }
+        } catch (_) {
+          // Ignore; keep cached vehicles.
         }
 
         if (!mounted) return;
         setState(() {
           _vehicleOptions = merged.values.toList(growable: false);
           _vehicleLoadError = _vehicleOptions.isEmpty
-              ? 'No vehicles mapped to your supervised plants.'
+              ? 'No vehicles found.'
               : null;
         });
       } else {
@@ -2988,7 +4729,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
         setState(() {
           _vehicleOptions = vehicles
-              .map((v) => _VehicleOption(id: v.id, number: v.number))
+              .map(
+                (v) => _VehicleOption(
+                  id: v.id,
+                  number: v.number,
+                  plantName: _plantNameForId(plantId),
+                ),
+              )
               .toList(growable: false);
           _vehicleLoadError = _vehicleOptions.isEmpty
               ? 'No vehicles mapped to this plant.'
@@ -3068,61 +4815,121 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         ? trimmedPath
         : 'https://sstranswaysindia.com'
               '${trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath'}';
+    final isPdf = imageUrl != null &&
+        imageUrl.toLowerCase().split('?').first.trim().endsWith('.pdf');
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Receipt'),
-        content: imageUrl == null
-            ? const Text('No receipt available for this entry.')
-            : Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SizedBox(
-                    height: 320,
-                    child: InteractiveViewer(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          imageUrl,
-                          fit: BoxFit.contain,
-                          loadingBuilder: (context, child, progress) {
-                            if (progress == null) return child;
-                            return const Center(
-                              child: CircularProgressIndicator(),
-                            );
-                          },
-                          errorBuilder: (context, error, stackTrace) => Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.broken_image, size: 48),
-                              const SizedBox(height: 12),
-                              Text(
-                                'Unable to load receipt image.',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                                textAlign: TextAlign.center,
+      builder: (context) {
+        int reloadKey = 0;
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              title: const Text('Receipt'),
+              content: imageUrl == null
+                  ? const Text('No receipt available for this entry.')
+                  : isPdf
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Text('PDF receipt attached.'),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: () async {
+                                final uri = Uri.tryParse(imageUrl);
+                                if (uri == null) {
+                                  showAppToast(
+                                    context,
+                                    'Invalid PDF URL.',
+                                    isError: true,
+                                  );
+                                  return;
+                                }
+                                final ok = await launchUrl(
+                                  uri,
+                                  mode: LaunchMode.externalApplication,
+                                );
+                                if (!ok && context.mounted) {
+                                  showAppToast(
+                                    context,
+                                    'Unable to open PDF.',
+                                    isError: true,
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.open_in_new),
+                              label: const Text('Open PDF'),
+                            ),
+                          ],
+                        )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        SizedBox(
+                          height: 320,
+                          child: InteractiveViewer(
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                imageUrl,
+                                key: ValueKey('receipt_$reloadKey'),
+                                fit: BoxFit.contain,
+                                loadingBuilder: (context, child, progress) {
+                                  if (progress == null) return child;
+                                  return const Center(
+                                    child: AppLoader(size: 20),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Center(
+                                      child: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          const Icon(
+                                            Icons.broken_image,
+                                            size: 48,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Text(
+                                            'Unable to load receipt image.',
+                                            style: Theme.of(
+                                              context,
+                                            ).textTheme.bodyMedium,
+                                            textAlign: TextAlign.center,
+                                          ),
+                                          const SizedBox(height: 12),
+                                          ElevatedButton.icon(
+                                            onPressed: () {
+                                              setDialogState(() {
+                                                reloadKey++;
+                                              });
+                                            },
+                                            icon: const Icon(Icons.refresh),
+                                            label: const Text('Reload'),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                               ),
-                            ],
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  SelectableText(
-                    imageUrl,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

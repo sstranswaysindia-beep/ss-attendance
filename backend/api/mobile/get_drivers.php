@@ -20,12 +20,52 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 }
 
 try {
-    // Query to get active drivers
+    if (!function_exists('column_exists')) {
+        function column_exists(mysqli $db, string $table, string $column): bool {
+            $tableEsc = $db->real_escape_string($table);
+            $columnEsc = $db->real_escape_string($column);
+            $sql = "
+                SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = '{$tableEsc}'
+                  AND COLUMN_NAME = '{$columnEsc}'
+                LIMIT 1
+            ";
+            $res = $db->query($sql);
+            $exists = $res && $res->num_rows > 0;
+            if ($res instanceof mysqli_result) {
+                $res->free();
+            }
+            return $exists;
+        }
+    }
+
+    if (!function_exists('table_exists')) {
+        function table_exists(mysqli $db, string $table): bool {
+            $tableEsc = $db->real_escape_string($table);
+            $res = $db->query("SHOW TABLES LIKE '{$tableEsc}'");
+            $exists = $res && $res->num_rows > 0;
+            if ($res instanceof mysqli_result) {
+                $res->free();
+            }
+            return $exists;
+        }
+    }
+
+    $hasPlantId = column_exists($conn, 'drivers', 'plant_id');
+    $hasPlants = $hasPlantId && table_exists($conn, 'plants') && column_exists($conn, 'plants', 'plant_name');
+
+    $plantSelect = $hasPlants ? ', p.plant_name' : ', NULL AS plant_name';
+    $plantJoin = $hasPlants ? ' LEFT JOIN plants p ON p.id = d.plant_id' : '';
+    $plantIdSelect = $hasPlantId ? ', d.plant_id' : ', NULL AS plant_id';
+
+    // Query to get active drivers (with plant if available)
     $stmt = $conn->prepare("
-        SELECT id, name 
-        FROM drivers 
-        WHERE status = 'Active' 
-        ORDER BY name
+        SELECT d.id, d.name {$plantIdSelect} {$plantSelect}
+        FROM drivers d
+        {$plantJoin}
+        WHERE d.status = 'Active'
+        ORDER BY d.name
     ");
     $stmt->execute();
     $result = $stmt->get_result();
@@ -34,7 +74,8 @@ try {
     while ($row = $result->fetch_assoc()) {
         $drivers[] = [
             'id' => (int)$row['id'],
-            'name' => $row['name']
+            'name' => $row['name'],
+            'plant' => $row['plant_name'] ?? null,
         ];
     }
     $stmt->close();

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -14,6 +15,7 @@ import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/supervisor_dashboard_screen.dart';
 import 'core/widgets/in_app_notification_banner.dart';
+import 'core/widgets/app_loader.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -82,10 +84,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
   }
 
   Future<void> _handleLogin(AppUser user) async {
-    await _authRepository.syncDeviceInfo(
-      user: user,
-      appVariant: 'admin',
-    );
+    await _authRepository.syncDeviceInfo(user: user, appVariant: 'admin');
     await AuthStorageService.saveUser(user);
     if (mounted) {
       setState(() => _currentUser = user);
@@ -145,9 +144,15 @@ class _SSAdminAppState extends State<SSAdminApp> {
             return const SizedBox.shrink();
           }
           final mediaQuery = MediaQuery.of(context);
-          final clampedScale = mediaQuery.textScaleFactor.clamp(1.0, 1.1);
+          final isAndroid =
+              !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
           return MediaQuery(
-            data: mediaQuery.copyWith(textScaleFactor: clampedScale),
+            // Only block Android "Font size" scaling. Let "Display size" work normally
+            // so the UI always fills the screen.
+            data: isAndroid
+                ? mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0))
+                : mediaQuery,
             child: InAppNotificationBannerHost(
               hideBell: child is _LoginRoute,
               child: child,
@@ -155,7 +160,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
           );
         },
         home: _isLoading
-            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            ? const Scaffold(body: Center(child: AppLoader()))
             : _currentUser == null
             ? _LoginRoute(
                 child: LoginScreen(

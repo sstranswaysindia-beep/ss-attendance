@@ -5,6 +5,7 @@ import '../../core/models/app_user.dart';
 import '../../core/models/safety_models.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_loader.dart';
 import 'tyre_vehicle_picker_screen.dart';
 
 class TyreInstructionsScreen extends StatefulWidget {
@@ -45,113 +46,124 @@ class _TyreInstructionsScreenState extends State<TyreInstructionsScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-
-    return AppGradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Text(
-            'Tyre Checklist',
-            style: GoogleFonts.josefinSans(
-              textStyle: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w600,
+    // Clamp textScaler to prevent scaling from both font size and display size settings
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
+      child: AppGradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: const Color(
+              0xFF12355B,
+            ), // Dark blue (same as training/spot audit)
+            foregroundColor: Colors.white,
+            elevation: 0,
+            title: Text(
+              'Tyre Checklist',
+              style: GoogleFonts.josefinSans(
+                textStyle: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
               ),
             ),
+            iconTheme: const IconThemeData(color: Colors.white),
           ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-        ),
-        body: FutureBuilder<TyreInstructions>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError || !snapshot.hasData) {
-              return _InstructionsError(
-                message: snapshot.error?.toString() ??
-                    'Unable to load tyre instructions',
-                onRetry: () {
-                  setState(() {
-                    _future = widget.repository.fetchTyreInstructions();
-                  });
-                },
-              );
-            }
+          body: FutureBuilder<TyreInstructions>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: AppLoader());
+              }
+              if (snapshot.hasError || !snapshot.hasData) {
+                return _InstructionsError(
+                  message:
+                      snapshot.error?.toString() ??
+                      'Unable to load tyre instructions',
+                  onRetry: () {
+                    setState(() {
+                      _future = widget.repository.fetchTyreInstructions();
+                    });
+                  },
+                );
+              }
 
-            final instructions = snapshot.data!;
-            return Column(
-              children: [
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
+              final instructions = snapshot.data!;
+              return Column(
+                children: [
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      children: [
+                        _SectionTitle(
+                          labelHi: 'जाँच सूची',
+                          labelEn: 'List of Checkpoints',
+                        ),
+                        const SizedBox(height: 12),
+                        ...instructions.checkpoints.map(
+                          (checkpoint) => _InstructionTile(
+                            number: checkpoint.number,
+                            textHi: checkpoint.textHi,
+                            textEn: checkpoint.textEn,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        _SectionTitle(
+                          labelHi: 'टायर हवा का दबाव',
+                          labelEn: 'PSI Guidance',
+                        ),
+                        const SizedBox(height: 12),
+                        _PsiCard(
+                          min: instructions.psiMin,
+                          max: instructions.psiMax,
+                        ),
+                        const SizedBox(height: 80),
+                      ],
                     ),
-                    children: [
-                      _SectionTitle(
-                        labelHi: 'जाँच सूची',
-                        labelEn: 'List of Checkpoints',
-                      ),
-                      const SizedBox(height: 12),
-                      ...instructions.checkpoints.map(
-                        (checkpoint) => _InstructionTile(
-                          number: checkpoint.number,
-                          textHi: checkpoint.textHi,
-                          textEn: checkpoint.textEn,
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      _SectionTitle(
-                        labelHi: 'टायर हवा का दबाव',
-                        labelEn: 'PSI Guidance',
-                      ),
-                      const SizedBox(height: 12),
-                      _PsiCard(
-                        min: instructions.psiMin,
-                        max: instructions.psiMax,
-                      ),
-                      const SizedBox(height: 80),
-                    ],
                   ),
-                ),
-                SafeArea(
-                  top: false,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: DecoratedBox(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF1C7ED6), Color(0xFF5AA9FF)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+                  SafeArea(
+                    top: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: DecoratedBox(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Color(0xFF1C7ED6), Color(0xFF5AA9FF)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.all(Radius.circular(40)),
                         ),
-                        borderRadius: BorderRadius.all(Radius.circular(40)),
-                      ),
-                      child: FilledButton(
-                        onPressed: () => _handleProceed(instructions),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          shadowColor: Colors.transparent,
-                          minimumSize: const Size.fromHeight(52),
-                          shape: const StadiumBorder(),
-                        ),
-                        child: Text(
-                          'Proceed',
-                          style: GoogleFonts.josefinSans(
-                            textStyle: theme.textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
+                        child: FilledButton(
+                          onPressed: () => _handleProceed(instructions),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.transparent,
+                            shadowColor: Colors.transparent,
+                            minimumSize: const Size.fromHeight(52),
+                            shape: const StadiumBorder(),
+                          ),
+                          child: Text(
+                            'Proceed',
+                            style: GoogleFonts.josefinSans(
+                              textStyle: theme.textTheme.titleMedium?.copyWith(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            );
-          },
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
@@ -313,9 +325,7 @@ class _PsiCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'प्रति टायर सुझाया गया दबाव 120–130 PSI',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: Colors.black87,
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: Colors.black87),
           ),
         ],
       ),

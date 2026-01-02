@@ -4,6 +4,7 @@ import '../../core/constants/assets.dart';
 import '../../core/models/app_user.dart';
 import '../../core/services/auth_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/app_toast.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -229,9 +230,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   ? const SizedBox(
                                       height: 20,
                                       width: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
+                                      child: AppLoader(size: 20),
                                     )
                                   : const Text('Login'),
                             ),

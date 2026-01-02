@@ -9,6 +9,7 @@ import '../../core/services/admin_master_repository.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/services/trip_repository.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 
 class SpotAuditWizardScreen extends StatefulWidget {
   const SpotAuditWizardScreen({required this.user, super.key});
@@ -75,7 +76,9 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
       Map<int, List<AdminDriver>> driverMap = <int, List<AdminDriver>>{};
 
       try {
-        final directory = await _safetyRepository.fetchPlantDirectory(user: widget.user);
+        final directory = await _safetyRepository.fetchPlantDirectory(
+          user: widget.user,
+        );
         if (directory.isNotEmpty) {
           plants = directory
               .map((entry) => TripPlant(id: entry.id, name: entry.name))
@@ -83,7 +86,10 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
           final driverAccumulator = <int, AdminDriver>{};
           for (final entry in directory) {
             vehicleMap[entry.id] = entry.vehicles
-                .map((vehicle) => TripVehicle(id: vehicle.id, number: vehicle.number))
+                .map(
+                  (vehicle) =>
+                      TripVehicle(id: vehicle.id, number: vehicle.number),
+                )
                 .where((vehicle) => vehicle.id > 0 && vehicle.number.isNotEmpty)
                 .toList(growable: false);
             driverMap[entry.id] = entry.drivers
@@ -331,13 +337,18 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
     final driverId = _selectedDriverId ?? 0;
     final vehicle = _selectedVehicleDetails();
     if (plantId <= 0 || driverId <= 0 || vehicle == null) {
-      showAppToast(context, 'Select plant, vehicle, and driver before submitting', isError: true);
+      showAppToast(
+        context,
+        'Select plant, vehicle, and driver before submitting',
+        isError: true,
+      );
       setState(() => _currentStep = 0);
       return;
     }
 
     final sectionsPayload = _buildSectionSubmissions();
-    final localeCode = Localizations.maybeLocaleOf(context)?.languageCode ?? 'en';
+    final localeCode =
+        Localizations.maybeLocaleOf(context)?.languageCode ?? 'en';
     final finalAction = _commentControllers['final_action']?.text.trim() ?? '';
 
     setState(() => _isSubmitting = true);
@@ -364,7 +375,11 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
     } catch (error) {
       if (!mounted) return;
       final message = error.toString().replaceFirst('Exception: ', '');
-      showAppToast(context, message.isEmpty ? 'Failed to submit audit' : message, isError: true);
+      showAppToast(
+        context,
+        message.isEmpty ? 'Failed to submit audit' : message,
+        isError: true,
+      );
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -376,21 +391,26 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: AppLoader()));
     }
     if (_loadingError != null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Spot Audit')),
+        appBar: AppBar(
+          backgroundColor: const Color(
+            0xFF12355B,
+          ), // Dark blue (same as training/incab)
+          foregroundColor: Colors.white,
+          elevation: 0,
+          title: const Text(
+            'Spot Audit',
+            style: TextStyle(color: Colors.white),
+          ),
+        ),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                'Unable to load data',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('Unable to load data', style: theme.textTheme.titleMedium),
               const SizedBox(height: 12),
               Text(
                 _loadingError!,
@@ -405,14 +425,21 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
     return Scaffold(
       backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Spot Audit'),
+        backgroundColor: const Color(
+          0xFF12355B,
+        ), // Dark blue (same as training/incab)
+        foregroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('Spot Audit', style: TextStyle(color: Colors.white)),
         actions: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Center(
               child: Text(
                 'Step ${_currentStep + 1}/$_totalSteps',
-                style: theme.textTheme.bodyMedium,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
@@ -459,15 +486,12 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                         : _nextStep,
                     child: _currentStep == _totalSteps - 1
                         ? (_isSubmitting
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                ),
-                              )
-                            : const Text('Submit Audit'))
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: AppLoader(size: 20),
+                                )
+                              : const Text('Submit Audit'))
                         : const Text('Next Page'),
                   ),
                 ),
@@ -489,98 +513,86 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Audit Details',
-                style: theme.textTheme.headlineSmall,
+              Text('Audit Details', style: theme.textTheme.headlineSmall),
+              const SizedBox(height: 12),
+              _whiteDropdownTheme(
+                context,
+                DropdownButtonFormField<int>(
+                  value: _selectedPlantId,
+                  items: _plants
+                      .map(
+                        (plant) => DropdownMenuItem(
+                          value: plant.id,
+                          child: Text(plant.name),
+                        ),
+                      )
+                      .toList(),
+                  decoration: const InputDecoration(
+                    labelText: 'Plant Name',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  validator: (value) =>
+                      value == null ? 'Please select a plant' : null,
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedPlantId = value;
+                      _selectedDriverId = null;
+                    });
+                    if (value != null) {
+                      _loadVehiclesForPlant(value);
+                    }
+                  },
+                ),
               ),
               const SizedBox(height: 12),
-            _whiteDropdownTheme(
-              context,
-              DropdownButtonFormField<int>(
-                value: _selectedPlantId,
-                items: _plants
-                    .map(
-                      (plant) => DropdownMenuItem(
-                        value: plant.id,
-                        child: Text(plant.name),
-                      ),
-                    )
-                    .toList(),
-                decoration: const InputDecoration(
-                  labelText: 'Plant Name',
-                  border: OutlineInputBorder(),
-                  filled: true,
-                  fillColor: Colors.white,
+              _SearchableDriverDropdown(
+                key: ValueKey(
+                  'driver_dropdown_${_selectedPlantId}_${_filteredDrivers.length}',
                 ),
-                validator: (value) =>
-                    value == null ? 'Please select a plant' : null,
-                onChanged: (value) {
+                drivers: _filteredDrivers,
+                selectedDriverId: _selectedDriverId,
+                onDriverSelected: (driverId) {
                   setState(() {
-                    _selectedPlantId = value;
-                    _selectedDriverId = null;
+                    _selectedDriverId = driverId;
                   });
-                  if (value != null) {
-                    _loadVehiclesForPlant(value);
+                },
+                validator: (value) {
+                  if (_selectedDriverId == null) {
+                    return 'Please select a driver';
                   }
+                  return null;
                 },
               ),
-            ),
-            const SizedBox(height: 12),
-            _whiteDropdownTheme(
-              context,
-              DropdownButtonFormField<String>(
-                value: _selectedVehicleId,
-                items: _vehicles
-                    .map(
-                      (vehicle) => DropdownMenuItem(
-                        value: vehicle.id.toString(),
-                        child: Text(vehicle.number),
-                      ),
-                    )
-                    .toList(),
-                decoration: const InputDecoration(
-                  labelText: 'Vehicle Number',
-                  border: OutlineInputBorder(),
-                  filled: true,
-                  fillColor: Colors.white,
+              const SizedBox(height: 12),
+              _whiteDropdownTheme(
+                context,
+                DropdownButtonFormField<String>(
+                  value: _selectedVehicleId,
+                  items: _vehicles
+                      .map(
+                        (vehicle) => DropdownMenuItem(
+                          value: vehicle.id.toString(),
+                          child: Text(vehicle.number),
+                        ),
+                      )
+                      .toList(),
+                  decoration: const InputDecoration(
+                    labelText: 'Vehicle Number',
+                    border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Colors.white,
+                  ),
+                  validator: (value) =>
+                      value == null ? 'Please select a vehicle' : null,
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedVehicleId = value;
+                    });
+                  },
                 ),
-                validator: (value) =>
-                    value == null ? 'Please select a vehicle' : null,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedVehicleId = value;
-                  });
-                },
               ),
-            ),
-            const SizedBox(height: 12),
-            _whiteDropdownTheme(
-              context,
-              DropdownButtonFormField<int>(
-                value: _selectedDriverId,
-                items: _filteredDrivers
-                    .map(
-                      (driver) => DropdownMenuItem(
-                        value: driver.id,
-                        child: Text(driver.name),
-                      ),
-                    )
-                    .toList(),
-                decoration: const InputDecoration(
-                  labelText: 'Driver Name',
-                  border: OutlineInputBorder(),
-                  filled: true,
-                  fillColor: Colors.white,
-                ),
-                validator: (value) =>
-                    value == null ? 'Please select a driver' : null,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedDriverId = value;
-                  });
-                },
-              ),
-            ),
               const SizedBox(height: 12),
               InputDecorator(
                 decoration: const InputDecoration(
@@ -591,13 +603,17 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                 ),
                 child: ListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: Text(DateFormat('dd MMM yyyy').format(_assessmentDate)),
+                  title: Text(
+                    DateFormat('dd MMM yyyy').format(_assessmentDate),
+                  ),
                   trailing: const Icon(Icons.calendar_today),
                   onTap: () async {
                     final picked = await showDatePicker(
                       context: context,
                       initialDate: _assessmentDate,
-                      firstDate: DateTime.now().subtract(const Duration(days: 7)),
+                      firstDate: DateTime.now().subtract(
+                        const Duration(days: 7),
+                      ),
                       lastDate: DateTime.now(),
                     );
                     if (picked != null) {
@@ -624,8 +640,10 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                   border: OutlineInputBorder(),
                 ),
                 child: ToggleButtons(
-                  isSelected:
-                      ['VITT', 'PG'].map((value) => value == _truckCategory).toList(),
+                  isSelected: [
+                    'VITT',
+                    'PG',
+                  ].map((value) => value == _truckCategory).toList(),
                   onPressed: (index) {
                     setState(() => _truckCategory = index == 0 ? 'VITT' : 'PG');
                   },
@@ -643,10 +661,7 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-              Text(
-                'Highlights',
-                style: theme.textTheme.titleMedium,
-              ),
+              Text('Highlights', style: theme.textTheme.titleMedium),
               const SizedBox(height: 8),
               TextFormField(
                 controller: _highlightsController,
@@ -664,6 +679,7 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
       ),
     );
   }
+
   Widget _buildPlantOverview(ThemeData theme) {
     if (_plants.isEmpty) {
       return const SizedBox.shrink();
@@ -679,13 +695,15 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
         if (_isPrefetchingVehicles && _plantVehicles.isEmpty)
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 12),
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: AppLoader()),
           )
         else
           Column(
             children: _plants.map((plant) {
-              final vehicles = _plantVehicles[plant.id] ?? const <TripVehicle>[];
-              final drivers = _plantDrivers[plant.id] ??
+              final vehicles =
+                  _plantVehicles[plant.id] ?? const <TripVehicle>[];
+              final drivers =
+                  _plantDrivers[plant.id] ??
                   _drivers
                       .where((driver) => driver.plantId == plant.id)
                       .toList(growable: false);
@@ -764,7 +782,9 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
         padding: const EdgeInsets.all(16),
         child: Card(
           elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
           color: Colors.white,
           child: Padding(
             padding: const EdgeInsets.all(20),
@@ -788,10 +808,7 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                 ),
                 const SizedBox(height: 12),
                 for (final question in section.questions) ...[
-                  Text(
-                    question.labelEn,
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  Text(question.labelEn, style: theme.textTheme.titleMedium),
                   Text(
                     question.labelHi,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -861,10 +878,7 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                 ],
                 Row(
                   children: [
-                    Text(
-                      'Marks',
-                      style: theme.textTheme.titleMedium,
-                    ),
+                    Text('Marks', style: theme.textTheme.titleMedium),
                     const SizedBox(width: 12),
                     SegmentedButton<int>(
                       segments: const [
@@ -875,7 +889,10 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
                       selected: <int>{_sectionScore(section.key)},
                       onSelectionChanged: (selection) {
                         if (selection.isEmpty) return;
-                        _setAnswer('${section.key}_manual_score', selection.first);
+                        _setAnswer(
+                          '${section.key}_manual_score',
+                          selection.first,
+                        );
                       },
                     ),
                   ],
@@ -924,17 +941,17 @@ class _SpotAuditWizardScreenState extends State<SpotAuditWizardScreen> {
               Card(
                 margin: const EdgeInsets.only(bottom: 12),
                 child: ListTile(
-                title: Text(section.titleEn),
-                subtitle: Text(
-                  section.titleHi,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w400,
-                    color: Colors.grey[600],
+                  title: Text(section.titleEn),
+                  subtitle: Text(
+                    section.titleHi,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w400,
+                      color: Colors.grey[600],
+                    ),
                   ),
+                  trailing: Text('${_sectionScore(section.key)} / 2'),
                 ),
-                trailing: Text('${_sectionScore(section.key)} / 2'),
               ),
-            ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _commentControllers.putIfAbsent(
@@ -992,7 +1009,6 @@ class _SpotAuditSection {
   final String guideHi;
 }
 
-
 class _RatingBlock extends StatelessWidget {
   const _RatingBlock({
     required this.label,
@@ -1018,7 +1034,9 @@ class _RatingBlock extends StatelessWidget {
           color: baseColor,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? Colors.black.withOpacity(0.7) : const Color(0xFF5E5E5E),
+            color: selected
+                ? Colors.black.withOpacity(0.7)
+                : const Color(0xFF5E5E5E),
             width: selected ? 3 : 2,
           ),
           boxShadow: selected
@@ -1069,7 +1087,9 @@ class _YesNoButton extends StatelessWidget {
           color: color,
           shape: BoxShape.circle,
           border: Border.all(
-            color: selected ? Colors.black.withOpacity(0.6) : Colors.transparent,
+            color: selected
+                ? Colors.black.withOpacity(0.6)
+                : Colors.transparent,
             width: selected ? 3 : 0,
           ),
           boxShadow: selected
@@ -1104,14 +1124,248 @@ Widget _whiteDropdownTheme(BuildContext context, Widget child) {
   );
 }
 
+class _SearchableDriverDropdown extends StatefulWidget {
+  const _SearchableDriverDropdown({
+    super.key,
+    required this.drivers,
+    required this.selectedDriverId,
+    required this.onDriverSelected,
+    required this.validator,
+  });
+
+  final List<AdminDriver> drivers;
+  final int? selectedDriverId;
+  final ValueChanged<int?> onDriverSelected;
+  final FormFieldValidator<String> validator;
+
+  @override
+  State<_SearchableDriverDropdown> createState() =>
+      _SearchableDriverDropdownState();
+}
+
+class _SearchableDriverDropdownState extends State<_SearchableDriverDropdown> {
+  late TextEditingController _controller;
+  AdminDriver? _selectedDriver;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    if (widget.selectedDriverId != null) {
+      _selectedDriver = widget.drivers.firstWhere(
+        (driver) => driver.id == widget.selectedDriverId,
+        orElse: () => widget.drivers.first,
+      );
+      _controller.text = _selectedDriver?.name ?? '';
+    }
+  }
+
+  @override
+  void didUpdateWidget(_SearchableDriverDropdown oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Check if drivers list changed (e.g., plant selection changed)
+    final driversChanged =
+        widget.drivers.length != oldWidget.drivers.length ||
+        !widget.drivers.every(
+          (driver) => oldWidget.drivers.any((d) => d.id == driver.id),
+        );
+
+    // Check if selected driver ID changed
+    final driverIdChanged =
+        widget.selectedDriverId != oldWidget.selectedDriverId;
+
+    if (driversChanged || driverIdChanged) {
+      if (widget.selectedDriverId != null && widget.drivers.isNotEmpty) {
+        // Try to find the selected driver in the new filtered list
+        _selectedDriver = widget.drivers.firstWhere(
+          (driver) => driver.id == widget.selectedDriverId,
+          orElse: () => AdminDriver(
+            id: 0,
+            empId: '',
+            name: '',
+            role: '',
+            status: '',
+            plantName: '',
+          ),
+        );
+        // Only set text if driver was found in the filtered list
+        if (_selectedDriver!.id > 0) {
+          _controller.text = _selectedDriver!.name;
+        } else {
+          // Driver not in filtered list (e.g., plant changed), clear selection
+          _selectedDriver = null;
+          _controller.clear();
+          widget.onDriverSelected(null);
+        }
+      } else {
+        // No driver selected or empty drivers list
+        _selectedDriver = null;
+        _controller.clear();
+      }
+    }
+
+    // Always clear the text field when drivers list changes (plant changed)
+    if (driversChanged && widget.selectedDriverId == null) {
+      _controller.clear();
+      _selectedDriver = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // Use a key based on drivers list to force rebuild when drivers change
+    final driversKey = widget.drivers.map((d) => d.id).join(',');
+    return Autocomplete<AdminDriver>(
+      key: ValueKey('driver_autocomplete_$driversKey'),
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        // Always use the current widget.drivers list
+        final currentDrivers = widget.drivers;
+        if (textEditingValue.text.isEmpty) {
+          return currentDrivers;
+        }
+        final query = textEditingValue.text.toLowerCase();
+        return currentDrivers.where((driver) {
+          return driver.name.toLowerCase().contains(query);
+        }).toList();
+      },
+      displayStringForOption: (AdminDriver driver) => driver.name,
+      fieldViewBuilder:
+          (
+            BuildContext context,
+            TextEditingController textEditingController,
+            FocusNode focusNode,
+            VoidCallback onFieldSubmitted,
+          ) {
+            // Sync the Autocomplete's controller with our internal controller
+            // This ensures the text updates when plant changes
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) {
+                // If no driver is selected, clear the text field
+                if (widget.selectedDriverId == null &&
+                    textEditingController.text.isNotEmpty) {
+                  textEditingController.clear();
+                  _controller.clear();
+                } else if (_controller.text != textEditingController.text) {
+                  textEditingController.text = _controller.text;
+                }
+              }
+            });
+            return TextFormField(
+              controller: textEditingController,
+              focusNode: focusNode,
+              decoration: const InputDecoration(
+                labelText: 'Driver Name',
+                hintText: 'Type to search driver...',
+                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: Colors.white,
+                prefixIcon: Icon(Icons.search),
+              ),
+              validator: widget.validator,
+              onChanged: (value) {
+                // Update internal controller
+                _controller.text = value;
+                // Clear selection if text doesn't match any driver
+                if (value.isEmpty) {
+                  widget.onDriverSelected(null);
+                  _selectedDriver = null;
+                }
+              },
+            );
+          },
+      onSelected: (AdminDriver driver) {
+        setState(() {
+          _selectedDriver = driver;
+          _controller.text = driver.name;
+        });
+        widget.onDriverSelected(driver.id);
+      },
+      optionsViewBuilder:
+          (
+            BuildContext context,
+            AutocompleteOnSelected<AdminDriver> onSelected,
+            Iterable<AdminDriver> options,
+          ) {
+            if (options.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            // Calculate max height to show more items (up to 12-15 items visible)
+            final screenHeight = MediaQuery.of(context).size.height;
+            final itemHeight = 48.0; // Approximate height per item
+            // Show up to 12 items or 50% of screen, whichever is smaller
+            final maxHeight = (itemHeight * 12).clamp(
+              itemHeight * 8, // Minimum 8 items visible
+              screenHeight * 0.5, // Maximum 50% of screen height
+            );
+
+            return Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                elevation: 4.0,
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxHeight: maxHeight),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.zero,
+                    itemCount: options.length,
+                    itemBuilder: (BuildContext context, int index) {
+                      final driver = options.elementAt(index);
+                      final isSelected = driver.id == widget.selectedDriverId;
+                      return InkWell(
+                        onTap: () => onSelected(driver),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? Colors.blue.shade50
+                                : Colors.white,
+                            border: Border(
+                              bottom: BorderSide(
+                                color: Colors.grey.shade200,
+                                width: 0.5,
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            driver.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+    );
+  }
+}
+
 Map<String, _SpotAuditSection> _buildSections() {
   final sections = <_SpotAuditSection>[
     _SpotAuditSection(
       key: 'personal_hygiene',
       titleEn: 'Section - Personal Hygiene',
       titleHi: 'व्यक्तिगत स्वच्छता',
-      guide:
-          'Ask driver to wear FRC.',
+      guide: 'Ask driver to wear FRC.',
       guideHi: 'ड्राइवर को FRC पहनने के लिए कहें।',
       questions: const [
         _SpotAuditQuestion(
@@ -1197,10 +1451,8 @@ Map<String, _SpotAuditSection> _buildSections() {
       key: 'cabin_housekeeping',
       titleEn: 'Cabin Housekeeping',
       titleHi: 'केबिन की साफ-सफाई',
-      guide:
-          'Check functioning of seat belt and overall cleanliness.',
-      guideHi:
-          'सीट बेल्ट के संचालन और समग्र सफाई की जांच करें।',
+      guide: 'Check functioning of seat belt and overall cleanliness.',
+      guideHi: 'सीट बेल्ट के संचालन और समग्र सफाई की जांच करें।',
       questions: const [
         _SpotAuditQuestion(
           id: 'housekeeping',
@@ -1346,7 +1598,5 @@ Map<String, _SpotAuditSection> _buildSections() {
     ),
   ];
 
-  return {
-    for (final section in sections) section.key: section,
-  };
+  return {for (final section in sections) section.key: section};
 }

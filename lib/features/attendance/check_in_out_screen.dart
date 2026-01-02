@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/models/app_user.dart';
@@ -13,7 +15,7 @@ import '../../core/models/attendance_record.dart';
 import '../../core/models/driver_vehicle.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/assignment_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/app_toast.dart';
 
 enum CheckFlowAction { checkIn, checkOut }
@@ -42,11 +44,13 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   final AssignmentRepository _assignmentRepository = AssignmentRepository();
 
   AttendanceRecord? _activeShift;
+  bool? _serverIsCheckedIn;
   bool _isLoadingShift = true;
   bool _isSubmitting = false;
   bool _isAssigning = false;
   bool _isSyncPending = false;
   File? _capturedPhoto;
+  double? _capturedPhotoAspectRatio;
   String? _submissionSummary;
   bool _hasShownLocationWarning = false;
   bool? _locationServiceEnabled;
@@ -111,7 +115,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   Future<void> _loadActiveShift() async {
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       setState(() {
         _isLoadingShift = false;
         _activeShift = null;
@@ -155,7 +159,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       if (!mounted) return;
       setState(() {
         _isLoadingShift = false;
-        _activeShift = null;
+        // Keep last known state if refresh fails (prevents UI flipping to Check-in).
       });
       _updateStatusAnimation();
       showAppToast(context, error.message, isError: true);
@@ -163,7 +167,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       if (!mounted) return;
       setState(() {
         _isLoadingShift = false;
-        _activeShift = null;
+        // Keep last known state if refresh fails (prevents UI flipping to Check-in).
       });
       _updateStatusAnimation();
       showAppToast(context, 'Unable to load attendance status.', isError: true);
@@ -258,6 +262,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['status'] == 'ok') {
+          final rawCheckedIn = data['is_checked_in'];
+          if (rawCheckedIn is bool) {
+            _serverIsCheckedIn = rawCheckedIn;
+          } else if (rawCheckedIn != null) {
+            _serverIsCheckedIn =
+                rawCheckedIn.toString() == '1' ||
+                rawCheckedIn.toString().toLowerCase() == 'true';
+          }
+        }
         if (data['status'] == 'ok' && data['current_attendance'] != null) {
           final attendanceData =
               data['current_attendance'] as Map<String, dynamic>;
@@ -280,6 +294,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           print('DEBUG: No current attendance found');
         }
       }
+      // Fallback: some DB rows might have out_time as empty string instead of NULL,
+      // which makes get_current_attendance.php return null. In that case, check
+      // get_attendance_status.php and use last_attendance to infer open shift.
+      final fallback = await _fetchLastAttendanceFromStatus();
+      if (fallback != null && _isMissingTimeValue(fallback.outTime)) {
+        print(
+          'DEBUG: Using last_attendance fallback as open shift: ${fallback.attendanceId}',
+        );
+        return fallback;
+      }
       return null;
     } catch (e) {
       print('Error fetching current attendance: $e');
@@ -287,13 +311,85 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     }
   }
 
+  Future<AttendanceRecord?> _fetchLastAttendanceFromStatus() async {
+    try {
+      final response = await http.post(
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/get_attendance_status.php',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'userId': widget.user.id}),
+      );
+
+      if (response.statusCode != 200) {
+        return null;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['status'] != 'ok') {
+        return null;
+      }
+
+      // Prefer explicit flags when available.
+      final currentStatus = data['current_status']?.toString().toLowerCase();
+      final hasOpen = data['has_open_attendance'];
+      final bool hasOpenAttendance = hasOpen is bool
+          ? hasOpen
+          : (hasOpen?.toString() == '1' ||
+                hasOpen?.toString().toLowerCase() == 'true');
+      if (currentStatus == 'checked_in' || hasOpenAttendance) {
+        _serverIsCheckedIn = true;
+      } else if (currentStatus == 'checked_out') {
+        _serverIsCheckedIn = false;
+      }
+
+      final last = data['last_attendance'];
+      if (last is! Map<String, dynamic>) {
+        return null;
+      }
+
+      return AttendanceRecord(
+        attendanceId: last['id']?.toString() ?? '',
+        driverId: last['driver_id']?.toString() ?? '',
+        plantId: last['plant_id']?.toString(),
+        plantName: '',
+        vehicleId: last['vehicle_id']?.toString(),
+        vehicleNumber: '',
+        assignmentId: last['assignment_id']?.toString(),
+        inTime: last['in_time']?.toString(),
+        outTime: last['out_time']?.toString(),
+        notes: last['notes']?.toString(),
+        status: last['approval_status']?.toString(),
+        source: last['source']?.toString(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isMissingTimeValue(String? raw) {
+    if (raw == null) return true;
+    final v = raw.trim().toLowerCase();
+    return v.isEmpty ||
+        v == 'null' ||
+        v == 'none' ||
+        v == 'na' ||
+        v == 'n/a' ||
+        v == '0' ||
+        v.startsWith('0000-00-00');
+  }
+
   bool get _hasOpenShift {
     final record = _activeShift;
-    if (record == null) {
-      return false;
+    // Prefer local record inference first (most reliable immediately after submit).
+    if (record != null && _isMissingTimeValue(record.outTime)) {
+      return true;
     }
-    final outTime = record.outTime;
-    return outTime == null || outTime.isEmpty;
+    // If server explicitly says the user is checked in, treat as open shift.
+    if (_serverIsCheckedIn == true) {
+      return true;
+    }
+    return false;
   }
 
   bool _isSameDay(DateTime a, DateTime b) =>
@@ -305,18 +401,18 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       return false;
     }
     final inTimeRaw = record.inTime;
-    if (inTimeRaw == null || inTimeRaw.isEmpty) {
+    if (_isMissingTimeValue(inTimeRaw)) {
       return false;
     }
-    final inTime = DateTime.tryParse(inTimeRaw);
+    final inTime = DateTime.tryParse(inTimeRaw!);
     if (inTime == null || !_isSameDay(inTime, DateTime.now())) {
       return false;
     }
     final outTimeRaw = record.outTime;
-    if (outTimeRaw == null || outTimeRaw.isEmpty) {
+    if (_isMissingTimeValue(outTimeRaw)) {
       return false;
     }
-    final outTime = DateTime.tryParse(outTimeRaw);
+    final outTime = DateTime.tryParse(outTimeRaw!);
     return outTime != null;
   }
 
@@ -446,7 +542,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     final driverId = widget.user.driverId ?? widget.user.id;
     final plantId = _resolvePlantId();
 
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       showAppToast(
         context,
         'User mapping missing. Contact admin.',
@@ -546,8 +642,29 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       final savedPath = '${dateDir.path}/$fileName';
       final savedFile = await File(xFile.path).copy(savedPath);
 
+      // Normalize orientation (some Android devices return sideways images relying on EXIF).
+      // Also compute aspect ratio for better preview sizing.
+      double? aspectRatio;
+      try {
+        final bytes = await savedFile.readAsBytes();
+        final decoded = img.decodeImage(bytes);
+        if (decoded != null) {
+          final baked = img.bakeOrientation(decoded);
+          if (baked.width > 0 && baked.height > 0) {
+            aspectRatio = baked.width / baked.height;
+          }
+          final normalizedBytes = img.encodeJpg(baked, quality: 90);
+          await savedFile.writeAsBytes(normalizedBytes, flush: true);
+        }
+      } catch (e) {
+        debugPrint('Photo normalize failed: $e');
+      }
+
       if (!mounted) return;
-      setState(() => _capturedPhoto = savedFile);
+      setState(() {
+        _capturedPhoto = savedFile;
+        _capturedPhotoAspectRatio = aspectRatio;
+      });
 
       // Optionally keep file size info for debugging without user toast
       // final fileSize = await savedFile.length();
@@ -570,7 +687,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     final vehicleId = _selectedVehicleId;
     final assignmentId = _activeShift?.assignmentId ?? widget.user.assignmentId;
 
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       showAppToast(
         context,
         'User mapping missing. Contact admin.',
@@ -652,6 +769,42 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         _capturedPhoto = null;
         _submissionSummary = '$actionLabel recorded at $displayTimestamp';
         _isSyncPending = false;
+        // Update local shift state immediately so UI flips between check-in/check-out
+        // even if the "current attendance" API is delayed or inconsistent.
+        if (performedAction == CheckFlowAction.checkIn) {
+          _serverIsCheckedIn = true;
+          _activeShift = AttendanceRecord(
+            attendanceId: result.attendanceId,
+            driverId: driverId,
+            plantId: plantId,
+            plantName: _resolvePlantLabel(),
+            vehicleId: vehicleId,
+            vehicleNumber: _selectedVehicleNumber,
+            assignmentId: assignmentId,
+            inTime: result.timestamp,
+            outTime: null,
+            inPhotoUrl: result.photoUrl,
+            notes: _buildSubmissionNotes(performedAction),
+            source: 'mobile',
+          );
+        } else {
+          _serverIsCheckedIn = false;
+          final previous = _activeShift;
+          _activeShift = AttendanceRecord(
+            attendanceId: previous?.attendanceId ?? result.attendanceId,
+            driverId: driverId,
+            plantId: previous?.plantId ?? plantId,
+            plantName: previous?.plantName ?? _resolvePlantLabel(),
+            vehicleId: previous?.vehicleId ?? vehicleId,
+            vehicleNumber: previous?.vehicleNumber ?? _selectedVehicleNumber,
+            assignmentId: previous?.assignmentId ?? assignmentId,
+            inTime: previous?.inTime,
+            outTime: result.timestamp,
+            outPhotoUrl: result.photoUrl,
+            notes: _buildSubmissionNotes(performedAction),
+            source: previous?.source ?? 'mobile',
+          );
+        }
       });
       _updateStatusAnimation();
 
@@ -811,7 +964,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         : Colors.blueGrey.shade600;
 
     final String permissionLabel = permissionKnown
-        ? _permissionDescription(permissionStatus!)
+        ? _permissionDescription(permissionStatus)
         : (_locationStatusRefreshing
               ? 'Checking permission…'
               : 'Permission unchecked');
@@ -869,7 +1022,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Precise GPS is mandatory for check-in and check-out. $subjectLine',
+                      subjectLine,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: Colors.indigo.shade700,
                       ),
@@ -918,7 +1071,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       ? SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: AppLoader(size: 16),
                         )
                       : const Icon(Icons.refresh),
                   label: Text(
@@ -998,7 +1151,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
   bool _isRecordOpen(AttendanceRecord record) {
     final outTime = record.outTime;
-    return outTime == null || outTime.isEmpty;
+    return _isMissingTimeValue(outTime);
   }
 
   bool _containsPlatformTag(String text) => text.contains(_platformNoteTag);
@@ -1039,19 +1192,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   @override
   Widget build(BuildContext context) {
     final bool attendanceCompleted = _hasCompletedAttendanceToday;
-    final String buttonLabel = attendanceCompleted
-        ? 'Attendance Completed'
-        : _currentActionLabel;
     final bool isButtonEnabled = !attendanceCompleted && !_isSubmitting;
-    final Color resolvedButtonColor = attendanceCompleted
-        ? Colors.blueGrey.shade400
-        : _currentAction == CheckFlowAction.checkIn
-        ? const Color(0xFF07DD05)
-        : const Color(0xFFDFCE34);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Check-in / Check-out'),
+        backgroundColor: const Color(0xFF00416A),
+        foregroundColor: Colors.white,
+        titleTextStyle: Theme.of(context).textTheme.titleLarge?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1060,19 +1211,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           ),
         ],
       ),
-      body: AppGradientBackground(
+      backgroundColor: Colors.white,
+      body: ColoredBox(
+        color: Colors.white,
         child: _isLoadingShift
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: AppLoader())
             : RefreshIndicator(
                 onRefresh: _loadActiveShift,
                 child: ListView(
                   physics: const AlwaysScrollableScrollPhysics(),
                   padding: const EdgeInsets.all(16),
                   children: [
-                    if (widget.user.geofencingEnabled) ...[
-                      _buildGeofenceBanner(context),
-                      const SizedBox(height: 16),
-                    ],
                     Row(
                       children: [
                         Expanded(
@@ -1097,16 +1246,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       children: [
                         TextButton.icon(
                           onPressed: (!attendanceCompleted && !_isSubmitting)
-                      ? _togglePlatformAttendance
-                      : null,
-                  icon: Icon(
-                    _platformAttendanceSelected
-                        ? Icons.check_box
-                        : Icons.check_box_outline_blank,
-                    size: 28,
-                  ),
-                  label: const Text('Rest'),
-                ),
+                              ? _togglePlatformAttendance
+                              : null,
+                          icon: Icon(
+                            _platformAttendanceSelected
+                                ? Icons.check_box
+                                : Icons.check_box_outline_blank,
+                            size: 28,
+                          ),
+                          label: const Text('Rest'),
+                        ),
                         const Spacer(),
                         OutlinedButton.icon(
                           onPressed: _isAssigning ? null : _pickVehicle,
@@ -1114,9 +1263,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
+                                  child: AppLoader(size: 16),
                                 )
                               : const Icon(Icons.swap_horiz),
                           label: Text(
@@ -1138,8 +1285,15 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(12),
-                        color: Colors.blue.shade50,
-                        border: Border.all(color: Colors.blue.shade200),
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Colors.yellow.shade50,
+                            Colors.amber.shade100,
+                          ],
+                        ),
+                        border: Border.all(color: Colors.amber.shade200),
                       ),
                       child: Column(
                         children: [
@@ -1147,14 +1301,14 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                             children: [
                               Icon(
                                 Icons.camera_alt,
-                                color: Colors.blue.shade700,
+                                color: Colors.amber.shade800,
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 'Photo Capture',
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
-                                      color: Colors.blue.shade700,
+                                      color: Colors.amber.shade900,
                                       fontWeight: FontWeight.w600,
                                     ),
                               ),
@@ -1162,21 +1316,79 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'Camera will open automatically when you click ${_currentActionLabel.toLowerCase()}. Photo will be saved to organized date folders.',
+                            'Camera will open automatically when you click ${_currentActionLabel.toLowerCase()}.',
                             style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: Colors.blue.shade600),
+                                ?.copyWith(color: Colors.brown.shade700),
+                          ),
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: SizedBox(
+                              width: double.infinity,
+                              height: 160,
+                              child: _capturedPhoto == null
+                                  ? Container(
+                                      color: Colors.yellow.shade50,
+                                      alignment: Alignment.center,
+                                      child: Lottie.asset(
+                                        'downloads/face_biometric.json',
+                                        fit: BoxFit.cover,
+                                        alignment: Alignment.center,
+                                        repeat: true,
+                                        animate: true,
+                                        options: LottieOptions(
+                                          enableMergePaths: true,
+                                        ),
+                                        errorBuilder: (context, error, stackTrace) {
+                                          // If the biometric JSON fails to load/parse on a device,
+                                          // show a known-good bundled animation so the UI isn't blank
+                                          // and print the reason for debugging.
+                                          debugPrint(
+                                            'Biometric Lottie failed: $error',
+                                          );
+                                          return Lottie.asset(
+                                            'assets/animations/man_account_icon.json',
+                                            fit: BoxFit.cover,
+                                            alignment: Alignment.center,
+                                            repeat: true,
+                                            animate: true,
+                                            errorBuilder:
+                                                (context, error2, stackTrace2) {
+                                                  debugPrint(
+                                                    'Fallback Lottie failed: $error2',
+                                                  );
+                                                  return Container(
+                                                    color:
+                                                        Colors.blueGrey.shade50,
+                                                    alignment: Alignment.center,
+                                                    child: Icon(
+                                                      Icons.face,
+                                                      size: 64,
+                                                      color: Colors
+                                                          .blueGrey
+                                                          .shade400,
+                                                    ),
+                                                  );
+                                                },
+                                          );
+                                        },
+                                      ),
+                                    )
+                                  : Image.file(
+                                      _capturedPhoto!,
+                                      fit: BoxFit.cover,
+                                      // For portrait selfies, keep the face in frame by biasing crop upward.
+                                      alignment:
+                                          (_capturedPhotoAspectRatio != null &&
+                                                  _capturedPhotoAspectRatio! <
+                                                      1.0)
+                                              ? Alignment.topCenter
+                                              : Alignment.center,
+                                    ),
+                            ),
                           ),
                           if (_capturedPhoto != null) ...[
                             const SizedBox(height: 12),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: Image.file(
-                                _capturedPhoto!,
-                                height: 120,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
                             Text(
                               'Photo captured successfully!',
                               style: Theme.of(context).textTheme.bodySmall
@@ -1189,41 +1401,58 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                         ],
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: isButtonEnabled ? _handleCheckInOut : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: resolvedButtonColor,
-                        disabledBackgroundColor: Colors.blueGrey.shade200,
+                    const SizedBox(height: 0),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: isButtonEnabled ? _handleCheckInOut : null,
+                        child: SizedBox(
+                          height: 90,
+                          width: double.infinity,
+                          child: Center(
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: AppLoader(size: 20),
+                                  )
+                                : Opacity(
+                                    opacity: isButtonEnabled ? 1.0 : 0.6,
+                                    // Remove the big background container; show only the animated Lottie "button".
+                                    child: ClipRect(
+                                      child: Center(
+                                        child: Transform.scale(
+                                          scale: 3.2,
+                                          child: Lottie.asset(
+                                            // Show animation based on open-shift state:
+                                            // Open shift => user needs to check-out => Checkout.json
+                                            // No open shift => user needs to check-in => Checkin.json
+                                            _hasOpenShift
+                                                ? 'downloads/Checkout.json'
+                                                : 'downloads/Checkin.json',
+                                            fit: BoxFit.contain,
+                                            alignment: Alignment.center,
+                                            repeat: true,
+                                            animate: true,
+                                            frameRate: FrameRate.max,
+                                            options: LottieOptions(
+                                              enableMergePaths: true,
+                                            ),
+                                            errorBuilder:
+                                                (context, error, stackTrace) {
+                                                  debugPrint(
+                                                    'Button Lottie failed: $error',
+                                                  );
+                                                  return const SizedBox();
+                                                },
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                          ),
+                        ),
                       ),
-                      child: _isSubmitting
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(
-                                  Colors.white,
-                                ),
-                              ),
-                            )
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  attendanceCompleted
-                                      ? Icons.verified
-                                      : Icons.camera_alt,
-                                  size: 16,
-                                  color: Colors.white,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  buttonLabel,
-                                  style: const TextStyle(color: Colors.white),
-                                ),
-                              ],
-                            ),
                     ),
                     if (attendanceCompleted) ...[
                       const SizedBox(height: 12),
@@ -1236,7 +1465,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                         ),
                       ),
                     ],
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 0),
                     _ShiftStatusCard(
                       actionLabel: _currentActionLabel,
                       hasOpenShift: _hasOpenShift,
@@ -1248,6 +1477,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                           ? _statusAnimation
                           : null,
                     ),
+                    if (widget.user.geofencingEnabled) ...[
+                      const SizedBox(height: 16),
+                      _buildGeofenceBanner(context),
+                    ],
                   ],
                 ),
               ),
@@ -1283,25 +1516,51 @@ class _SummaryInfoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Icon(icon, color: theme.colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: theme.textTheme.bodySmall),
-                  const SizedBox(height: 4),
-                  Text(value, style: theme.textTheme.titleMedium),
-                ],
-              ),
-            ),
-          ],
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.lightGreen.shade50, Colors.lightGreen.shade100],
         ),
+        border: Border.all(color: Colors.lightGreen.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.green.shade800),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.green.shade900,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    color: Colors.green.shade900,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -83,14 +83,18 @@ try {
   }
 
   $vehicles = [];
+  $disableWhere = '';
+  if (function_exists('has_col') && has_col($db, 'vehicles', 'disable_flag')) {
+    $disableWhere = " AND (disable_flag = 'Y' OR disable_flag IS NULL)";
+  }
 
   if ($plantCol) {
-    $sql = "SELECT id, `$vehNoCol` AS vno FROM vehicles WHERE `$plantCol`=? ORDER BY `$vehNoCol`";
+    $sql = "SELECT id, `$vehNoCol` AS vno FROM vehicles WHERE `$plantCol`=? {$disableWhere} ORDER BY `$vehNoCol`";
     $st  = $db->prepare($sql);
     if (!$st) { _gv_log('prepare1 failed: '.$db->error); _json(['ok'=>false,'error'=>'DB prepare failed'],500); }
     $st->bind_param('i', $reqPlantId);
   } else {
-    $sql = "SELECT id, `$vehNoCol` AS vno FROM vehicles ORDER BY `$vehNoCol`";
+    $sql = "SELECT id, `$vehNoCol` AS vno FROM vehicles WHERE 1=1 {$disableWhere} ORDER BY `$vehNoCol`";
     $st  = $db->prepare($sql);
     if (!$st) { _gv_log('prepare2 failed: '.$db->error); _json(['ok'=>false,'error'=>'DB prepare failed'],500); }
   }

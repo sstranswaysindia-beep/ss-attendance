@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:lottie/lottie.dart';
 import '../calculator/average_calculator_screen.dart';
 
 import '../../core/models/app_user.dart';
@@ -11,12 +12,16 @@ import '../../core/models/attendance_record.dart';
 import '../../core/services/approvals_repository.dart';
 import '../../core/services/app_update_service.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/gps_ping_repository.dart';
 import '../../core/models/supervisor_today_attendance.dart';
 import '../../core/services/gps_ping_service.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/safety_repository.dart';
+import '../../core/services/auth_storage_service.dart';
+import '../../core/services/training_flag_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/models/document_models.dart';
@@ -32,6 +37,7 @@ import '../finance/advance_salary_screen.dart';
 import '../attendance/proxy_attendance_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../profile/supervisor_profile_screen.dart';
+import '../safety/training/training_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
@@ -57,19 +63,21 @@ class SupervisorDashboardScreen extends StatefulWidget {
 }
 
 class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final FinanceRepository _financeRepository = FinanceRepository();
   final ApprovalsRepository _approvalsRepository = ApprovalsRepository();
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
   final DocumentsRepository _documentsRepository = DocumentsRepository();
   final AppUpdateService _appUpdateService = AppUpdateService();
+  late SafetyRepository _safetyRepository;
   GpsPingService? _gpsPingService;
 
   late DateTime _now;
   Timer? _ticker;
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
+  bool _checkingTraining = false;
 
   List<_SupervisorNotification> _systemNotifications = const [
     _SupervisorNotification(message: 'Loading...', type: NotificationType.info),
@@ -86,7 +94,6 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   DocumentOverviewData? _documentsOverview;
   bool _isLoadingDocumentsOverview = false;
   String? _documentsOverviewError;
-  bool _hasPromptedForUpdate = false;
 
   bool _isLoadingTodayAttendance = false;
   String? _todayAttendanceError;
@@ -96,6 +103,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _now = DateTime.now();
     _initializePushNotifications();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -110,6 +118,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       CurvedAnimation(parent: _glowController, curve: Curves.easeInOut),
     );
 
+    _safetyRepository = SafetyRepository(currentUser: widget.user);
     _loadActiveShift();
     _loadNotifications();
     _loadSupervisorTodayAttendance();
@@ -119,6 +128,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForAppUpdate();
+      _checkTrainingRequirement();
     });
 
     _gpsPingService =
@@ -134,12 +144,22 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _glowController.dispose();
     _gpsPingService?.stop();
     _pushNotificationSubscription?.cancel();
     _pushNotificationListSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      _checkForAppUpdate();
+      _checkTrainingRequirement();
+    }
   }
 
   void _initializePushNotifications() {
@@ -357,17 +377,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   }
 
   Future<void> _checkForAppUpdate() async {
-    if (_hasPromptedForUpdate) {
-      return;
-    }
-
     final status = await _appUpdateService.checkForUpdate();
     if (!mounted || !status.isUpdateAvailable) {
-      return;
-    }
-
-    _hasPromptedForUpdate = true;
-    if (!mounted) {
       return;
     }
 
@@ -382,6 +393,39 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         onDismissed: () {},
       ),
     );
+  }
+
+  Future<void> _checkTrainingRequirement() async {
+    if (_checkingTraining) return;
+    _checkingTraining = true;
+    try {
+      // Reload latest user and override to catch updated flag without relogin
+      final storedUser = await AuthStorageService.getUser();
+      final effectiveUser = storedUser ?? widget.user;
+      final override = await TrainingFlagService.isTrainingRequiredOverride();
+      final trainingRequiredFlag = effectiveUser.trainingRequired || override;
+      final shouldRedirect =
+          trainingRequiredFlag &&
+          (effectiveUser.role == UserRole.driver ||
+              effectiveUser.role == UserRole.supervisor);
+
+      if (shouldRedirect && mounted) {
+        final repoUser = storedUser ?? widget.user;
+        _safetyRepository = SafetyRepository(currentUser: repoUser);
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (_) => SafetyTrainingScreen(
+              user: repoUser,
+              repository: _safetyRepository,
+            ),
+          ),
+        );
+      }
+    } catch (_) {
+      // Best-effort; ignore errors to avoid blocking dashboard usage
+    } finally {
+      _checkingTraining = false;
+    }
   }
 
   Future<void> _loadSupervisorTodayAttendance({bool silent = false}) async {
@@ -750,7 +794,37 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Supervisor Dashboard'),
+        titleSpacing: 0,
+        leadingWidth: 36,
+        leading: Builder(
+          builder: (context) => IconButton(
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            iconSize: 20,
+            icon: const Icon(Icons.menu),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: Lottie.asset(
+                'assets/animations/green_flashing_circle_icon.json',
+                repeat: true,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Text(
+              'Supervisor Dashboard',
+              style: textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
         actions: [
           if (user.proxyEnabled)
             IconButton(
@@ -870,11 +944,35 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ProfilePhotoWidget(user: widget.user, radius: 24),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        'Welcome, ${widget.user.displayName}',
-                        style: textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 130,
+                            height: 34,
+                            child: Lottie.asset(
+                              'downloads/welcome.json',
+                              repeat: true,
+                              fit: BoxFit.contain,
+                            ),
+                          ),
+                          const SizedBox(width: 0),
+                          Flexible(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 8, left: 2),
+                              child: Text(
+                                widget.user.displayName,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.titleMedium?.copyWith(
+                                  fontSize:
+                                      (textTheme.titleMedium?.fontSize ?? 16) +
+                                          6,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -975,17 +1073,17 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       ? Icons.access_time
                       : _isAttendanceLockedToday
                       ? Icons.verified
-                      : Icons.check_circle,
+                      : Icons.arrow_right_alt,
                   iconColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
                       : _isAttendanceLockedToday
                       ? const Color(0xFF37474F)
-                      : Colors.white,
+                      : Colors.black,
                   textColor: _hasOpenShift
                       ? const Color(0xFF3B2F00)
                       : _isAttendanceLockedToday
                       ? const Color(0xFF37474F)
-                      : const Color(0xFF003300),
+                      : Colors.black,
                 ),
                 if (_shiftSummary != null) ...[
                   const SizedBox(height: 8),
@@ -1179,10 +1277,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 Container(
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
-                      colors: [
-                        Color(0xFFE3F2FD),
-                        Colors.white,
-                      ],
+                      colors: [Color(0xFFE3F2FD), Colors.white],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -1191,16 +1286,20 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                   padding: const EdgeInsets.all(12),
                   child: Column(
                     children: [
-                      for (int index = 0;
-                          index < notifications.length;
-                          index++) ...[
+                      for (
+                        int index = 0;
+                        index < notifications.length;
+                        index++
+                      ) ...[
                         Builder(
                           builder: (context) {
                             final item = notifications[index];
-                            final hasTitle = item.title != null &&
+                            final hasTitle =
+                                item.title != null &&
                                 item.title!.trim().isNotEmpty;
-                            final timeLabel =
-                                _formatNotificationTime(item.timestamp);
+                            final timeLabel = _formatNotificationTime(
+                              item.timestamp,
+                            );
                             return Card(
                               margin: EdgeInsets.zero,
                               elevation: 2,
@@ -1215,19 +1314,16 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                   color: _notificationColor(item.type),
                                 ),
                                 title: Text(
-                                  hasTitle
-                                      ? item.title!.trim()
-                                      : item.message,
+                                  hasTitle ? item.title!.trim() : item.message,
                                 ),
                                 subtitle: hasTitle ? Text(item.message) : null,
                                 trailing: timeLabel != null
                                     ? Text(
                                         timeLabel,
-                                        style:
-                                            theme.textTheme.labelSmall?.copyWith(
-                                          color:
-                                              theme.colorScheme.outline,
-                                        ),
+                                        style: theme.textTheme.labelSmall
+                                            ?.copyWith(
+                                              color: theme.colorScheme.outline,
+                                            ),
                                       )
                                     : null,
                                 onTap: item.isPlaceholder
@@ -1258,7 +1354,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
   Widget _buildTodayAttendanceSection(ThemeData theme) {
     if (_isLoadingTodayAttendance && _todayAttendance.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: AppLoader());
     }
 
     if (_todayAttendanceError != null && _todayAttendance.isEmpty) {
@@ -1339,7 +1435,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
           child: SizedBox(
             height: 18,
             width: 18,
-            child: CircularProgressIndicator(strokeWidth: 2),
+            child: AppLoader(size: 18),
           ),
         ),
       );
@@ -1447,10 +1543,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     final gradientColors = isAbsent
         ? const [Color(0xFF9E9E9E), Color(0xFF757575)]
         : isComplete
-            ? const [Color(0xFF00D100), Color(0xFF00AA00)]
-            : isPartial
-                ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
-                : const [Color(0xFFED1C24), Color(0xFFB3121B)];
+        ? const [Color(0xFF00D100), Color(0xFF00AA00)]
+        : isPartial
+        ? const [Color(0xFFFFCE55), Color(0xFFFFB347)]
+        : const [Color(0xFFED1C24), Color(0xFFB3121B)];
 
     const primaryTextColor = Colors.black87;
     const subtleTextColor = Colors.black54;
@@ -1484,7 +1580,11 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Status: ${isAbsent ? 'Absent' : hasAny ? 'Done' : 'Not Done'}',
+                  'Status: ${isAbsent
+                      ? 'Absent'
+                      : hasAny
+                      ? 'Done'
+                      : 'Not Done'}',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: primaryTextColor,
                     fontWeight: FontWeight.w500,
@@ -1516,10 +1616,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 onChanged: isBusy
                     ? null
                     : (value) => _toggleDriverAbsence(
-                          plant: plant,
-                          driver: driver,
-                          markAbsent: value,
-                        ),
+                        plant: plant,
+                        driver: driver,
+                        markAbsent: value,
+                      ),
                 activeColor: const Color(0xFF1ABC9C),
                 activeTrackColor: const Color(0xFF8DE3C5),
               ),
@@ -1527,10 +1627,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
+                  child: AppLoader(size: 16),
                 ),
             ],
           ),

@@ -40,8 +40,12 @@ class _TyreReviewScreenState extends State<TyreReviewScreen> {
 
   TyreChipStatus _statusFor(TyreChecklistTyreState state) {
     final hasCritical = state.hasCriticalIssue;
-    final caution = state.hasCaution ||
-        state.psiOutsideRange(widget.instructions.psiMin, widget.instructions.psiMax);
+    final caution =
+        state.hasCaution ||
+        state.psiOutsideRange(
+          widget.instructions.psiMin,
+          widget.instructions.psiMax,
+        );
     if (hasCritical) return TyreChipStatus.issue;
     if (caution) return TyreChipStatus.caution;
     if (state.isComplete) return TyreChipStatus.ok;
@@ -64,7 +68,11 @@ class _TyreReviewScreenState extends State<TyreReviewScreen> {
     } catch (error, stackTrace) {
       debugPrint('TyreReview submit error: $error\n$stackTrace');
       if (mounted) {
-        showAppToast(context, 'Failed to submit inspection: $error', isError: true);
+        showAppToast(
+          context,
+          'Failed to submit inspection: $error',
+          isError: true,
+        );
       }
     } finally {
       if (mounted) {
@@ -76,198 +84,213 @@ class _TyreReviewScreenState extends State<TyreReviewScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final psiRange = '${widget.instructions.psiMin.toStringAsFixed(0)}–'
+    // Clamp textScaler to prevent scaling from both font size and display size settings
+    final psiRange =
+        '${widget.instructions.psiMin.toStringAsFixed(0)}–'
         '${widget.instructions.psiMax.toStringAsFixed(0)} PSI';
 
-    return AppGradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          title: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: const TextScaler.linear(1.0)),
+      child: AppGradientBackground(
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: AppBar(
+            backgroundColor: const Color(
+              0xFF12355B,
+            ), // Dark blue (same as training/spot audit)
+            foregroundColor: Colors.white,
+            elevation: 0,
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Review Inspection',
+                  style: GoogleFonts.josefinSans(
+                    textStyle: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.vehicle.vehicleNumber,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: Colors.white70,
+                  ),
+                ),
+              ],
+            ),
+            iconTheme: const IconThemeData(color: Colors.white),
+          ),
+          body: Column(
             children: [
-              Text(
-                'Review Inspection',
-                style: GoogleFonts.josefinSans(
-                  textStyle: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w600,
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline, color: Colors.blueAccent),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Ensure every tyre has completed checklist before submitting. PSI guidance: $psiRange',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-              const SizedBox(height: 4),
-              Text(
-                widget.vehicle.vehicleNumber,
-                style: theme.textTheme.bodySmall,
-              ),
-            ],
-          ),
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-        ),
-        body: Column(
-          children: [
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline, color: Colors.blueAccent),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Ensure every tyre has completed checklist before submitting. PSI guidance: $psiRange',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
-                itemCount: widget.tyreStates.length + 1,
-                itemBuilder: (context, index) {
-                  if (index < widget.tyreStates.length) {
-                    final tyreState = widget.tyreStates[index];
-                    final status = _statusFor(tyreState);
-                    final palette = switch (status) {
-                      TyreChipStatus.ok => (
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 120),
+                  itemCount: widget.tyreStates.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index < widget.tyreStates.length) {
+                      final tyreState = widget.tyreStates[index];
+                      final status = _statusFor(tyreState);
+                      final palette = switch (status) {
+                        TyreChipStatus.ok => (
                           bg: Colors.green.shade50,
                           iconColor: Colors.green,
-                          icon: Icons.check_circle
+                          icon: Icons.check_circle,
                         ),
-                      TyreChipStatus.caution => (
+                        TyreChipStatus.caution => (
                           bg: Colors.orange.shade50,
                           iconColor: Colors.orange.shade700,
-                          icon: Icons.error_outline
+                          icon: Icons.error_outline,
                         ),
-                      TyreChipStatus.issue => (
+                        TyreChipStatus.issue => (
                           bg: Colors.red.shade50,
                           iconColor: Colors.red,
-                          icon: Icons.close
+                          icon: Icons.close,
                         ),
-                      TyreChipStatus.draft => (
+                        TyreChipStatus.draft => (
                           bg: Colors.blueGrey.shade50,
                           iconColor: Colors.blueGrey,
-                          icon: Icons.help_outline
+                          icon: Icons.help_outline,
                         ),
-                    };
-                    return Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: ListTile(
+                      };
+                      return Card(
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18),
                         ),
-                        leading: CircleAvatar(
-                          backgroundColor: palette.bg,
-                          child: Icon(
+                        child: ListTile(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: palette.bg,
+                            child: Icon(palette.icon, color: palette.iconColor),
+                          ),
+                          title: Text(
+                            tyreState.position,
+                            style: GoogleFonts.josefinSans(
+                              textStyle: theme.textTheme.titleMedium,
+                            ),
+                          ),
+                          subtitle: Text(
+                            '${tyreState.psi.toStringAsFixed(1)} PSI',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: status == TyreChipStatus.issue
+                                  ? Colors.red
+                                  : status == TyreChipStatus.caution
+                                  ? Colors.orange.shade700
+                                  : theme.colorScheme.outline,
+                            ),
+                          ),
+                          trailing: Icon(
                             palette.icon,
                             color: palette.iconColor,
                           ),
                         ),
-                        title: Text(
-                          tyreState.position,
-                          style: GoogleFonts.josefinSans(
-                            textStyle: theme.textTheme.titleMedium,
-                          ),
+                      );
+                    }
+
+                    return Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Overall notes (optional)',
+                              style: GoogleFonts.josefinSans(
+                                textStyle: theme.textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            TextField(
+                              controller: _notesController,
+                              maxLines: 4,
+                              decoration: const InputDecoration(
+                                hintText: 'Add notes for supervisor review',
+                                border: OutlineInputBorder(),
+                              ),
+                            ),
+                          ],
                         ),
-                        subtitle: Text(
-                          '${tyreState.psi.toStringAsFixed(1)} PSI',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: status == TyreChipStatus.issue
-                                ? Colors.red
-                                : status == TyreChipStatus.caution
-                                    ? Colors.orange.shade700
-                                    : theme.colorScheme.outline,
-                          ),
-                        ),
-                        trailing: Icon(palette.icon, color: palette.iconColor),
                       ),
                     );
-                  }
-
-                  return Card(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(18),
+                  },
+                ),
+              ),
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  child: FilledButton(
+                    onPressed: _isSubmitting ? null : _submit,
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      shape: const StadiumBorder(),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Overall notes (optional)',
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                Colors.white,
+                              ),
+                            ),
+                          )
+                        : Text(
+                            'Submit Inspection',
                             style: GoogleFonts.josefinSans(
                               textStyle: theme.textTheme.titleMedium?.copyWith(
+                                color: Colors.white,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _notesController,
-                            maxLines: 4,
-                            decoration: const InputDecoration(
-                              hintText: 'Add notes for supervisor review',
-                              border: OutlineInputBorder(),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                child: FilledButton(
-                  onPressed: _isSubmitting ? null : _submit,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(52),
-                    shape: const StadiumBorder(),
                   ),
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : Text(
-                          'Submit Inspection',
-                          style: GoogleFonts.josefinSans(
-                            textStyle: theme.textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

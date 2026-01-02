@@ -1,13 +1,19 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/safety_models.dart';
 import '../../core/services/safety_repository.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 import 'spot_audit_wizard_screen.dart';
 import 'tyre_instructions_screen.dart';
+import 'incab_assessment_screen.dart';
+import 'training/training_screen.dart';
 
 class SafetyHubScreen extends StatefulWidget {
   const SafetyHubScreen({required this.user, super.key});
@@ -22,14 +28,37 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
   late final SafetyRepository _repository;
   late Future<List<SafetyModule>> _modulesFuture;
 
+  List<SafetyModule> _visibleModulesForUser(List<SafetyModule> modules) {
+    // Drivers should only see Training inside Safety.
+    if (widget.user.role == UserRole.driver) {
+      return modules.where((module) => module.key == 'training').toList();
+    }
+    return modules;
+  }
+
   @override
   void initState() {
     super.initState();
+    NotificationService().requestBellHide();
     _repository = SafetyRepository(currentUser: widget.user);
     _modulesFuture = _repository.fetchModules();
   }
 
+  @override
+  void dispose() {
+    NotificationService().releaseBellHide();
+    super.dispose();
+  }
+
   void _openModule(SafetyModule module) {
+    if (widget.user.role == UserRole.driver && module.key != 'training') {
+      showAppToast(
+        context,
+        'Only Training is available for drivers.',
+        isError: true,
+      );
+      return;
+    }
     switch (module.key) {
       case 'tyre_checklist':
         Navigator.of(context).push(
@@ -48,6 +77,26 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
           ),
         );
         break;
+      case 'incab':
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => InCabAssessmentScreen(
+              user: widget.user,
+              repository: _repository,
+            ),
+          ),
+        );
+        break;
+      case 'training':
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SafetyTrainingScreen(
+              user: widget.user,
+              repository: _repository,
+            ),
+          ),
+        );
+        break;
       default:
         showAppToast(context, 'Module coming soon');
     }
@@ -56,62 +105,71 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final clampedTextScale = math.min(
+      MediaQuery.of(context).textScaleFactor,
+      1.0,
+    );
 
-    return AppGradientBackground(
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaleFactor: clampedTextScale),
+      child: AppGradientBackground(
+        child: Scaffold(
           backgroundColor: Colors.transparent,
-          elevation: 0,
-          title: Text(
-            'Safety',
-            style: GoogleFonts.josefinSans(
-              textStyle: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w600,
+          appBar: AppBar(
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            title: Text(
+              'Safety',
+              style: GoogleFonts.josefinSans(
+                textStyle: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
-        ),
-        body: FutureBuilder<List<SafetyModule>>(
-          future: _modulesFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            if (snapshot.hasError) {
-              return _SafetyError(
-                message: snapshot.error?.toString() ?? 'Unable to load modules',
-                onRetry: () {
-                  setState(() {
-                    _modulesFuture = _repository.fetchModules();
-                  });
-                },
-              );
-            }
-            final modules = snapshot.data ?? const <SafetyModule>[];
-            if (modules.isEmpty) {
-              return const _SafetyEmptyState();
-            }
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: GridView.builder(
-                itemCount: modules.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  childAspectRatio: 1.05,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
+          body: FutureBuilder<List<SafetyModule>>(
+            future: _modulesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: AppLoader());
+              }
+              if (snapshot.hasError) {
+                return _SafetyError(
+                  message:
+                      snapshot.error?.toString() ?? 'Unable to load modules',
+                  onRetry: () {
+                    setState(() {
+                      _modulesFuture = _repository.fetchModules();
+                    });
+                  },
+                );
+              }
+              final modules = snapshot.data ?? const <SafetyModule>[];
+              final visibleModules = _visibleModulesForUser(modules);
+              if (visibleModules.isEmpty) {
+                return const _SafetyEmptyState();
+              }
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: GridView.builder(
+                  itemCount: visibleModules.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 1.05,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemBuilder: (context, index) {
+                    final module = visibleModules[index];
+                    return _SafetyModuleCard(
+                      module: module,
+                      onTap: () => _openModule(module),
+                    );
+                  },
                 ),
-                itemBuilder: (context, index) {
-                  final module = modules[index];
-                  return _SafetyModuleCard(
-                    module: module,
-                    onTap: () => _openModule(module),
-                  );
-                },
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -119,10 +177,7 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
 }
 
 class _SafetyModuleCard extends StatelessWidget {
-  const _SafetyModuleCard({
-    required this.module,
-    required this.onTap,
-  });
+  const _SafetyModuleCard({required this.module, required this.onTap});
 
   final SafetyModule module;
   final VoidCallback onTap;
@@ -260,7 +315,7 @@ class _SafetyModuleCard extends StatelessWidget {
       case 'tyre_checklist':
         return 'Daily tyre inspection checklist';
       case 'incab':
-        return 'Cabin housekeeping & safety';
+        return 'In-cab assessment';
       case 'spot_audit':
         return 'Random safety audits';
       case 'training':
@@ -272,10 +327,7 @@ class _SafetyModuleCard extends StatelessWidget {
 }
 
 class _SafetyError extends StatelessWidget {
-  const _SafetyError({
-    required this.message,
-    required this.onRetry,
-  });
+  const _SafetyError({required this.message, required this.onRetry});
 
   final String message;
   final VoidCallback onRetry;
@@ -289,8 +341,11 @@ class _SafetyError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.warning_amber_rounded,
-                color: theme.colorScheme.error, size: 48),
+            Icon(
+              Icons.warning_amber_rounded,
+              color: theme.colorScheme.error,
+              size: 48,
+            ),
             const SizedBox(height: 16),
             Text(
               'Unable to load Safety hub',
@@ -305,9 +360,7 @@ class _SafetyError extends StatelessWidget {
             const SizedBox(height: 24),
             FilledButton(
               onPressed: onRetry,
-              style: FilledButton.styleFrom(
-                shape: const StadiumBorder(),
-              ),
+              style: FilledButton.styleFrom(shape: const StadiumBorder()),
               child: const Text('Retry'),
             ),
           ],

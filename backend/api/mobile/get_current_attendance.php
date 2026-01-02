@@ -41,7 +41,8 @@ try {
             SELECT id, driver_id, plant_id, vehicle_id, assignment_id, 
                    in_time, out_time, notes, approval_status, source
             FROM attendance 
-            WHERE driver_id = ? AND out_time IS NULL 
+            WHERE driver_id = ?
+              AND (out_time IS NULL OR out_time = '' OR out_time = '0000-00-00 00:00:00')
             ORDER BY in_time DESC 
             LIMIT 1
         ");
@@ -75,7 +76,9 @@ try {
             SELECT id, driver_id, plant_id, vehicle_id, assignment_id, 
                    in_time, out_time, notes, approval_status, source
             FROM attendance 
-            WHERE driver_id IS NULL AND notes LIKE ? AND out_time IS NULL 
+            WHERE driver_id IS NULL
+              AND notes LIKE ?
+              AND (out_time IS NULL OR out_time = '' OR out_time = '0000-00-00 00:00:00')
             ORDER BY in_time DESC 
             LIMIT 1
         ");

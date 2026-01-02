@@ -1,0 +1,2 @@
+- Added Training 5 (Road Rage & Speed Risk) with Hindi transcript; no audio required.
+- Training list/player backgrounds remain light; transcript keeps bullets/line breaks with TTS highlighting.

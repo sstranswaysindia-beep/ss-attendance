@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:lottie/lottie.dart';
 
 import '../services/notification_service.dart';
 
@@ -94,15 +95,15 @@ class _InAppNotificationBannerHostState
         _inboxNotifications = notifications;
       });
     });
-    _bellVisibilitySubscription =
-        NotificationService().bellVisibilityChanges.listen((hidden) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _isBellForcedHidden = hidden;
-      });
-    });
+    _bellVisibilitySubscription = NotificationService().bellVisibilityChanges
+        .listen((hidden) {
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            _isBellForcedHidden = hidden;
+          });
+        });
   }
 
   @override
@@ -156,7 +157,106 @@ class _InAppNotificationBannerHostState
   }
 
   void _openNotificationCenter() {
-    _showNotificationTicker();
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.notifications, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Notifications',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      NotificationService().clearInAppNotifications();
+                      Navigator.of(context).pop();
+                    },
+                    child: const Text('Clear'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Flexible(
+                child: _inboxNotifications.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 28),
+                          child: Text('No notifications yet'),
+                        ),
+                      )
+                    : ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _inboxNotifications.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final n = _inboxNotifications[index];
+                          final title = n.title.trim().isEmpty
+                              ? 'Notification'
+                              : n.title.trim();
+                          final msg = n.body.trim().isNotEmpty
+                              ? n.body.trim()
+                              : (n.data['body']?.toString() ??
+                                    n.data['message']?.toString() ??
+                                    'Notification received.');
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            subtitle: Text(
+                              msg,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Remove',
+                              onPressed: () {
+                                NotificationService().removeInAppNotification(
+                                  n.id,
+                                );
+                              },
+                              icon: const Icon(Icons.close, size: 18),
+                            ),
+                            onTap: () {
+                              showNotificationDetailDialog(
+                                context,
+                                title: title,
+                                message: msg,
+                                timestamp: n.receivedAt,
+                              );
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _showNotificationTicker([InAppNotificationData? notification]) {
@@ -180,17 +280,20 @@ class _InAppNotificationBannerHostState
       return;
     }
 
-    final preview = notifications.take(3).map((entry) {
-      final title = entry.title?.trim().isNotEmpty == true
-          ? entry.title!.trim()
-          : 'Notification';
-      final message = entry.body.trim().isNotEmpty
-          ? entry.body.trim()
-          : (entry.data['body']?.toString() ??
-              entry.data['message']?.toString() ??
-              'Received');
-      return '$title: $message';
-    }).join('   •   ');
+    final preview = notifications
+        .take(3)
+        .map((entry) {
+          final title = entry.title.trim().isNotEmpty
+              ? entry.title.trim()
+              : 'Notification';
+          final message = entry.body.trim().isNotEmpty
+              ? entry.body.trim()
+              : (entry.data['body']?.toString() ??
+                    entry.data['message']?.toString() ??
+                    'Received');
+          return '$title: $message';
+        })
+        .join('   •   ');
 
     scaffoldMessenger.clearSnackBars();
     scaffoldMessenger.showSnackBar(
@@ -198,11 +301,7 @@ class _InAppNotificationBannerHostState
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         duration: Duration(seconds: 4 + (preview.length ~/ 20)),
-        content: Text(
-          preview,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        content: Text(preview, maxLines: 1, overflow: TextOverflow.ellipsis),
       ),
     );
   }
@@ -387,11 +486,13 @@ class _NotificationBellButton extends StatelessWidget {
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
-            Icon(
-              hasNotifications
-                  ? Icons.notifications_active
-                  : Icons.notifications_none,
-              size: 26,
+            SizedBox(
+              width: 42,
+              height: 42,
+              child: Lottie.asset(
+                'assets/animations/notification.json',
+                repeat: true,
+              ),
             ),
             if (hasNotifications)
               Positioned(

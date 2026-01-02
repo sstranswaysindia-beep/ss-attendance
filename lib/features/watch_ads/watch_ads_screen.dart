@@ -5,6 +5,7 @@ import '../../core/models/app_user.dart';
 import '../../core/models/watch_ads_models.dart';
 import '../../core/services/watch_ads_repository.dart';
 import '../../core/widgets/app_toast.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/services/rewarded_ad_manager.dart';
 
 class WatchAdsScreen extends StatefulWidget {
@@ -128,7 +129,7 @@ class _WatchAdsScreenState extends State<WatchAdsScreen> {
         centerTitle: true,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: AppLoader())
           : status == null
               ? _ErrorState(
                   message: _error ?? 'Unable to load reward status',
@@ -167,7 +168,7 @@ class _WatchAdsScreenState extends State<WatchAdsScreen> {
                             .map((entry) => _HistoryTile(entry: entry)),
                       if (_isRefreshing) ...[
                         const SizedBox(height: 16),
-                        const Center(child: CircularProgressIndicator()),
+                        const Center(child: AppLoader()),
                       ],
                     ],
                   ),
@@ -412,11 +413,7 @@ class _WatchButton extends StatelessWidget {
                       const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
+                        child: AppLoader(size: 20),
                       )
                     else
                       Icon(

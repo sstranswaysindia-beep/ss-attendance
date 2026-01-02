@@ -544,6 +544,42 @@ main.main > .container-fluid {
     transform: scale(1.03);
     box-shadow: 0 0 0 3px rgba(59,130,246,0.3);
 }
+
+/* ================= Compact mode (reduce padding everywhere) ================= */
+.page-header { margin-bottom: .75rem; }
+.page-header h1 { font-size: 1.05rem; }
+
+main.main > .container-fluid { padding-left: .85rem; padding-right: .85rem; }
+@media (min-width: 992px) {
+    main.main > .container-fluid { padding-left: 1.25rem; padding-right: 1.25rem; }
+}
+
+.filters-card,
+.approvals-card,
+.missing-card { border-radius: 14px; }
+.card .card-header { padding: .45rem .7rem; }
+.filters-card .card-body { padding: .6rem .7rem; }
+
+.row.g-3 { --bs-gutter-x: .65rem; --bs-gutter-y: .65rem; }
+.stats-card { padding: .85rem .95rem; border-radius: 16px; }
+.stats-card p { font-size: .68rem; letter-spacing: .06em; }
+.stats-card h3 { font-size: 1.35rem; margin-top: .35rem; }
+
+.filters-card .row { --bs-gutter-x: .55rem; --bs-gutter-y: .55rem; }
+.filters-card .form-label { font-size: .76rem; margin-bottom: .15rem; }
+.filters-card .form-control,
+.filters-card .form-select { font-size: .85rem; padding: .3rem .45rem; border-radius: .65rem; }
+.filters-card .btn { padding: .35rem .6rem; font-size: .85rem; border-radius: .65rem; }
+.role-toggle { padding: 3px; gap: 3px; }
+.role-pill { padding: 5px 10px; font-size: .74rem; }
+
+/* Search bar: remove aggressive grow */
+#table-search-input { transition: box-shadow 0.12s ease; }
+#table-search-input:focus { transform: none; box-shadow: 0 0 0 2px rgba(59,130,246,0.22); }
+
+/* Tables */
+.table thead th { font-size: .74rem; padding: .35rem .45rem; }
+.table tbody td { font-size: .86rem; padding: .28rem .45rem; }
 </style>
 </head>
 <body>

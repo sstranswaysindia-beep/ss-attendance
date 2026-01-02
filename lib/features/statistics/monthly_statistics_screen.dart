@@ -6,6 +6,7 @@ import '../../core/models/daily_attendance_summary.dart';
 import '../../core/models/monthly_stat.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/widgets/app_gradient_background.dart';
+import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/app_toast.dart';
 
 const Color _statsPrimaryColor = Color(0xFF00296B);
@@ -45,7 +46,7 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
   Future<void> _loadStats() async {
     // For supervisors without driver_id, use user ID instead
     final driverId = widget.user.driverId ?? widget.user.id;
-    if (driverId == null || driverId.isEmpty) {
+    if (driverId.isEmpty) {
       setState(() {
         _errorMessage = 'User mapping missing. Contact admin.';
         _stats = const [];
@@ -165,7 +166,7 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
       ),
       body: AppGradientBackground(
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: AppLoader())
             : _errorMessage != null
             ? Center(
                 child: Padding(
@@ -293,7 +294,7 @@ class _MonthlyStatisticsScreenState extends State<MonthlyStatisticsScreen> {
                     const Center(
                       child: Padding(
                         padding: EdgeInsets.symmetric(vertical: 24),
-                        child: CircularProgressIndicator(),
+                        child: AppLoader(size: 20),
                       ),
                     )
                   else if (_dailySummaries.isEmpty)
