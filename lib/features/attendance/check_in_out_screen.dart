@@ -134,10 +134,15 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         _activeShift = currentAttendance;
         _isLoadingShift = false;
         if (currentAttendance != null) {
-          if (currentAttendance.vehicleId != null &&
-              currentAttendance.vehicleId!.isNotEmpty) {
-            _selectedVehicleId = currentAttendance.vehicleId;
-            _selectedVehicleNumber = currentAttendance.vehicleNumber;
+          final vehicleId = currentAttendance.vehicleId;
+          if (vehicleId != null && vehicleId.isNotEmpty) {
+            _selectedVehicleId = vehicleId;
+            final attendanceVehicleNumber = currentAttendance.vehicleNumber;
+            _selectedVehicleNumber = (attendanceVehicleNumber != null &&
+                    attendanceVehicleNumber.isNotEmpty)
+                ? attendanceVehicleNumber
+                : (_resolveVehicleNumberById(vehicleId) ??
+                    _selectedVehicleNumber);
           }
           _submissionSummary = _hasOpenShift
               ? 'Checked in at ${_formatDateTime(currentAttendance.inTime)}'
@@ -172,6 +177,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       _updateStatusAnimation();
       showAppToast(context, 'Unable to load attendance status.', isError: true);
     }
+  }
+
+  String? _resolveVehicleNumberById(String vehicleId) {
+    final vehicles = widget.availableVehicles;
+    if (vehicles.isEmpty) return null;
+    for (final vehicle in vehicles) {
+      if (vehicle.id == vehicleId) {
+        return vehicle.vehicleNumber;
+      }
+    }
+    return null;
   }
 
   Future<void> _preflightLocationCheck() async {
@@ -484,6 +500,39 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     return 'Not mapped';
   }
 
+  bool _requiresVehicleSelection() {
+    return !_plantAllowsMissingVehicle();
+  }
+
+  bool _plantAllowsMissingVehicle() {
+    bool containsOffice(String? text) {
+      if (text == null || text.isEmpty) {
+        return false;
+      }
+      return text.toLowerCase().contains('office');
+    }
+
+    final candidates = <String?>[
+      widget.user.assignmentPlantName,
+      widget.user.plantName,
+      widget.user.defaultPlantName,
+      _resolvePlantLabel(),
+    ];
+
+    for (final candidate in candidates) {
+      if (containsOffice(candidate)) {
+        return true;
+      }
+    }
+
+    final role = widget.user.driverRole;
+    if (containsOffice(role)) {
+      return true;
+    }
+
+    return false;
+  }
+
   Future<void> _pickVehicle() async {
     final vehicles = widget.availableVehicles;
     if (vehicles.isEmpty) {
@@ -597,12 +646,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       );
       return;
     }
+    final locationFuture = _captureCurrentLocation(
+      requireHighAccuracy: widget.user.geofencingEnabled,
+    );
+
     // First capture photo, then submit attendance
     await _capturePhoto();
 
     // If photo was captured successfully, proceed with submission
     if (_capturedPhoto != null) {
-      await _submitAttendance();
+      final locationPayload = await locationFuture;
+      await _submitAttendance(locationPayload: locationPayload);
     }
   }
 
@@ -612,7 +666,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       final xFile = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
-        imageQuality: 85,
+        imageQuality: 70,
       );
 
       if (xFile == null) {
@@ -653,7 +707,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           if (baked.width > 0 && baked.height > 0) {
             aspectRatio = baked.width / baked.height;
           }
-          final normalizedBytes = img.encodeJpg(baked, quality: 90);
+          final normalizedBytes = img.encodeJpg(baked, quality: 80);
           await savedFile.writeAsBytes(normalizedBytes, flush: true);
         }
       } catch (e) {
@@ -675,7 +729,9 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     }
   }
 
-  Future<void> _submitAttendance() async {
+  Future<void> _submitAttendance({
+    Map<String, dynamic>? locationPayload,
+  }) async {
     final performedAction = _currentAction;
     final actionLabel = performedAction == CheckFlowAction.checkIn
         ? 'Check-in'
@@ -703,7 +759,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       );
       return;
     }
-    if (vehicleId == null || vehicleId.isEmpty) {
+    final requiresVehicle = _requiresVehicleSelection();
+    if (requiresVehicle && (vehicleId == null || vehicleId.isEmpty)) {
       showAppToast(
         context,
         'Select a vehicle before submitting.',
@@ -728,7 +785,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     _updateStatusAnimation();
 
     try {
-      final locationPayload = await _captureCurrentLocation(
+      locationPayload ??= await _captureCurrentLocation(
         requireHighAccuracy: widget.user.geofencingEnabled,
       );
 
@@ -891,25 +948,37 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         return null;
       }
 
+      if (!requireHighAccuracy) {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          final lastTimestamp = lastKnown.timestamp;
+          final ageMinutes =
+              DateTime.now().difference(lastTimestamp).inMinutes;
+          if (ageMinutes <= 5) {
+            _hasShownLocationWarning = false;
+            return _positionToPayload(
+              lastKnown,
+              geofenceEnforced: requireHighAccuracy,
+              source: 'geolocator_last_known',
+            );
+          }
+        }
+      }
+
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: requireHighAccuracy
             ? LocationAccuracy.bestForNavigation
             : LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 15),
+        timeLimit: requireHighAccuracy
+            ? const Duration(seconds: 15)
+            : const Duration(seconds: 8),
       );
       _hasShownLocationWarning = false;
-      return <String, dynamic>{
-        'latitude': position.latitude,
-        'longitude': position.longitude,
-        'timestamp': position.timestamp.toIso8601String(),
-        'accuracy': position.accuracy,
-        'altitude': position.altitude,
-        'speed': position.speed,
-        'speedAccuracy': position.speedAccuracy,
-        'heading': position.heading,
-        'source': 'geolocator',
-        'geofenceEnforced': requireHighAccuracy,
-      };
+      return _positionToPayload(
+        position,
+        geofenceEnforced: requireHighAccuracy,
+        source: 'geolocator',
+      );
     } catch (error) {
       if (mounted && !_hasShownLocationWarning) {
         _hasShownLocationWarning = true;
@@ -933,6 +1002,25 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         });
       }
     }
+  }
+
+  Map<String, dynamic> _positionToPayload(
+    Position position, {
+    required bool geofenceEnforced,
+    required String source,
+  }) {
+    return <String, dynamic>{
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'timestamp': position.timestamp.toIso8601String(),
+      'accuracy': position.accuracy,
+      'altitude': position.altitude,
+      'speed': position.speed,
+      'speedAccuracy': position.speedAccuracy,
+      'heading': position.heading,
+      'source': source,
+      'geofenceEnforced': geofenceEnforced,
+    };
   }
 
   Widget _buildGeofenceBanner(BuildContext context) {
@@ -1193,6 +1281,19 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   Widget build(BuildContext context) {
     final bool attendanceCompleted = _hasCompletedAttendanceToday;
     final bool isButtonEnabled = !attendanceCompleted && !_isSubmitting;
+    final bool isCheckIn = _currentAction == CheckFlowAction.checkIn;
+    final Color photoCardStart =
+        isCheckIn ? const Color(0xFF98FB98) : Colors.yellow.shade50;
+    final Color photoCardEnd =
+        isCheckIn ? const Color(0xFFB6F7B6) : Colors.amber.shade100;
+    final Color photoCardBorder =
+        isCheckIn ? const Color(0xFF7EEA7E) : Colors.amber.shade200;
+    final Color photoIconColor =
+        isCheckIn ? Colors.green.shade800 : Colors.amber.shade800;
+    final Color photoTitleColor =
+        isCheckIn ? Colors.green.shade900 : Colors.amber.shade900;
+    final Color photoBodyColor =
+        isCheckIn ? Colors.green.shade900 : Colors.brown.shade700;
 
     return Scaffold(
       appBar: AppBar(
@@ -1242,43 +1343,56 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       ],
                     ),
                     const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        TextButton.icon(
-                          onPressed: (!attendanceCompleted && !_isSubmitting)
-                              ? _togglePlatformAttendance
-                              : null,
-                          icon: Icon(
-                            _platformAttendanceSelected
-                                ? Icons.check_box
-                                : Icons.check_box_outline_blank,
-                            size: 28,
+                    if (_requiresVehicleSelection())
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              TextButton.icon(
+                                onPressed: (!attendanceCompleted && !_isSubmitting)
+                                    ? _togglePlatformAttendance
+                                    : null,
+                                icon: Icon(
+                                  _platformAttendanceSelected
+                                      ? Icons.check_box
+                                      : Icons.check_box_outline_blank,
+                                  size: 28,
+                                ),
+                                label: const Text('Rest'),
+                              ),
+                              const Spacer(),
+                              OutlinedButton.icon(
+                                onPressed: _isAssigning ? null : _pickVehicle,
+                                icon: _isAssigning
+                                    ? const SizedBox(
+                                        width: 16,
+                                        height: 16,
+                                        child: AppLoader(size: 16),
+                                      )
+                                    : const Icon(Icons.swap_horiz),
+                                label: Text(
+                                  _isAssigning ? 'Updating...' : 'Change Vehicle',
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF96E072),
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(
+                                    color: Color(0xFF96E072),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          label: const Text('Rest'),
-                        ),
-                        const Spacer(),
-                        OutlinedButton.icon(
-                          onPressed: _isAssigning ? null : _pickVehicle,
-                          icon: _isAssigning
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: AppLoader(size: 16),
-                                )
-                              : const Icon(Icons.swap_horiz),
-                          label: Text(
-                            _isAssigning ? 'Updating...' : 'Change Vehicle',
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (widget.availableVehicles.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text(
-                          'No vehicles are mapped yet. Contact supervisor to assign one.',
-                          style: TextStyle(fontSize: 12),
-                        ),
+                          if (widget.availableVehicles.isEmpty)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text(
+                                'No vehicles are mapped yet. Contact supervisor to assign one.',
+                                style: TextStyle(fontSize: 12),
+                              ),
+                            ),
+                        ],
                       ),
                     const SizedBox(height: 20),
                     Container(
@@ -1289,11 +1403,11 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                           colors: [
-                            Colors.yellow.shade50,
-                            Colors.amber.shade100,
+                            photoCardStart,
+                            photoCardEnd,
                           ],
                         ),
-                        border: Border.all(color: Colors.amber.shade200),
+                        border: Border.all(color: photoCardBorder),
                       ),
                       child: Column(
                         children: [
@@ -1301,14 +1415,14 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                             children: [
                               Icon(
                                 Icons.camera_alt,
-                                color: Colors.amber.shade800,
+                                color: photoIconColor,
                               ),
                               const SizedBox(width: 8),
                               Text(
                                 'Photo Capture',
                                 style: Theme.of(context).textTheme.titleMedium
                                     ?.copyWith(
-                                      color: Colors.amber.shade900,
+                                      color: photoTitleColor,
                                       fontWeight: FontWeight.w600,
                                     ),
                               ),
@@ -1318,7 +1432,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                           Text(
                             'Camera will open automatically when you click ${_currentActionLabel.toLowerCase()}.',
                             style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: Colors.brown.shade700),
+                                ?.copyWith(color: photoBodyColor),
                           ),
                           const SizedBox(height: 12),
                           ClipRRect(
@@ -1328,7 +1442,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                               height: 160,
                               child: _capturedPhoto == null
                                   ? Container(
-                                      color: Colors.yellow.shade50,
+                                      color: photoCardStart,
                                       alignment: Alignment.center,
                                       child: Lottie.asset(
                                         'downloads/face_biometric.json',
@@ -1376,14 +1490,8 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                                     )
                                   : Image.file(
                                       _capturedPhoto!,
-                                      fit: BoxFit.cover,
-                                      // For portrait selfies, keep the face in frame by biasing crop upward.
-                                      alignment:
-                                          (_capturedPhotoAspectRatio != null &&
-                                                  _capturedPhotoAspectRatio! <
-                                                      1.0)
-                                              ? Alignment.topCenter
-                                              : Alignment.center,
+                                      fit: BoxFit.contain,
+                                      alignment: Alignment.center,
                                     ),
                             ),
                           ),
@@ -1473,6 +1581,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                       summary: _submissionSummary,
                       activeShift: _activeShift,
                       isSyncPending: _isSyncPending,
+                      selectedVehicleNumber: _selectedVehicleNumber,
                       statusAnimation: (_hasOpenShift || _isSyncPending)
                           ? _statusAnimation
                           : null,
@@ -1523,9 +1632,9 @@ class _SummaryInfoCard extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Colors.lightGreen.shade50, Colors.lightGreen.shade100],
+          colors: [const Color(0xFFABC4FF), const Color(0xFFABC4FF)],
         ),
-        border: Border.all(color: Colors.lightGreen.shade200),
+        border: Border.all(color: const Color(0xFFABC4FF)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
@@ -1536,7 +1645,7 @@ class _SummaryInfoCard extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(icon, color: Colors.green.shade800),
+          Icon(icon, color: Colors.blue.shade800),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -1545,7 +1654,7 @@ class _SummaryInfoCard extends StatelessWidget {
                 Text(
                   label,
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: Colors.green.shade900,
+                    color: Colors.white,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -1553,7 +1662,7 @@ class _SummaryInfoCard extends StatelessWidget {
                 Text(
                   value,
                   style: theme.textTheme.titleMedium?.copyWith(
-                    color: Colors.green.shade900,
+                    color: Colors.white,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -1574,6 +1683,7 @@ class _ShiftStatusCard extends StatelessWidget {
     required this.summary,
     required this.activeShift,
     required this.isSyncPending,
+    required this.selectedVehicleNumber,
     this.statusAnimation,
   });
 
@@ -1583,6 +1693,7 @@ class _ShiftStatusCard extends StatelessWidget {
   final String? summary;
   final AttendanceRecord? activeShift;
   final bool isSyncPending;
+  final String? selectedVehicleNumber;
   final Animation<double>? statusAnimation;
 
   @override
@@ -1659,7 +1770,10 @@ class _ShiftStatusCard extends StatelessWidget {
               _ShiftDetailRow(
                 label: 'Vehicle',
                 value:
-                    activeShift!.vehicleNumber ?? activeShift!.vehicleId ?? '-',
+                    activeShift!.vehicleNumber ??
+                    selectedVehicleNumber ??
+                    activeShift!.vehicleId ??
+                    '-',
               ),
             ],
           ],

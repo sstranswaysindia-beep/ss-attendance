@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 class DocumentPreviewScreen extends StatefulWidget {
@@ -67,13 +66,6 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.title),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.open_in_new),
-            tooltip: 'Open in browser',
-            onPressed: _openInBrowser,
-          ),
-        ],
       ),
       body: Stack(
         children: [
@@ -113,16 +105,6 @@ class _DocumentPreviewScreenState extends State<DocumentPreviewScreen> {
     );
   }
 
-  Future<void> _openInBrowser() async {
-    final url = _currentUrl ?? widget.initialUri.toString();
-    final uri = Uri.tryParse(url) ?? widget.initialUri;
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open in browser.')),
-      );
-    }
-  }
 }
 
 class DocumentPreviewSheet extends StatefulWidget {
@@ -207,11 +189,6 @@ class _DocumentPreviewSheetState extends State<DocumentPreviewSheet> {
                       ),
                     ),
                     IconButton(
-                      tooltip: 'Open in browser',
-                      icon: const Icon(Icons.open_in_new),
-                      onPressed: _openInBrowser,
-                    ),
-                    IconButton(
                       tooltip: 'Close',
                       icon: const Icon(Icons.close),
                       onPressed: () => Navigator.of(context).pop(),
@@ -264,14 +241,4 @@ class _DocumentPreviewSheetState extends State<DocumentPreviewSheet> {
     );
   }
 
-  Future<void> _openInBrowser() async {
-    final url = _currentUrl ?? widget.initialUri.toString();
-    final uri = Uri.tryParse(url) ?? widget.initialUri;
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open in browser.')),
-      );
-    }
-  }
 }

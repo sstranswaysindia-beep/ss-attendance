@@ -73,56 +73,36 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   Widget build(BuildContext context) {
     final plantLabel = _user.plantName ?? _user.plantId ?? 'Not mapped';
     final isHelper = (_user.driverRole?.toLowerCase().trim() ?? '') == 'helper';
+    final theme = Theme.of(context);
+    final contactNumber = _user.contactNumber?.trim();
 
-    final keyInfoFields = [
-      _ProfileField(
-        label: 'Employee ID',
-        value: _user.employeeId ?? 'Not assigned',
-      ),
-      _ProfileField(label: 'Plant', value: plantLabel),
-      _ProfileField(
-        label: 'Vehicle Number',
-        value: _user.vehicleNumber ?? 'Not assigned',
-      ),
-      _ProfileField(
-        label: 'Father\'s Name',
-        value: _user.fatherName ?? 'Not provided',
-      ),
-      _ProfileField(label: 'Aadhaar', value: _user.aadhaar ?? 'Not provided'),
-    ];
+    String formatDate(String? raw) {
+      if (raw == null || raw.trim().isEmpty) {
+        return 'Not provided';
+      }
+      final parsed = DateTime.tryParse(raw);
+      if (parsed == null) {
+        return raw;
+      }
+      return '${parsed.day.toString().padLeft(2, '0')} '
+          '${_monthLabel(parsed.month)} ${parsed.year}';
+    }
 
-    final editableFields = [
-      const _ProfileField(label: 'Contact Number', value: '+91 98765 43210'),
-      const _ProfileField(label: 'Email', value: 'driver@example.com'),
-      _ProfileField(label: 'Address', value: _user.address ?? 'Not provided'),
-    ];
-
-    final complianceFields = [
-      _ProfileField(
-        label: 'ESI Number',
-        value: _user.esiNumber ?? 'Not provided',
-      ),
-      _ProfileField(
-        label: 'UAN Number',
-        value: _user.uanNumber ?? 'Not provided',
-      ),
-      _ProfileField(
-        label: 'IFSC Code',
-        value: _user.ifscCode != null
-            ? _user.ifscVerified == true
-                  ? '${_user.ifscCode} (Verified)'
-                  : '${_user.ifscCode} (Pending verification)'
-            : 'Not provided',
-      ),
-      _ProfileField(
-        label: 'Bank Account',
-        value: _user.bankAccount ?? 'Not provided',
-      ),
-      _ProfileField(
-        label: 'Branch Name',
-        value: _user.branchName ?? 'Not provided',
-      ),
-    ];
+    String licenseStatusLabel(String? validityRaw) {
+      if (validityRaw == null || validityRaw.trim().isEmpty) {
+        return 'Validity not set';
+      }
+      final parsed = DateTime.tryParse(validityRaw);
+      if (parsed == null) {
+        return 'Validity not set';
+      }
+      final today = DateTime.now();
+      final normalizedToday = DateTime(today.year, today.month, today.day);
+      if (parsed.isBefore(normalizedToday)) {
+        return 'Expired';
+      }
+      return 'Valid';
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -134,74 +114,144 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Center(
+              _ProfileHeaderCard(
+                user: _user,
+                isUploading: _isUploadingPhoto,
+                onPhotoSelected: _handlePhotoSelected,
+              ),
+              const SizedBox(height: 16),
+              _ProfileSectionCard(
+                title: 'Key Information',
+                icon: Icons.badge_outlined,
                 child: Column(
                   children: [
-                    ProfilePhotoWithUpload(
-                      user: _user,
-                      radius: 56,
-                      onPhotoSelected: _handlePhotoSelected,
-                      isUploading: _isUploadingPhoto,
-                      showBorder: true,
-                      borderColor: Theme.of(context).colorScheme.primary,
-                      borderWidth: 3,
+                    _ProfileInfoRow(
+                      label: 'Employee ID',
+                      value: _user.employeeId ?? 'Not assigned',
                     ),
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Tap the camera icon to update your profile photo',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    _ProfileInfoRow(label: 'Plant', value: plantLabel),
+                    _ProfileInfoRow(
+                      label: 'Vehicle Number',
+                      value: _user.vehicleNumber ?? 'Not assigned',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Father\'s Name',
+                      value: _user.fatherName ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Aadhaar',
+                      value: _user.aadhaar ?? 'Not provided',
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
-              Text(
-                _user.displayName,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Employee ID: ${_user.employeeId ?? 'Not assigned'}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              Text(
-                'Plant: $plantLabel',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              Text(
-                'Vehicle: ${_user.vehicleNumber ?? 'Not assigned'}',
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Key Information',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              ...keyInfoFields.map(
-                (field) => _ProfileFieldTile(field: field, readOnly: true),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Personal Details',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              ...editableFields.map((field) => _ProfileFieldTile(field: field)),
-              const SizedBox(height: 16),
-              Text(
-                'Bank & Compliance',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
-              ...complianceFields.map(
-                (field) => _ProfileFieldTile(field: field, readOnly: true),
+              const SizedBox(height: 12),
+              _ProfileSectionCard(
+                title: 'Contact & Address',
+                icon: Icons.contact_phone_outlined,
+                child: Column(
+                  children: [
+                    _ProfileInfoRow(
+                      label: 'Contact Number',
+                      value: contactNumber?.isNotEmpty == true
+                          ? contactNumber!
+                          : 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Address',
+                      value: _user.address ?? 'Not provided',
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () {},
-                child: const Text('Update Personal Info'),
+              _ProfileSectionCard(
+                title: 'License Details',
+                icon: Icons.credit_card_outlined,
+                child: Column(
+                  children: [
+                    _ProfileInfoRow(
+                      label: 'DL Number',
+                      value: _user.dlNumber ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Issue Date',
+                      value: formatDate(_user.dlIssueDate),
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Validity',
+                      value: formatDate(_user.dlValidity),
+                      valueColor:
+                          licenseStatusLabel(_user.dlValidity) == 'Expired'
+                              ? theme.colorScheme.error
+                              : Colors.green.shade700,
+                      trailing: Text(
+                        licenseStatusLabel(_user.dlValidity),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color:
+                              licenseStatusLabel(_user.dlValidity) == 'Expired'
+                              ? theme.colorScheme.error
+                              : Colors.green.shade700,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _ProfileSectionCard(
+                title: 'Nominee Details',
+                icon: Icons.group_outlined,
+                child: Column(
+                  children: [
+                    _ProfileInfoRow(
+                      label: 'Nominee Name',
+                      value: _user.nomineeName ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Relation',
+                      value: _user.nomineeRelation ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Nominee Contact',
+                      value: _user.nomineeContact ?? 'Not provided',
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _ProfileSectionCard(
+                title: 'Bank & Compliance',
+                icon: Icons.account_balance_outlined,
+                child: Column(
+                  children: [
+                    _ProfileInfoRow(
+                      label: 'ESI Number',
+                      value: _user.esiNumber ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'UAN Number',
+                      value: _user.uanNumber ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'IFSC Code',
+                      value: _user.ifscCode != null
+                          ? _user.ifscVerified == true
+                                ? '${_user.ifscCode} (Verified)'
+                                : '${_user.ifscCode} (Pending verification)'
+                          : 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Bank Account',
+                      value: _user.bankAccount ?? 'Not provided',
+                    ),
+                    _ProfileInfoRow(
+                      label: 'Branch Name',
+                      value: _user.branchName ?? 'Not provided',
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
@@ -211,30 +261,200 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
   }
 }
 
-class _ProfileField {
-  const _ProfileField({required this.label, required this.value});
-
-  final String label;
-  final String value;
+String _monthLabel(int month) {
+  const labels = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
+  ];
+  final index = (month - 1).clamp(0, 11).toInt();
+  return labels[index];
 }
 
-class _ProfileFieldTile extends StatelessWidget {
-  const _ProfileFieldTile({required this.field, this.readOnly = false});
+class _ProfileHeaderCard extends StatelessWidget {
+  const _ProfileHeaderCard({
+    required this.user,
+    required this.isUploading,
+    required this.onPhotoSelected,
+  });
 
-  final _ProfileField field;
-  final bool readOnly;
+  final AppUser user;
+  final bool isUploading;
+  final Future<void> Function(File file) onPhotoSelected;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: TextFormField(
-        initialValue: field.value,
-        readOnly: readOnly,
-        decoration: InputDecoration(
-          labelText: field.label,
-          suffixIcon: readOnly ? const Icon(Icons.lock) : null,
+    final theme = Theme.of(context);
+    final plantLabel = user.plantName ?? user.plantId ?? 'Not mapped';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.primary.withOpacity(0.12),
+            Colors.white,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+      ),
+      child: Column(
+        children: [
+          ProfilePhotoWithUpload(
+            user: user,
+            radius: 52,
+            onPhotoSelected: onPhotoSelected,
+            isUploading: isUploading,
+            showBorder: true,
+            borderColor: theme.colorScheme.primary,
+            borderWidth: 3,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            user.displayName,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Employee ID: ${user.employeeId ?? 'Not assigned'}',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Plant: $plantLabel',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Vehicle: ${user.vehicleNumber ?? 'Not assigned'}',
+            style: theme.textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Tap the camera icon to update your profile photo',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileSectionCard extends StatelessWidget {
+  const _ProfileSectionCard({
+    required this.title,
+    required this.icon,
+    required this.child,
+  });
+
+  final String title;
+  final IconData icon;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.black.withOpacity(0.08)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: theme.colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileInfoRow extends StatelessWidget {
+  const _ProfileInfoRow({
+    required this.label,
+    required this.value,
+    this.valueColor,
+    this.trailing,
+  });
+
+  final String label;
+  final String value;
+  final Color? valueColor;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: valueColor ?? Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (trailing != null) trailing!,
+        ],
       ),
     );
   }

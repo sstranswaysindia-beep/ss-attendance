@@ -148,6 +148,9 @@ if ($method === 'POST') {
       json_out(['ok'=>false,'error'=>'Only drivers can change vehicle assignment'], 403);
     }
 
+    // assignments writes disabled (requested)
+    json_out(['ok'=>true,'assignmentSkipped'=>true]);
+
     // If assignments table is missing, treat like "no-op" success so UI isn't blocked
     if (!table_exists($db,'assignments')) {
       json_out(['ok'=>true]);

@@ -5,6 +5,7 @@ class DailyAttendanceSummary {
     required this.outTimes,
     required this.totalMinutes,
     this.hasOpenShift = false,
+    this.hasApprovalPending = false,
   });
 
   final String dateLabel;
@@ -12,6 +13,7 @@ class DailyAttendanceSummary {
   final List<String> outTimes;
   final int totalMinutes;
   final bool hasOpenShift;
+  final bool hasApprovalPending;
 
   String get formattedDuration {
     final hours = totalMinutes ~/ 60;

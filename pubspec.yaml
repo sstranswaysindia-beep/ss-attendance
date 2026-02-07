@@ -2,7 +2,7 @@ name: sstranswaysindia
 description: "SS Transways India - Transportation Management App for tracking trips, attendance, and fleet operations."
 publish_to: 'none'
 
-version: 1.0.163+163
+version: 1.0.183+183
 
 environment:
   sdk: ^3.9.2
@@ -30,6 +30,7 @@ dependencies:
   image: ^4.1.7
   cached_network_image: ^3.3.1
   shared_preferences: ^2.2.2
+  local_auth: ^2.2.0
   device_info_plus: ^10.1.0
   webview_flutter: ^4.4.2
   package_info_plus: ^9.0.0

@@ -195,7 +195,36 @@ try {
     }
 
     $customers = [];
-    if (td_table_exists($db, 'customers') && td_has_col($db, 'customers', 'id')) {
+    if (td_table_exists($db, 'customers_master') &&
+        td_has_col($db, 'customers_master', 'id') &&
+        td_has_col($db, 'customers_master', 'customer_name')) {
+        $hasShort = td_has_col($db, 'customers_master', 'short_code');
+        $hasStatus = td_has_col($db, 'customers_master', 'status');
+        $sql = "SELECT id, customer_name" . ($hasShort ? ", short_code" : "") . " FROM customers_master
+                WHERE customer_name IS NOT NULL AND TRIM(customer_name) != ''";
+        if ($hasStatus) {
+            $sql .= " AND (LOWER(status) = 'active' OR status = '1')";
+        }
+        $sql .= $hasShort
+            ? " ORDER BY short_code, customer_name LIMIT 5000"
+            : " ORDER BY customer_name LIMIT 5000";
+        if ($rs = $db->query($sql)) {
+            while ($row = $rs->fetch_assoc()) {
+                $name = trim((string)($row['customer_name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $entry = ['name' => $name, 'id' => (int)$row['id']];
+                if ($hasShort && !empty($row['short_code'])) {
+                    $entry['short_code'] = (string)$row['short_code'];
+                }
+                $customers[] = $entry;
+            }
+            $rs->close();
+        }
+    }
+
+    if (empty($customers) && td_table_exists($db, 'customers') && td_has_col($db, 'customers', 'id')) {
         $customerNameCol = null;
         foreach (['name', 'customer_name', 'title'] as $field) {
             if (td_has_col($db, 'customers', $field)) {

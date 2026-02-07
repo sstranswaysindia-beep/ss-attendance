@@ -11,11 +11,13 @@ import 'dart:async';
 import 'core/models/app_user.dart';
 import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
+import 'core/services/biometric_unlock_service.dart';
 import 'core/services/training_flag_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/session_event_bus.dart';
 import 'firebase_options.dart';
 import 'features/auth/login_screen.dart';
+import 'features/auth/biometric_lock_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/driver_dashboard_screen.dart';
 import 'features/dashboard/supervisor_dashboard_screen.dart';
@@ -40,10 +42,8 @@ Future<void> main() async {
   // Set system UI overlay style globally
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
       statusBarBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.white,
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
@@ -69,6 +69,9 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   bool _forcingTrainingNav = false;
   late final StreamSubscription<void> _logoutSub;
+  final BiometricUnlockService _biometricService = BiometricUnlockService();
+  bool _biometricPromptActive = false;
+  DateTime? _lastBiometricUnlockAt;
 
   @override
   void initState() {
@@ -135,9 +138,49 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      await _maybePromptBiometricUnlock();
       await _refreshTrainingRequirement();
       _forceTrainingIfRequired();
     }
+  }
+
+  Future<void> _maybePromptBiometricUnlock() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+    if (_currentUser == null) return;
+    if (_biometricPromptActive) return;
+    if (_lastBiometricUnlockAt != null) {
+      final elapsed = DateTime.now().difference(_lastBiometricUnlockAt!);
+      if (elapsed < const Duration(seconds: 3)) return;
+    }
+
+    final enabled = await _biometricService.isEnabledForUser(_currentUser!.id);
+    if (!enabled) return;
+    final supported = await _biometricService.isSupported();
+    if (!supported) {
+      await _biometricService.setEnabledForUser(_currentUser!.id, false);
+      return;
+    }
+
+    _biometricPromptActive = true;
+    final context = _navKey.currentContext;
+    if (context == null) {
+      _biometricPromptActive = false;
+      return;
+    }
+
+    final unlocked = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => BiometricLockScreen(service: _biometricService),
+      ),
+    );
+    if (unlocked == true) {
+      _lastBiometricUnlockAt = DateTime.now();
+    }
+
+    _biometricPromptActive = false;
   }
 
   Future<void> _refreshTrainingRequirement() async {
@@ -212,6 +255,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
       salary: user.salary,
       profilePhoto: user.profilePhoto,
       aadhaar: user.aadhaar,
+      contactNumber: user.contactNumber,
       esiNumber: user.esiNumber,
       uanNumber: user.uanNumber,
       ifscCode: user.ifscCode,
@@ -220,6 +264,12 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
       branchName: user.branchName,
       fatherName: user.fatherName,
       address: user.address,
+      dlNumber: user.dlNumber,
+      dlValidity: user.dlValidity,
+      dlIssueDate: user.dlIssueDate,
+      nomineeName: user.nomineeName,
+      nomineeRelation: user.nomineeRelation,
+      nomineeContact: user.nomineeContact,
       vehicleNumber: user.vehicleNumber,
       driverRole: user.driverRole,
       availableVehicles: user.availableVehicles,
@@ -231,6 +281,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
       geofencingEnabled: user.geofencingEnabled,
       proxyEnabled: user.proxyEnabled,
       trainingRequired: trainingRequired,
+      advanceEntryAllowed: user.advanceEntryAllowed,
     );
   }
 
@@ -289,15 +340,13 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
             return const SizedBox.shrink();
           }
           final mediaQuery = MediaQuery.of(context);
-          final isAndroid =
-              !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
           return MediaQuery(
-            // Only block Android "Font size" scaling. Do NOT fight Android "Display size":
-            // changing display size changes logical pixels; the UI must adapt to fill the screen.
-            data: isAndroid
-                ? mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0))
-                : mediaQuery,
+            // Lock text scaling across all platforms so system display/font size
+            // changes do not inflate UI text sizes.
+            data: mediaQuery.copyWith(
+              textScaler: const TextScaler.linear(1.0),
+            ),
             child: InAppNotificationBannerHost(
               hideBell: child is _LoginRoute,
               child: child,

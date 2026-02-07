@@ -180,7 +180,31 @@ if (empty($helpers) && $hasTable('drivers') && $hasCol('drivers','id')) {
 
 /* ---------- CUSTOMERS (optional, used by UI datalist) ---------- */
 $customers = [];
-if ($hasTable('customers') && $hasCol('customers','name')) {
+if ($hasTable('customers_master') && $hasCol('customers_master','customer_name')) {
+  $hasShort = $hasCol('customers_master', 'short_code');
+  $hasStatus = $hasCol('customers_master', 'status');
+  $sql = "SELECT id, customer_name" . ($hasShort ? ", short_code" : "") . " FROM customers_master
+          WHERE customer_name <> ''";
+  if ($hasStatus) {
+    $sql .= " AND (LOWER(status) = 'active' OR status = '1')";
+  }
+  $sql .= $hasShort
+    ? " ORDER BY short_code, customer_name LIMIT 5000"
+    : " ORDER BY customer_name LIMIT 5000";
+  if ($rs = $db->query($sql)) {
+    while ($r = $rs->fetch_assoc()) {
+      $nm = trim((string)($r['customer_name'] ?? ''));
+      if ($nm !== '') {
+        $entry = ['name' => $nm, 'id' => (int)$r['id']];
+        if ($hasShort && !empty($r['short_code'])) {
+          $entry['short_code'] = (string)$r['short_code'];
+        }
+        $customers[] = $entry;
+      }
+    }
+    $rs->close();
+  }
+} elseif ($hasTable('customers') && $hasCol('customers','name')) {
   if ($rs = $db->query("SELECT name FROM customers WHERE name <> '' ORDER BY name")) {
     while ($r = $rs->fetch_assoc()) {
       $nm = trim((string)($r['name'] ?? ''));

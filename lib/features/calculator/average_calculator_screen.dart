@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
+import '../../core/widgets/app_loader.dart';
+
 class AverageCalculatorScreen extends StatefulWidget {
   const AverageCalculatorScreen({super.key});
 
@@ -146,10 +148,8 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: Colors.white,
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
       child: Scaffold(
@@ -213,27 +213,7 @@ class _AverageCalculatorScreenState extends State<AverageCalculatorScreen> {
       width: double.infinity,
       height: double.infinity,
       color: Colors.white,
-      child: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            CircularProgressIndicator(
-              strokeWidth: 3,
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-            ),
-            SizedBox(height: 24),
-            Text(
-              'Loading Average Calculator...',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'Optimizing for mobile experience',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
-            ),
-          ],
-        ),
-      ),
+      child: const Center(child: AppLoader()),
     );
   }
 

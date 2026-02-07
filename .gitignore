@@ -57,3 +57,6 @@ android/key.properties
 android/app/upload-keystore.jks
 *.jks
 *.keystore
+
+# Reverse-engineering / decompiled artifacts (generated locally)
+reverse_apk/

@@ -159,8 +159,27 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       return false;
     }
 
+    final statusLabel =
+        approval.status?.isNotEmpty == true ? approval.status! : 'Pending';
+    final normalizedStatus = statusLabel.toLowerCase();
+    final isRejected = normalizedStatus == 'rejected';
     final isApprove = direction == DismissDirection.endToStart;
-    final action = isApprove ? 'approve' : 'reject';
+    String action;
+    if (isRejected) {
+      final confirmed = await _confirmDeleteRejected(approval);
+      if (confirmed != true) {
+        return false;
+      }
+      action = 'delete';
+    } else {
+      action = isApprove ? 'approve' : 'reject';
+      if (!isApprove) {
+        final confirmed = await _confirmReject(approval);
+        if (confirmed != true) {
+          return false;
+        }
+      }
+    }
     final hasOutTime = (approval.outTime ?? '').trim().isNotEmpty;
     if (isApprove && !hasOutTime) {
       showAppToast(
@@ -197,10 +216,14 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
       });
 
       if (mounted) {
-        showAppToast(
-          context,
-          isApprove ? 'Attendance approved.' : 'Attendance rejected.',
-        );
+        if (action == 'delete') {
+          showAppToast(context, 'Rejected attendance deleted.');
+        } else {
+          showAppToast(
+            context,
+            isApprove ? 'Attendance approved.' : 'Attendance rejected.',
+          );
+        }
         if (isApprove) {
           _showApproveSuccessAnimation();
         }
@@ -253,6 +276,68 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
     if (mounted && Navigator.of(context, rootNavigator: true).canPop()) {
       Navigator.of(context, rootNavigator: true).pop();
     }
+  }
+
+  Future<bool?> _confirmReject(AttendanceApproval approval) {
+    final inLabel = (approval.inTime ?? '').trim();
+    final dateLabel = inLabel.isNotEmpty
+        ? inLabel
+        : DateFormat('dd MMM yyyy').format(_selectedDate);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text('Reject attendance?'),
+        content: Text(
+          'Reject attendance for ${approval.driverName} on $dateLabel.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDeleteRejected(AttendanceApproval approval) {
+    final inLabel = (approval.inTime ?? '').trim();
+    final dateLabel = inLabel.isNotEmpty
+        ? inLabel
+        : DateFormat('dd MMM yyyy').format(_selectedDate);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text('Delete rejected attendance?'),
+        content: Text(
+          'Delete rejected attendance for ${approval.driverName} on $dateLabel?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade600,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
   }
 
   Color _statusChipColor(String status) {
@@ -516,7 +601,7 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Swipe left to approve and right to reject pending entries.',
+                          'Swipe left to approve and right to reject pending entries. Rejected entries can be swiped right to delete.',
                         ),
                       ),
                     ],
@@ -674,12 +759,12 @@ class _ApprovalsScreenState extends State<ApprovalsScreen> {
                                 label: 'Approve',
                               );
                             } else if (isRejected) {
-                              dismissDirection = DismissDirection.endToStart;
-                              trailingBackground = _ApprovalSwipeBackground(
-                                alignment: Alignment.centerRight,
-                                color: const Color(0xFFE5F6E5),
-                                icon: Icons.check,
-                                label: 'Re-Approve',
+                              dismissDirection = DismissDirection.startToEnd;
+                              leadingBackground = const _ApprovalSwipeBackground(
+                                alignment: Alignment.centerLeft,
+                                color: Color(0xFFFFE5E5),
+                                icon: Icons.delete,
+                                label: 'Delete',
                               );
                             } else {
                               dismissDirection = DismissDirection.startToEnd;

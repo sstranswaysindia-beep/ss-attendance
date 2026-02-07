@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:lottie/lottie.dart';
-import '../calculator/average_calculator_screen.dart';
+import 'package:http/http.dart' as http;
+import '../calculator/average_calculator_extra_screen.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/advance_request.dart';
@@ -22,6 +24,7 @@ import '../../core/services/notification_service.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/services/auth_storage_service.dart';
 import '../../core/services/training_flag_service.dart';
+import '../../core/services/biometric_unlock_service.dart';
 import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/models/document_models.dart';
@@ -32,8 +35,11 @@ import '../approvals/approvals_screen.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
+import '../attendance/employee_attendance_calendar_screen.dart';
 import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
+import '../leave/apply_leave_screen.dart';
+import '../documents/personal_documents_sheet.dart';
 import '../attendance/proxy_attendance_screen.dart';
 import '../profile/driver_profile_screen.dart';
 import '../profile/supervisor_profile_screen.dart';
@@ -44,6 +50,7 @@ import '../trips/trip_screen.dart';
 import '../watch_ads/watch_ads_screen.dart';
 import '../documents/documents_hub_screen.dart';
 import '../safety/safety_hub_screen.dart';
+import '../tasks/tasks_screen.dart';
 import 'driver_dashboard_screen.dart'
     show GlowingAttendanceButton, HoverListTile, NotificationType;
 
@@ -70,6 +77,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
   final DocumentsRepository _documentsRepository = DocumentsRepository();
   final AppUpdateService _appUpdateService = AppUpdateService();
+  final BiometricUnlockService _biometricService = BiometricUnlockService();
   late SafetyRepository _safetyRepository;
   GpsPingService? _gpsPingService;
 
@@ -94,11 +102,19 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
   DocumentOverviewData? _documentsOverview;
   bool _isLoadingDocumentsOverview = false;
   String? _documentsOverviewError;
+  bool _biometricEnabled = false;
+  bool _biometricSupported = false;
 
   bool _isLoadingTodayAttendance = false;
   String? _todayAttendanceError;
   List<SupervisorTodayAttendancePlant> _todayAttendance = const [];
   final Set<int> _absenceUpdatingDriverIds = <int>{};
+  bool _isLoadingMaintenanceDue = false;
+  String? _maintenanceDueError;
+  List<_MaintenancePlant> _maintenanceDuePlants = const [];
+  int _taskCount = 0;
+  bool _isLoadingTasks = false;
+  bool _taskSnackShown = false;
 
   @override
   void initState() {
@@ -122,7 +138,10 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     _loadActiveShift();
     _loadNotifications();
     _loadSupervisorTodayAttendance();
+    _loadMaintenanceDue();
+    _loadTaskCount();
     _loadAppVersion();
+    _loadBiometricSetting();
     if (widget.user.canViewDocuments) {
       _loadDocumentsOverview();
     }
@@ -142,6 +161,220 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
           );
   }
 
+  Future<void> _loadBiometricSetting() async {
+    final enabled = await _biometricService.isEnabledForUser(widget.user.id);
+    final supported = await _biometricService.isSupported();
+    if (!mounted) return;
+    setState(() {
+      _biometricEnabled = enabled;
+      _biometricSupported = supported;
+    });
+  }
+
+  Future<void> _loadTaskCount() async {
+    final userId = int.tryParse(widget.user.id);
+    if (userId == null) {
+      setState(() => _taskCount = 0);
+      return;
+    }
+
+    setState(() => _isLoadingTasks = true);
+    try {
+      final response = await http.post(
+        Uri.parse('https://sstranswaysindia.com/api/mobile/tasks_list.php'),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'userId': userId, 'limit': 20}),
+      );
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final ok = response.statusCode == 200 && data['status'] == 'ok';
+      if (ok) {
+        final count = int.tryParse(data['count']?.toString() ?? '') ?? 0;
+        if (mounted) {
+          setState(() => _taskCount = count);
+          if (count > 0) {
+            _showPendingTasksSnack();
+          } else {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          }
+        }
+      } else if (mounted) {
+        setState(() => _taskCount = 0);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _taskCount = 0);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingTasks = false);
+      }
+    }
+  }
+
+  Future<void> _loadMaintenanceDue({bool silent = false}) async {
+    final plantIds = _resolveMaintenancePlantIds();
+    if (plantIds.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _maintenanceDuePlants = const [];
+        _maintenanceDueError = null;
+        _isLoadingMaintenanceDue = false;
+      });
+      return;
+    }
+
+    if (!silent) {
+      setState(() {
+        _isLoadingMaintenanceDue = true;
+        _maintenanceDueError = null;
+      });
+    }
+
+    try {
+      final responses = await Future.wait(
+        plantIds.map(_fetchMaintenanceDueForPlant),
+      );
+      final merged = <_MaintenancePlant>[];
+      for (final plants in responses) {
+        merged.addAll(plants);
+      }
+      merged.sort(
+        (a, b) =>
+            a.plantName.toLowerCase().compareTo(b.plantName.toLowerCase()),
+      );
+      if (!mounted) return;
+      setState(() {
+        _maintenanceDuePlants = merged;
+        _maintenanceDueError = null;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _maintenanceDueError =
+            'Unable to load maintenance due details. Please try again.';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingMaintenanceDue = false);
+      }
+    }
+  }
+
+  Future<List<_MaintenancePlant>> _fetchMaintenanceDueForPlant(
+    int plantId,
+  ) async {
+    final uri =
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/maintenance_due.php',
+        ).replace(
+          queryParameters: {
+            'supervisorUserId': widget.user.id,
+            'plant_id': plantId.toString(),
+            'scope': 'due',
+          },
+        );
+    final response = await http.get(uri);
+    if (response.statusCode != 200) {
+      throw Exception('Maintenance due fetch failed.');
+    }
+    final payload =
+        jsonDecode(response.body) as Map<String, dynamic>? ?? const {};
+    final isOk = payload['ok'] == true || payload['status'] == 'ok';
+    if (!isOk) {
+      throw Exception(payload['error']?.toString() ?? 'Request failed.');
+    }
+    final plants = payload['plants'] as List<dynamic>? ?? const [];
+    return plants
+        .whereType<Map<String, dynamic>>()
+        .map(_MaintenancePlant.fromJson)
+        .toList(growable: false);
+  }
+
+  Set<int> _resolveMaintenancePlantIds() {
+    final ids = <int>{};
+    for (final plant in widget.user.supervisedPlants) {
+      final rawId = plant['id'] ?? plant['plantId'] ?? plant['plant_id'];
+      final id = int.tryParse(rawId?.toString() ?? '');
+      if (id != null && id > 0) {
+        ids.add(id);
+      }
+    }
+    for (final rawId in widget.user.supervisedPlantIds) {
+      if (rawId == null) continue;
+      final id = int.tryParse(rawId.toString());
+      if (id != null && id > 0) {
+        ids.add(id);
+      }
+    }
+    if (ids.isEmpty) {
+      final fallbackCandidates = <String?>[
+        widget.user.assignmentPlantId,
+        widget.user.plantId,
+        widget.user.defaultPlantId,
+      ];
+      for (final candidate in fallbackCandidates) {
+        final id = int.tryParse(candidate ?? '');
+        if (id != null && id > 0) {
+          ids.add(id);
+          break;
+        }
+      }
+    }
+    return ids;
+  }
+
+  void _showPendingTasksSnack() {
+    if (!mounted) return;
+    if (_taskSnackShown) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      _taskSnackShown = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          content: GestureDetector(
+            onTap: () {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              Navigator.of(context)
+                  .push(
+                    MaterialPageRoute(
+                      builder: (_) => TasksScreen(user: widget.user),
+                    ),
+                  )
+                  .then((_) => _loadTaskCount());
+            },
+            child: Row(
+              children: [
+                const Icon(Icons.task_alt, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'You have $_taskCount pending tasks. Tap to open.',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    });
+  }
+
+  Future<void> _toggleBiometric(bool value) async {
+    final supported = await _biometricService.isSupported();
+    if (!supported && value) {
+      showAppToast(
+        context,
+        'Biometric unlock is not available on this device.',
+        isError: true,
+      );
+      return;
+    }
+    setState(() => _biometricEnabled = value);
+    await _biometricService.setEnabledForUser(widget.user.id, value);
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -159,6 +392,8 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
     if (state == AppLifecycleState.resumed) {
       _checkForAppUpdate();
       _checkTrainingRequirement();
+      _taskSnackShown = false;
+      _loadTaskCount();
     }
   }
 
@@ -374,6 +609,19 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       _loadSupervisorTodayAttendance(silent: true),
       _loadActiveShift(),
     ]);
+  }
+
+  Future<void> _openEmployeeCalendar(
+    SupervisorTodayAttendanceDriver driver,
+  ) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EmployeeAttendanceCalendarScreen(
+          driverId: driver.driverId.toString(),
+          driverName: driver.driverName,
+        ),
+      ),
+    );
   }
 
   Future<void> _checkForAppUpdate() async {
@@ -650,9 +898,11 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
 
   String _twoDigits(int value) => value.toString().padLeft(2, '0');
 
-  void _openAverageCalculator() {
+  void _openAverageCalculatorExtra() {
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (context) => const AverageCalculatorScreen()),
+      MaterialPageRoute(
+        builder: (context) => const AverageCalculatorExtraScreen(),
+      ),
     );
   }
 
@@ -895,6 +1145,14 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.folder_shared),
+                title: const Text('Personal Documents'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  showPersonalDocumentsSheet(context, widget.user);
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.play_circle_fill_outlined),
                 title: const Text('Watch Ads & Earn'),
                 onTap: () {
@@ -905,6 +1163,21 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                     ),
                   );
                 },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.fingerprint),
+                title: const Text('Biometric Unlock'),
+                subtitle: Text(
+                  _biometricSupported
+                      ? 'Unlock with fingerprint or face'
+                      : 'Not supported on this device',
+                ),
+                value: _biometricEnabled,
+                onChanged: _biometricSupported ? _toggleBiometric : null,
+                activeColor: Colors.green,
+                activeTrackColor: Colors.green.shade200,
+                inactiveThumbColor: Colors.red,
+                inactiveTrackColor: Colors.red.shade200,
               ),
               ListTile(
                 leading: const Icon(Icons.logout),
@@ -966,7 +1239,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                                 style: textTheme.titleMedium?.copyWith(
                                   fontSize:
                                       (textTheme.titleMedium?.fontSize ?? 16) +
-                                          6,
+                                      6,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -1168,6 +1441,16 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                       ],
                       const Divider(height: 0),
                       HoverListTile(
+                        leading: const Icon(Icons.beach_access),
+                        title: const Text('Apply Leave'),
+                        onTap: () =>
+                            showApplyLeaveSheet(context, widget.user).then((_) {
+                              _loadNotifications();
+                              _loadSupervisorTodayAttendance(silent: true);
+                            }),
+                      ),
+                      const Divider(height: 0),
+                      HoverListTile(
                         leading: const Icon(Icons.payments),
                         title: const Text('Salary & Advances'),
                         onTap: () => Navigator.of(context)
@@ -1249,12 +1532,64 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
                         HoverListTile(
                           leading: const Icon(Icons.calculate),
                           title: const Text('Average Calculator'),
-                          onTap: () => _openAverageCalculator(),
+                          onTap: () => _openAverageCalculatorExtra(),
+                        ),
+                      ],
+                      if (_taskCount > 0 && !_isLoadingTasks) ...[
+                        const Divider(height: 0),
+                        HoverListTile(
+                          leading: const Icon(Icons.task_alt),
+                          title: Row(
+                            children: [
+                              const Expanded(child: Text('Task')),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  _taskCount.toString(),
+                                  style: TextStyle(
+                                    color: Colors.red.shade700,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          onTap: () => Navigator.of(context)
+                              .push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      TasksScreen(user: widget.user),
+                                ),
+                              )
+                              .then((_) => _loadTaskCount()),
                         ),
                       ],
                     ],
                   ),
                 ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Text('Maintenance Due', style: textTheme.titleMedium),
+                    const Spacer(),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: _isLoadingMaintenanceDue
+                          ? null
+                          : () => _loadMaintenanceDue(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                _buildMaintenanceDueSection(theme),
                 const SizedBox(height: 16),
                 Row(
                   children: [
@@ -1432,11 +1767,7 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
         0,
         const Align(
           alignment: Alignment.centerRight,
-          child: SizedBox(
-            height: 18,
-            width: 18,
-            child: AppLoader(size: 18),
-          ),
+          child: SizedBox(height: 18, width: 18, child: AppLoader(size: 18)),
         ),
       );
     }
@@ -1445,6 +1776,224 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: items,
     );
+  }
+
+  Widget _buildMaintenanceDueSection(ThemeData theme) {
+    if (_isLoadingMaintenanceDue && _maintenanceDuePlants.isEmpty) {
+      return const Center(child: AppLoader());
+    }
+
+    if (_maintenanceDueError != null && _maintenanceDuePlants.isEmpty) {
+      return Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _maintenanceDueError!,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: _isLoadingMaintenanceDue
+                    ? null
+                    : () => _loadMaintenanceDue(),
+                child: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final vehiclesCount = _maintenanceDuePlants.fold<int>(
+      0,
+      (sum, plant) => sum + plant.vehicles.length,
+    );
+
+    if (vehiclesCount == 0) {
+      return Card(
+        color: Colors.white,
+        elevation: 2,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: const Padding(
+          padding: EdgeInsets.all(16),
+          child: Text('No maintenance due vehicles found.'),
+        ),
+      );
+    }
+
+    final cards = <Widget>[];
+    for (final plant in _maintenanceDuePlants) {
+      if (plant.vehicles.isEmpty) {
+        continue;
+      }
+      cards.add(_buildMaintenancePlantCard(theme, plant));
+    }
+
+    if (_isLoadingMaintenanceDue && _maintenanceDuePlants.isNotEmpty) {
+      cards.insert(
+        0,
+        const Align(
+          alignment: Alignment.centerRight,
+          child: SizedBox(height: 18, width: 18, child: AppLoader(size: 18)),
+        ),
+      );
+    }
+
+    return Column(children: cards);
+  }
+
+  Widget _buildMaintenancePlantCard(ThemeData theme, _MaintenancePlant plant) {
+    return Card(
+      color: Colors.white,
+      elevation: 2,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.build_circle, color: Colors.black),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${plant.plantName} (${plant.vehicles.length})',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (plant.location.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                plant.location,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            ...plant.vehicles.map(
+              (vehicle) => _buildMaintenanceVehicleTile(theme, vehicle),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMaintenanceVehicleTile(
+    ThemeData theme,
+    _MaintenanceVehicle vehicle,
+  ) {
+    final severityColor = _maintenanceSeverityColor(
+      theme,
+      vehicle.overallSeverity,
+    );
+    final dueItems = vehicle.dueItems;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: severityColor.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: severityColor.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  vehicle.currentKm != null
+                      ? '${vehicle.vehicleNo} • C.KM ${_formatKm(vehicle.currentKm!)}'
+                      : vehicle.vehicleNo,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              _MaintenanceSeverityChip(
+                label: vehicle.overallLabel,
+                color: severityColor,
+              ),
+            ],
+          ),
+          if (dueItems.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            ...dueItems.map(
+              (item) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: _buildMaintenanceItemRow(theme, item),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMaintenanceItemRow(ThemeData theme, _MaintenanceDueItem item) {
+    final severityColor = _maintenanceSeverityColor(theme, item.severity);
+    final kmLabel = item.kmLabel?.trim();
+    final dateLabel = item.dateLabel?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          item.label,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            if (kmLabel != null && kmLabel.isNotEmpty && kmLabel != '—')
+              _MaintenanceMetaChip(label: 'KM: $kmLabel', color: severityColor),
+            if (dateLabel != null && dateLabel.isNotEmpty && dateLabel != '—')
+              _MaintenanceMetaChip(
+                label: 'Date: $dateLabel',
+                color: severityColor,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Color _maintenanceSeverityColor(ThemeData theme, String severity) {
+    switch (severity.toLowerCase()) {
+      case 'overdue':
+        return Colors.redAccent;
+      case 'due_soon':
+        return Colors.orange.shade700;
+      case 'ok':
+        return Colors.green.shade700;
+      default:
+        return theme.colorScheme.outline;
+    }
+  }
+
+  String _formatKm(double value) {
+    final formatter = NumberFormat.decimalPattern('en_IN');
+    return formatter.format(value.round());
   }
 
   Widget _buildPlantAttendanceCard(
@@ -1571,11 +2120,37 @@ class _SupervisorDashboardScreenState extends State<SupervisorDashboardScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  driver.driverName,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: primaryTextColor,
-                    fontWeight: FontWeight.w600,
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _openEmployeeCalendar(driver),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 2,
+                        horizontal: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              driver.driverName,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                color: primaryTextColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.calendar_month,
+                            size: 16,
+                            color: primaryTextColor,
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -1729,6 +2304,144 @@ class _SupervisorNotification {
   final bool isPlaceholder;
 }
 
+class _MaintenancePlant {
+  _MaintenancePlant({
+    required this.plantId,
+    required this.plantName,
+    required this.location,
+    required this.vehicles,
+  });
+
+  factory _MaintenancePlant.fromJson(Map<String, dynamic> json) {
+    final vehicles = (json['vehicles'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(_MaintenanceVehicle.fromJson)
+        .toList(growable: false);
+    return _MaintenancePlant(
+      plantId: int.tryParse(json['plant_id']?.toString() ?? '') ?? 0,
+      plantName: json['plant_name']?.toString() ?? 'Unknown Plant',
+      location: json['location']?.toString() ?? '',
+      vehicles: vehicles,
+    );
+  }
+
+  final int plantId;
+  final String plantName;
+  final String location;
+  final List<_MaintenanceVehicle> vehicles;
+}
+
+class _MaintenanceVehicle {
+  _MaintenanceVehicle({
+    required this.vehicleId,
+    required this.vehicleNo,
+    required this.currentKm,
+    required this.overallLabel,
+    required this.overallSeverity,
+    required this.dueItems,
+  });
+
+  factory _MaintenanceVehicle.fromJson(Map<String, dynamic> json) {
+    final overall = json['overall'] as Map<String, dynamic>? ?? const {};
+    final dueItems = (json['due_items'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(_MaintenanceDueItem.fromJson)
+        .toList(growable: false);
+    return _MaintenanceVehicle(
+      vehicleId: int.tryParse(json['vehicle_id']?.toString() ?? '') ?? 0,
+      vehicleNo: json['vehicle_no']?.toString() ?? 'Vehicle',
+      currentKm: double.tryParse(json['current_km']?.toString() ?? ''),
+      overallLabel: overall['label']?.toString() ?? 'Due',
+      overallSeverity: overall['severity']?.toString() ?? 'due_soon',
+      dueItems: dueItems,
+    );
+  }
+
+  final int vehicleId;
+  final String vehicleNo;
+  final double? currentKm;
+  final String overallLabel;
+  final String overallSeverity;
+  final List<_MaintenanceDueItem> dueItems;
+}
+
+class _MaintenanceDueItem {
+  _MaintenanceDueItem({
+    required this.label,
+    required this.severity,
+    required this.kmLabel,
+    required this.dateLabel,
+  });
+
+  factory _MaintenanceDueItem.fromJson(Map<String, dynamic> json) {
+    final byKm = json['by_km'] as Map<String, dynamic>? ?? const {};
+    final byDate = json['by_date'] as Map<String, dynamic>? ?? const {};
+    return _MaintenanceDueItem(
+      label: json['label']?.toString() ?? 'Service',
+      severity: json['severity']?.toString() ?? 'due_soon',
+      kmLabel: byKm['label']?.toString(),
+      dateLabel: byDate['label']?.toString(),
+    );
+  }
+
+  final String label;
+  final String severity;
+  final String? kmLabel;
+  final String? dateLabel;
+}
+
+class _MaintenanceSeverityChip extends StatelessWidget {
+  const _MaintenanceSeverityChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _MaintenanceMetaChip extends StatelessWidget {
+  const _MaintenanceMetaChip({required this.label, required this.color});
+
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
 class _SupervisedPlantsCard extends StatelessWidget {
   const _SupervisedPlantsCard({required this.user});
 
@@ -1812,11 +2525,11 @@ class _SupervisedPlantsCard extends StatelessWidget {
                   label: Text(
                     plantName,
                     style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onPrimary,
+                      color: Colors.white,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  backgroundColor: theme.colorScheme.primary,
+                  backgroundColor: const Color(0xFFA530EE),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 );
               }).toList(),

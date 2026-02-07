@@ -27,10 +27,8 @@ Future<void> main() async {
 
   SystemChrome.setSystemUIOverlayStyle(
     const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
       statusBarBrightness: Brightness.light,
-      systemNavigationBarColor: Colors.white,
       systemNavigationBarIconBrightness: Brightness.dark,
     ),
   );
@@ -112,10 +110,8 @@ class _SSAdminAppState extends State<SSAdminApp> {
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: const SystemUiOverlayStyle(
-        statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.dark,
         statusBarBrightness: Brightness.light,
-        systemNavigationBarColor: Colors.white,
         systemNavigationBarIconBrightness: Brightness.dark,
       ),
       child: MaterialApp(
@@ -130,7 +126,6 @@ class _SSAdminAppState extends State<SSAdminApp> {
               color: colorScheme.onSurface,
             ),
             systemOverlayStyle: const SystemUiOverlayStyle(
-              statusBarColor: Colors.transparent,
               statusBarIconBrightness: Brightness.dark,
               statusBarBrightness: Brightness.light,
             ),
@@ -144,15 +139,13 @@ class _SSAdminAppState extends State<SSAdminApp> {
             return const SizedBox.shrink();
           }
           final mediaQuery = MediaQuery.of(context);
-          final isAndroid =
-              !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
           return MediaQuery(
-            // Only block Android "Font size" scaling. Let "Display size" work normally
-            // so the UI always fills the screen.
-            data: isAndroid
-                ? mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0))
-                : mediaQuery,
+            // Lock text scaling across all platforms so system display/font size
+            // changes do not inflate UI text sizes.
+            data: mediaQuery.copyWith(
+              textScaler: const TextScaler.linear(1.0),
+            ),
             child: InAppNotificationBannerHost(
               hideBell: child is _LoginRoute,
               child: child,

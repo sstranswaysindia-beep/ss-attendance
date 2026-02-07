@@ -22,6 +22,7 @@ class AppUser {
     this.salary,
     this.profilePhoto,
     this.aadhaar,
+    this.contactNumber,
     this.esiNumber,
     this.uanNumber,
     this.ifscCode,
@@ -30,6 +31,12 @@ class AppUser {
     this.branchName,
     this.fatherName,
     this.address,
+    this.dlNumber,
+    this.dlValidity,
+    this.dlIssueDate,
+    this.nomineeName,
+    this.nomineeRelation,
+    this.nomineeContact,
     this.vehicleNumber,
     this.driverRole,
     this.availableVehicles = const <DriverVehicle>[],
@@ -41,6 +48,7 @@ class AppUser {
     this.geofencingEnabled = false,
     this.proxyEnabled = false,
     this.trainingRequired = false,
+    this.advanceEntryAllowed = false,
   });
 
   final String id;
@@ -61,6 +69,7 @@ class AppUser {
   final String? salary;
   String? profilePhoto;
   final String? aadhaar;
+  final String? contactNumber;
   final String? esiNumber;
   final String? uanNumber;
   final String? ifscCode;
@@ -69,6 +78,12 @@ class AppUser {
   final String? branchName;
   final String? fatherName;
   final String? address;
+  final String? dlNumber;
+  final String? dlValidity;
+  final String? dlIssueDate;
+  final String? nomineeName;
+  final String? nomineeRelation;
+  final String? nomineeContact;
   final String? vehicleNumber;
   final String? driverRole;
   final List<DriverVehicle> availableVehicles;
@@ -80,6 +95,7 @@ class AppUser {
   final bool geofencingEnabled;
   final bool proxyEnabled;
   final bool trainingRequired;
+  final bool advanceEntryAllowed;
 
   AppUser copyWith({
     String? id,
@@ -100,6 +116,7 @@ class AppUser {
     String? salary,
     String? profilePhoto,
     String? aadhaar,
+    String? contactNumber,
     String? esiNumber,
     String? uanNumber,
     String? ifscCode,
@@ -108,6 +125,12 @@ class AppUser {
     String? branchName,
     String? fatherName,
     String? address,
+    String? dlNumber,
+    String? dlValidity,
+    String? dlIssueDate,
+    String? nomineeName,
+    String? nomineeRelation,
+    String? nomineeContact,
     String? vehicleNumber,
     String? driverRole,
     List<DriverVehicle>? availableVehicles,
@@ -119,6 +142,7 @@ class AppUser {
     bool? geofencingEnabled,
     bool? proxyEnabled,
     bool? trainingRequired,
+    bool? advanceEntryAllowed,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -139,6 +163,7 @@ class AppUser {
       salary: salary ?? this.salary,
       profilePhoto: profilePhoto ?? this.profilePhoto,
       aadhaar: aadhaar ?? this.aadhaar,
+      contactNumber: contactNumber ?? this.contactNumber,
       esiNumber: esiNumber ?? this.esiNumber,
       uanNumber: uanNumber ?? this.uanNumber,
       ifscCode: ifscCode ?? this.ifscCode,
@@ -147,6 +172,12 @@ class AppUser {
       branchName: branchName ?? this.branchName,
       fatherName: fatherName ?? this.fatherName,
       address: address ?? this.address,
+      dlNumber: dlNumber ?? this.dlNumber,
+      dlValidity: dlValidity ?? this.dlValidity,
+      dlIssueDate: dlIssueDate ?? this.dlIssueDate,
+      nomineeName: nomineeName ?? this.nomineeName,
+      nomineeRelation: nomineeRelation ?? this.nomineeRelation,
+      nomineeContact: nomineeContact ?? this.nomineeContact,
       vehicleNumber: vehicleNumber ?? this.vehicleNumber,
       driverRole: driverRole ?? this.driverRole,
       availableVehicles: availableVehicles ?? this.availableVehicles,
@@ -158,6 +189,7 @@ class AppUser {
       geofencingEnabled: geofencingEnabled ?? this.geofencingEnabled,
       proxyEnabled: proxyEnabled ?? this.proxyEnabled,
       trainingRequired: trainingRequired ?? this.trainingRequired,
+      advanceEntryAllowed: advanceEntryAllowed ?? this.advanceEntryAllowed,
     );
   }
 
@@ -181,6 +213,7 @@ class AppUser {
       'salary': salary,
       'profilePhoto': profilePhoto,
       'aadhaar': aadhaar,
+      'contactNumber': contactNumber,
       'esiNumber': esiNumber,
       'uanNumber': uanNumber,
       'ifscCode': ifscCode,
@@ -189,6 +222,12 @@ class AppUser {
       'branchName': branchName,
       'fatherName': fatherName,
       'address': address,
+      'dlNumber': dlNumber,
+      'dlValidity': dlValidity,
+      'dlIssueDate': dlIssueDate,
+      'nomineeName': nomineeName,
+      'nomineeRelation': nomineeRelation,
+      'nomineeContact': nomineeContact,
       'vehicleNumber': vehicleNumber,
       'driverRole': driverRole,
       'availableVehicles': availableVehicles.map((v) => v.toJson()).toList(),
@@ -200,6 +239,7 @@ class AppUser {
       'geofencingEnabled': geofencingEnabled,
       'proxyEnabled': proxyEnabled,
       'trainingRequired': trainingRequired,
+      'advanceEntryAllowed': advanceEntryAllowed,
     };
   }
 
@@ -223,6 +263,9 @@ class AppUser {
       salary: json['salary'] as String?,
       profilePhoto: json['profilePhoto'] as String?,
       aadhaar: json['aadhaar'] as String?,
+      contactNumber:
+          (json['contactNumber'] ?? json['contact'] ?? json['contact_number'])
+              as String?,
       esiNumber: json['esiNumber'] as String?,
       uanNumber: json['uanNumber'] as String?,
       ifscCode: json['ifscCode'] as String?,
@@ -231,6 +274,17 @@ class AppUser {
       branchName: json['branchName'] as String?,
       fatherName: json['fatherName'] as String?,
       address: json['address'] as String?,
+      dlNumber: (json['dlNumber'] ?? json['dl_number']) as String?,
+      dlValidity:
+          (json['dlValidity'] ?? json['dl_validity'] ?? json['license_expiry_date'])
+              as String?,
+      dlIssueDate: (json['dlIssueDate'] ?? json['dl_issue_date']) as String?,
+      nomineeName:
+          (json['nomineeName'] ?? json['nominee_name']) as String?,
+      nomineeRelation:
+          (json['nomineeRelation'] ?? json['relation_nominee']) as String?,
+      nomineeContact:
+          (json['nomineeContact'] ?? json['nominee_contact']) as String?,
       vehicleNumber: json['vehicleNumber'] as String?,
       driverRole: json['driverRole'] as String?,
       availableVehicles:
@@ -256,6 +310,9 @@ class AppUser {
       ),
       trainingRequired: _parseGeofenceFlag(
         json['trainingRequired'] ?? json['training_req'],
+      ),
+      advanceEntryAllowed: _parseGeofenceFlag(
+        json['advanceEntryAllowed'] ?? json['advance_entry'],
       ),
     );
   }

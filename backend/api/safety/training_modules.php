@@ -20,6 +20,12 @@ try {
         apiRespond(200, ['status' => 'ok', 'modules' => []]);
     }
 
+    // Annual training: track progress per calendar year (identity_key includes year).
+    $now = new DateTimeImmutable('now');
+    $trainingYear = $now->format('Y');
+    $yearStart = (new DateTimeImmutable($now->format('Y-01-01 00:00:00')))->format('Y-m-d H:i:s');
+    $yearEnd = (new DateTimeImmutable(((int)$trainingYear + 1) . '-01-01 00:00:00'))->format('Y-m-d H:i:s');
+
     $modules = [];
     $sql = "
         SELECT id, code, title, description, transcript, audio_url, duration_seconds, sort_order
@@ -65,7 +71,7 @@ try {
     // Attach progress per module
     $progressByModule = [];
     if (!empty($modules) && ($userId || $driverId) && safety_table_exists($conn, 'safety_training_progress')) {
-        $identityKey = $userId ? ('u_' . $userId) : ('d_' . $driverId);
+        $identityKey = ($userId ? ('u_' . $userId) : ('d_' . $driverId)) . '_' . $trainingYear;
         $ids = implode(',', array_fill(0, count($modules), '?'));
         $types = str_repeat('i', count($modules));
         $values = array_map(static fn($m) => $m['id'], $modules);
@@ -73,11 +79,19 @@ try {
             SELECT module_id, position_seconds, completed
             FROM safety_training_progress
             WHERE identity_key = ?
+              AND created_at >= ?
+              AND created_at < ?
+              AND updated_at >= ?
+              AND updated_at < ?
               AND module_id IN ({$ids})
         ");
         if ($stmt) {
-            $bind = [$typesWithIdentity = 's' . $types];
+            $bind = [$typesWithIdentity = 'sssss' . $types];
             $bind[] = &$identityKey;
+            $bind[] = &$yearStart;
+            $bind[] = &$yearEnd;
+            $bind[] = &$yearStart;
+            $bind[] = &$yearEnd;
             foreach ($values as $idx => $val) {
                 $bind[] = &$values[$idx];
             }
@@ -108,7 +122,24 @@ try {
         ]);
     }
 
-    apiRespond(200, ['status' => 'ok', 'modules' => $sorted]);
+    $payload = ['status' => 'ok', 'modules' => $sorted];
+    if (!empty($_GET['debug']) || !empty($_POST['debug'])) {
+        $payload['debug'] = [
+            'trainingYear' => $trainingYear,
+            'identityKeyUsed' => ($userId ? ('u_' . $userId) : ('d_' . $driverId)) . '_' . $trainingYear,
+            'yearStart' => $yearStart,
+            'yearEnd' => $yearEnd,
+            'modulesCount' => count($sorted),
+            'progressRowsMatched' => count($progressByModule),
+            'ctx' => [
+                'userId' => $userId,
+                'driverId' => $driverId,
+                'role' => $ctx['role'] ?? '',
+            ],
+        ];
+    }
+
+    apiRespond(200, $payload);
 } catch (Throwable $e) {
     apiRespond(500, ['status' => 'error', 'error' => $e->getMessage()]);
 }

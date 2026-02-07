@@ -1,0 +1,3 @@
+- Fixed Diesel tab Vehicle Average Calculation math (remaining qty and driver amount) and show Diesel Cost across all plants.
+- Updated Billing Vehicles/Dashboard Misc calculations to distribute plant-level MISC (advance + plant ledger) across vehicles, with sub-plant mapping.
+- Average Calculator Extra stability and UI tweaks (prevent idle refresh clearing inputs, smaller toggle, date picker white background).

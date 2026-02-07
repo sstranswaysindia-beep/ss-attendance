@@ -1,0 +1,3 @@
+- Safety hub header now matches approvals styling with a white page background.
+- Added a bottom-centered safety animation and increased its size.
+- Updated attendance history status chips to match approvals styling.

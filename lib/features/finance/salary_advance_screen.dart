@@ -8,6 +8,7 @@ import '../../core/models/advance_transaction.dart';
 import '../../core/models/advance_request.dart';
 import '../../core/models/app_user.dart';
 import '../../core/models/salary_credit.dart';
+import '../../core/models/salary_distribution_row.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/widgets/app_toast.dart';
@@ -30,6 +31,8 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
 
   bool _isLoading = false;
   String? _errorMessage;
+  SalaryDistributionRow? _salaryDistribution;
+  String? _salaryDistributionMonthKey;
   List<SalaryCredit> _salaryCredits = const [];
   List<AdvanceRequest> _advanceRequests = const [];
   List<AdvanceTransaction> _advanceTransactions = const [];
@@ -49,6 +52,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   // These are the same labels used by backend `transaction_descriptions`.
   static const Set<String> _additionalIncomeCategories = <String>{
     'DA',
+    'TRAINING',
     'MEDICAL',
     'UNIFORM',
     'TRAVEL',
@@ -56,6 +60,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     'ROOM',
     'EXTRA',
     'PAPER',
+    'EMP PAPER',
   };
 
   // Payroll constants (adjust to match billing rules if they change).
@@ -112,7 +117,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     final desc = t.description.trim().toUpperCase();
     if (desc.isEmpty) return null;
     final match = RegExp(
-      r'^(DA|MEDICAL|UNIFORM|TRAVEL|INCENTIVE|ROOM|EXTRA|PAPER)\b',
+      r'^(DA|TRAINING|MEDICAL|UNIFORM|TRAVEL|INCENTIVE|ROOM|EXTRA|PAPER|EMP PAPER)\b',
     ).firstMatch(desc);
     return match?.group(1);
   }
@@ -192,13 +197,63 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _selectedMonth = _monthNames[now.month - 1];
-    _selectedYear = now.year;
+    final effectiveDate = now.day < 15
+        ? DateTime(now.year, now.month - 1, 1)
+        : DateTime(now.year, now.month, 1);
+    _selectedMonth = _monthNames[effectiveDate.month - 1];
+    _selectedYear = effectiveDate.year;
     _availableYears = [now.year, now.year - 1, now.year - 2];
     _resolvedEsiNumber = widget.user.esiNumber;
     _resolvedUanNumber = widget.user.uanNumber;
     _loadFinanceData();
     _loadPfEsiFromDriver();
+  }
+
+  Future<void> _loadSalaryDistribution(String driverId) async {
+    final int? driverIdInt = int.tryParse(driverId);
+    if (driverIdInt == null) return;
+
+    final selectedMonthIndex = _getMonthIndex(_selectedMonth);
+    final monthKey = _monthKey(DateTime(_selectedYear, selectedMonthIndex, 1));
+
+    try {
+      final uri = Uri.parse(
+        'https://sstranswaysindia.com/billing/api/salary_distribution.php',
+      ).replace(
+        queryParameters: <String, String>{
+          'month': monthKey,
+          'employees_all_months': '0',
+        },
+      );
+
+      final response = await http.get(uri);
+      if (response.statusCode != 200) return;
+
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map<String, dynamic>) return;
+      if (decoded['status'] != 'ok') return;
+
+      final rows = decoded['rows'];
+      if (rows is! List) return;
+
+      SalaryDistributionRow? match;
+      for (final item in rows) {
+        if (item is! Map<String, dynamic>) continue;
+        final rowDriverId = int.tryParse(item['driver_id']?.toString() ?? '');
+        if (rowDriverId == driverIdInt) {
+          match = SalaryDistributionRow.fromJson(item);
+          break;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _salaryDistribution = match;
+        _salaryDistributionMonthKey = monthKey;
+      });
+    } catch (_) {
+      // Best-effort: keep existing local calculations if API fails.
+    }
   }
 
   Future<void> _loadPfEsiFromDriver() async {
@@ -405,6 +460,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                   () => _daysWorkedForSelectedMonth = value,
                                 );
                               });
+                              _loadSalaryDistribution(driverId);
                             }
                           },
                         );
@@ -425,6 +481,8 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     if (driverId == null || driverId.isEmpty) {
       setState(() {
         _errorMessage = 'Driver mapping missing. Contact admin.';
+        _salaryDistribution = null;
+        _salaryDistributionMonthKey = null;
         _salaryCredits = const [];
         _advanceRequests = const [];
         _advanceTransactions = const [];
@@ -463,6 +521,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
       });
       _updateAvailableYears();
       final days = await _fetchDaysWorkedForSelectedMonth(driverId);
+      await _loadSalaryDistribution(driverId);
       if (mounted) {
         setState(() => _daysWorkedForSelectedMonth = days);
       }
@@ -510,12 +569,16 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
       DateTime(_selectedYear, selectedMonthIndex, 1),
     );
 
+    final SalaryDistributionRow? salaryDist =
+        _salaryDistributionMonthKey == selectedKey ? _salaryDistribution : null;
+
     // Same as Khata Book "You will get/give" for selected month:
     // balance = (advance_received) - (expense), but exclude "additional income" categories
     // so DA/Medical/Uniform/etc don't reduce salary.
     final additionalIncomeByCategory = <String, double>{};
     double additionalIncomeTotal = 0.0;
-    final advanceBalanceForSelectedMonth = _advanceTransactions.fold<double>(
+    final computedAdvanceBalanceForSelectedMonth =
+        _advanceTransactions.fold<double>(
       0.0,
       (sum, t) {
         final dt = _tryParseDate(t.createdAt);
@@ -535,6 +598,9 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
         return sum;
       },
     );
+
+    final advanceBalanceForSelectedMonth =
+        salaryDist?.advance ?? computedAdvanceBalanceForSelectedMonth;
 
     final salaryCreditsForSelectedMonth = _salaryCredits
         .where((c) {
@@ -672,8 +738,8 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                               monthIndex + 1,
                               0,
                             ).day;
-                            final monthlySalary =
-                                double.tryParse(baseSalary ?? '') ?? 0.0;
+                            final monthlySalary = salaryDist?.baseSalary ??
+                                (double.tryParse(baseSalary ?? '') ?? 0.0);
                             final daysWorked = _daysWorkedForSelectedMonth;
                             final perDay = daysInMonth > 0
                                 ? (monthlySalary / daysInMonth)
@@ -686,20 +752,48 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                             final hasEsi = _hasNonEmptyValue(
                               _resolvedEsiNumber,
                             );
-                            final employeePf = hasPf
-                                ? (grossEarned * _employeePfRate)
-                                : 0.0;
-                            final employeeEsi = hasEsi
-                                ? ((grossEarned <= _esiWageCeiling)
-                                      ? (grossEarned * _employeeEsiRate)
-                                      : 0.0)
-                                : 0.0;
+                            final employeePf = salaryDist?.pfEmployee ??
+                                (hasPf ? (grossEarned * _employeePfRate) : 0.0);
+                            final employeeEsi = salaryDist?.esiEmployee ??
+                                (hasEsi
+                                    ? ((grossEarned <= _esiWageCeiling)
+                                          ? (grossEarned * _employeeEsiRate)
+                                          : 0.0)
+                                    : 0.0);
 
-                            final salaryCreditedCalc =
-                                grossEarned -
-                                advanceBalanceForSelectedMonth -
-                                employeePf -
-                                employeeEsi;
+                            final totalPayable =
+                                salaryDist?.total ??
+                                (grossEarned -
+                                    advanceBalanceForSelectedMonth -
+                                    employeePf -
+                                    employeeEsi);
+
+                            final additionalIncomeItems = salaryDist == null
+                                ? additionalIncomeByCategory.entries
+                                    .where((e) => e.value.abs() > 0.0001)
+                                    .toList(growable: false)
+                                : <MapEntry<String, double>>[
+                                    MapEntry('DA', salaryDist.da),
+                                    MapEntry('Training', salaryDist.training),
+                                    MapEntry(
+                                      'ESI (Employer)',
+                                      salaryDist.esiEmployer,
+                                    ),
+                                    MapEntry(
+                                      'PF (Employer)',
+                                      salaryDist.pfEmployer,
+                                    ),
+                                    MapEntry('Medical', salaryDist.medical),
+                                    MapEntry('Uniform', salaryDist.uniform),
+                                    MapEntry('Travel', salaryDist.travel),
+                                    MapEntry('Room', salaryDist.room),
+                                    MapEntry('Incentive', salaryDist.incentive),
+                                    MapEntry('Extra', salaryDist.extra),
+                                    MapEntry('Paper', salaryDist.paper),
+                                    MapEntry('EMP Paper', salaryDist.empPaper),
+                                  ].where((e) => e.value.abs() > 0.0001).toList(
+                                    growable: false,
+                                  );
 
                             Widget row(
                               String label,
@@ -728,6 +822,27 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                               );
                             }
 
+                            List<Widget> rowIfNonZero(
+                              String label,
+                              double value, {
+                              required String formattedValue,
+                              Color? valueColor,
+                              FontWeight valueWeight = FontWeight.w700,
+                            }) {
+                              if (value.abs() <= 0.0001) {
+                                return const [];
+                              }
+                              return [
+                                const SizedBox(height: 6),
+                                row(
+                                  label,
+                                  formattedValue,
+                                  valueColor: valueColor,
+                                  valueWeight: valueWeight,
+                                ),
+                              ];
+                            }
+
                             return Container(
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
@@ -746,16 +861,85 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                   ),
                                   const SizedBox(height: 6),
                                   row(
-                                    'Days worked (${_selectedMonthLabel()})',
-                                    '$daysWorked',
+                                    salaryDist != null
+                                        ? 'Days worked (paid/total)'
+                                        : 'Days worked (${_selectedMonthLabel()})',
+                                    salaryDist != null
+                                        ? '${salaryDist.totalPaidDays}/${salaryDist.totalDays}'
+                                        : '$daysWorked',
                                   ),
+                                  if (salaryDist != null) ...[
+                                    const SizedBox(height: 6),
+                                    row(
+                                      'Total days',
+                                      '${salaryDist.totalDays}',
+                                    ),
+                                    const SizedBox(height: 6),
+                                    row(
+                                      'Holiday taken',
+                                      '${salaryDist.holidayTaken}',
+                                    ),
+                                  ],
                                   const SizedBox(height: 6),
                                   row(
                                     'Monthly earned (${_selectedMonthLabel()})',
                                     _formatInr(monthlyEarned),
                                   ),
-                                  if (additionalIncomeByCategory
-                                      .isNotEmpty) ...[
+                                  if (salaryDist != null) ...[
+                                    if (salaryDist.pfEmployee.abs() > 0.0001) ...[
+                                      const SizedBox(height: 6),
+                                      row(
+                                        'Employee PF deduction',
+                                        _formatInrSigned(-salaryDist.pfEmployee),
+                                        valueColor: Colors.red.shade700,
+                                        valueWeight: FontWeight.w700,
+                                      ),
+                                    ],
+                                    if (salaryDist.esiEmployee.abs() > 0.0001) ...[
+                                      const SizedBox(height: 6),
+                                      row(
+                                        'Employee ESI deduction',
+                                        _formatInrSigned(-salaryDist.esiEmployee),
+                                        valueColor: Colors.red.shade700,
+                                        valueWeight: FontWeight.w700,
+                                      ),
+                                    ],
+                                    ...rowIfNonZero(
+                                      'Remaining salary',
+                                      salaryDist.remainingSalary,
+                                      formattedValue: _formatInrSigned(
+                                        salaryDist.remainingSalary,
+                                      ),
+                                      valueColor:
+                                          salaryDist.remainingSalary >= 0
+                                          ? Colors.green.shade700
+                                          : Colors.red.shade700,
+                                      valueWeight: FontWeight.w800,
+                                    ),
+                                    ...rowIfNonZero(
+                                      'Loan EMI',
+                                      salaryDist.loanEmi,
+                                      formattedValue: _formatInrSigned(
+                                        -salaryDist.loanEmi,
+                                      ),
+                                      valueColor: salaryDist.loanEmi > 0
+                                          ? Colors.red.shade700
+                                          : Colors.black87,
+                                      valueWeight: FontWeight.w700,
+                                    ),
+                                    ...rowIfNonZero(
+                                      'Loan Adj',
+                                      salaryDist.loanAdj,
+                                      formattedValue: _formatInrSigned(
+                                        -salaryDist.loanAdj,
+                                      ),
+                                      valueColor: salaryDist.loanAdj > 0
+                                          ? Colors.red.shade700
+                                          : Colors.black87,
+                                      valueWeight: FontWeight.w700,
+                                    ),
+                                  ],
+                                  if (additionalIncomeItems.isNotEmpty) ...[
                                     const SizedBox(height: 10),
                                     Align(
                                       alignment: Alignment.centerLeft,
@@ -768,9 +952,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 6),
-                                    ...additionalIncomeByCategory.entries
-                                        .where((e) => e.value.abs() > 0.0001)
-                                        .map((entry) {
+                                    ...additionalIncomeItems.map((entry) {
                                           return Padding(
                                             padding: const EdgeInsets.only(
                                               bottom: 6,
@@ -785,28 +967,35 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                             ),
                                           );
                                         }),
-                                    row(
-                                      'Total additional income',
-                                      _formatInrSigned(additionalIncomeTotal),
-                                      valueColor: additionalIncomeTotal >= 0
-                                          ? Colors.green.shade800
-                                          : Colors.red.shade800,
-                                      valueWeight: FontWeight.w800,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    row(
-                                      'Gross earned (earned + income)',
-                                      _formatInrSigned(grossEarned),
-                                      valueColor: grossEarned >= 0
-                                          ? Colors.green.shade800
-                                          : Colors.red.shade800,
-                                      valueWeight: FontWeight.w800,
-                                    ),
+                                    if (salaryDist == null) ...[
+                                      ...rowIfNonZero(
+                                        'Total additional income',
+                                        additionalIncomeTotal,
+                                        formattedValue: _formatInrSigned(
+                                          additionalIncomeTotal,
+                                        ),
+                                        valueColor: additionalIncomeTotal >= 0
+                                            ? Colors.green.shade800
+                                            : Colors.red.shade800,
+                                        valueWeight: FontWeight.w800,
+                                      ),
+                                      ...rowIfNonZero(
+                                        'Gross earned (earned + income)',
+                                        grossEarned,
+                                        formattedValue: _formatInrSigned(
+                                          grossEarned,
+                                        ),
+                                        valueColor: grossEarned >= 0
+                                            ? Colors.green.shade800
+                                            : Colors.red.shade800,
+                                        valueWeight: FontWeight.w800,
+                                      ),
+                                    ],
                                   ],
-                                  const SizedBox(height: 6),
-                                  row(
+                                  ...rowIfNonZero(
                                     'Advance balance (${_selectedMonthLabel()})',
-                                    _formatInrSigned(
+                                    advanceBalanceForSelectedMonth,
+                                    formattedValue: _formatInrSigned(
                                       advanceBalanceForSelectedMonth,
                                     ),
                                     valueColor:
@@ -814,29 +1003,35 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                                         ? Colors.green.shade700
                                         : Colors.red.shade700,
                                   ),
-                                  if (hasPf) ...[
-                                    const SizedBox(height: 6),
-                                    row(
+                                  if (salaryDist == null && hasPf)
+                                    ...rowIfNonZero(
                                       'Employee PF deduction',
-                                      _formatInrSigned(-employeePf),
+                                      employeePf,
+                                      formattedValue: _formatInrSigned(
+                                        -employeePf,
+                                      ),
                                       valueColor: Colors.red.shade700,
                                       valueWeight: FontWeight.w700,
                                     ),
-                                  ],
-                                  if (hasEsi) ...[
-                                    const SizedBox(height: 6),
-                                    row(
+                                  if (salaryDist == null && hasEsi)
+                                    ...rowIfNonZero(
                                       'Employee ESI deduction',
-                                      _formatInrSigned(-employeeEsi),
+                                      employeeEsi,
+                                      formattedValue: _formatInrSigned(
+                                        -employeeEsi,
+                                      ),
                                       valueColor: Colors.red.shade700,
                                       valueWeight: FontWeight.w700,
                                     ),
-                                  ],
-                                  const SizedBox(height: 6),
-                                  row(
-                                    'Salary credited (net)',
-                                    _formatInrSigned(salaryCreditedCalc),
-                                    valueColor: salaryCreditedCalc >= 0
+                                  ...rowIfNonZero(
+                                    salaryDist != null
+                                        ? 'Total payable (billing)'
+                                        : 'Salary credited (net)',
+                                    totalPayable,
+                                    formattedValue: _formatInrSigned(
+                                      totalPayable,
+                                    ),
+                                    valueColor: totalPayable >= 0
                                         ? Colors.green.shade700
                                         : Colors.red.shade700,
                                     valueWeight: FontWeight.w800,

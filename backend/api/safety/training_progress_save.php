@@ -31,7 +31,8 @@ try {
         apiRespond(400, ['status' => 'error', 'error' => 'Training tables not installed']);
     }
 
-    $identityKey = $userId ? ('u_' . $userId) : ('d_' . $driverId);
+    $trainingYear = (new DateTimeImmutable('now'))->format('Y');
+    $identityKey = ($userId ? ('u_' . $userId) : ('d_' . $driverId)) . '_' . $trainingYear;
 
     // auto-complete if near the end; never downgrade an already completed row
     $position = max(0, $position);
@@ -46,7 +47,7 @@ try {
         $autoComplete = true;
     }
 
-    // upsert
+    // upsert (year-scoped identity_key)
     $sql = "
         INSERT INTO safety_training_progress (user_id, driver_id, identity_key, module_id, position_seconds, completed)
         VALUES (?, ?, ?, ?, ?, ?)

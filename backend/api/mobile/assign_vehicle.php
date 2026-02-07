@@ -21,6 +21,9 @@ if (!$driverId || !$plantId || !$vehicleId) {
     apiRespond(400, ['status' => 'error', 'error' => 'driverId, plantId, and vehicleId are required integers.']);
 }
 
+// Stop updating assignments table entirely (requested).
+$disableAssignmentWrites = true;
+
 $driverStmt = $conn->prepare('SELECT id FROM drivers WHERE id = ? LIMIT 1');
 $driverStmt->bind_param('i', $driverId);
 $driverStmt->execute();
@@ -29,6 +32,20 @@ if (!$driverStmt->get_result()->fetch_assoc()) {
     apiRespond(404, ['status' => 'error', 'error' => 'Driver not found.']);
 }
 $driverStmt->close();
+
+if ($disableAssignmentWrites) {
+    $savedPhotoRelPath = apiSaveUploadedFile('photo', $driverId, 'vehicle_' . $vehicleId);
+    apiRespond(200, [
+        'status' => 'ok',
+        'assignmentId' => null,
+        'driverId' => $driverId,
+        'plantId' => $plantId,
+        'vehicleId' => $vehicleId,
+        'updatedBy' => $updatedBy,
+        'photo' => $savedPhotoRelPath,
+        'assignmentSkipped' => true,
+    ]);
+}
 
 $conn->begin_transaction();
 

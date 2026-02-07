@@ -152,13 +152,24 @@ class TripRepository {
 
       final customers = <String>[...fallbackCustomers];
       for (final item in customersJson) {
-        final name = item is Map<String, dynamic>
-            ? item['name']?.toString()
-            : item?.toString();
-        if (name != null &&
-            name.trim().isNotEmpty &&
-            !customers.contains(name.trim())) {
-          customers.add(name.trim());
+        String? name;
+        String? shortCode;
+        if (item is Map<String, dynamic>) {
+          name = item['name']?.toString();
+          shortCode = item['short_code']?.toString();
+        } else {
+          name = item?.toString();
+        }
+        final trimmedName = name?.trim();
+        if (trimmedName == null || trimmedName.isEmpty) {
+          continue;
+        }
+        final trimmedCode = shortCode?.trim();
+        final display = (trimmedCode != null && trimmedCode.isNotEmpty)
+            ? '${trimmedCode.toUpperCase()} - $trimmedName'
+            : trimmedName;
+        if (!customers.contains(display)) {
+          customers.add(display);
         }
       }
 
@@ -193,9 +204,12 @@ class TripRepository {
     String? plantId,
     String? vehicleId,
   }) async {
+    final monthParam =
+        '${from.year.toString().padLeft(4, '0')}-${from.month.toString().padLeft(2, '0')}';
     final queryParams = <String, String>{
       'from': _formatDate(from),
       'to': _formatDate(to),
+      'month': monthParam,
       'status': status,
       if (plantId != null && plantId.isNotEmpty) 'plantId': plantId,
       if (vehicleId != null && vehicleId.isNotEmpty) 'vehicleId': vehicleId,
@@ -553,7 +567,7 @@ class TripRepository {
     required AppUser user,
     required String plantId,
   }) async {
-    final fallbackVehicles = _buildFallbackVehicles(user);
+    var fallbackVehicles = _buildFallbackVehicles(user);
 
     try {
       // For supervisors, filter vehicles from login response by selected plant (only when plantId > 0).
@@ -584,7 +598,8 @@ class TripRepository {
         );
 
         if (supervisesThisPlant) {
-          // For supervisors, show vehicles ONLY from the selected plant
+          // For supervisors, keep plant vehicles as a fallback, but still
+          // fetch from API to include last-end KM details.
           final plantVehicles = <TripVehicle>[];
           for (final driverVehicle in user.availableVehicles) {
             // Only include vehicles that belong to the selected plant
@@ -606,7 +621,7 @@ class TripRepository {
             'TripRepository: Total vehicles for plant $selectedPlantIdInt: ${plantVehicles.length}',
           );
           if (plantVehicles.isNotEmpty) {
-            return plantVehicles;
+            fallbackVehicles = plantVehicles;
           }
         } else {
           // Supervisor doesn't supervise this plant, return empty list

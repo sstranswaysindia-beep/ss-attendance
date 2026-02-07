@@ -1,0 +1,3 @@
+- Added native Average Calculator screen for supervisors (replaces web view) with new mobile APIs.
+- Updated PF calculations to prorated 1800/month across Attendance Matrix, Billing dashboard, and salary distribution.
+- Refined Average Calculator UI layout (grid totals, entry cards, toggles, and button styling).

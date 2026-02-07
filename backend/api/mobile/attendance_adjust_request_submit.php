@@ -13,25 +13,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require __DIR__ . '/common.php';
 
+function plantAllowsNullVehicle(mysqli $conn, ?int $plantId): bool {
+    static $cache = [];
+    if ($plantId === null) {
+        return false;
+    }
+    if (array_key_exists($plantId, $cache)) {
+        return $cache[$plantId];
+    }
+    $stmt = $conn->prepare('SELECT plant_name FROM plants WHERE id = ? LIMIT 1');
+    if (!$stmt) {
+        $cache[$plantId] = false;
+        return false;
+    }
+    $stmt->bind_param('i', $plantId);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$row) {
+        $cache[$plantId] = false;
+        return false;
+    }
+    $name = strtolower(trim((string)($row['plant_name'] ?? '')));
+    $cache[$plantId] = $name !== '' && str_contains($name, 'office');
+    return $cache[$plantId];
+}
+
+function driverAllowsNullVehicle(?array $driverRow): bool {
+    if (!$driverRow) {
+        return false;
+    }
+    $role = strtolower(trim((string)($driverRow['role'] ?? '')));
+    return $role !== '' && str_contains($role, 'office');
+}
+
 apiEnsurePost();
 
 $data = apiRequireJson();
 
-$driverId       = apiSanitizeInt($data['driverId'] ?? null);
-$requestedById  = apiSanitizeInt($data['requestedById'] ?? null);
-$proposedInRaw  = trim((string)($data['proposedIn'] ?? ''));
-$proposedOutRaw = trim((string)($data['proposedOut'] ?? ''));
-$reason         = trim((string)($data['reason'] ?? ''));
-$plantId        = apiSanitizeInt($data['plantId'] ?? null);
-$vehicleId      = apiSanitizeInt($data['vehicleId'] ?? null);
+    $driverId       = apiSanitizeInt($data['driverId'] ?? null);
+    $requestedById  = apiSanitizeInt($data['requestedById'] ?? null);
+    $proposedInRaw  = trim((string)($data['proposedIn'] ?? ''));
+    $proposedOutRaw = trim((string)($data['proposedOut'] ?? ''));
+    $reason         = trim((string)($data['reason'] ?? ''));
+    $plantId        = apiSanitizeInt($data['plantId'] ?? null);
+    $vehicleId      = apiSanitizeInt($data['vehicleId'] ?? null);
+    $driverRow      = null;
 
-if (!$driverId || !$requestedById) {
-    apiRespond(400, ['status' => 'error', 'error' => 'driverId and requestedById are required']);
-}
+    if (!$driverId || !$requestedById) {
+        apiRespond(400, ['status' => 'error', 'error' => 'driverId and requestedById are required']);
+    }
 
-if ($reason === '') {
-    apiRespond(400, ['status' => 'error', 'error' => 'reason is required']);
-}
+    $requestedByStmt = $conn->prepare('SELECT id FROM users WHERE id = ? LIMIT 1');
+    if ($requestedByStmt) {
+        $requestedByStmt->bind_param('i', $requestedById);
+        $requestedByStmt->execute();
+        $requestedByRow = $requestedByStmt->get_result()->fetch_assoc();
+        $requestedByStmt->close();
+        if (!$requestedByRow) {
+            apiRespond(404, ['status' => 'error', 'error' => 'Requested by user not found']);
+        }
+    }
+
+    if ($reason === '') {
+        apiRespond(400, ['status' => 'error', 'error' => 'reason is required']);
+    }
 
 try {
     $proposedIn = new DateTime($proposedInRaw);
@@ -40,35 +86,91 @@ try {
     apiRespond(400, ['status' => 'error', 'error' => 'Invalid date/time provided']);
 }
 
-if ($proposedOut <= $proposedIn) {
-    apiRespond(400, ['status' => 'error', 'error' => 'Out time must be after in time']);
-}
+    if ($proposedOut <= $proposedIn) {
+        apiRespond(400, ['status' => 'error', 'error' => 'Out time must be after in time']);
+    }
 
-$requestDate = $proposedIn->format('Y-m-d');
+    $requestDate = $proposedIn->format('Y-m-d');
+
+    if ($vehicleId !== null && $vehicleId <= 0) {
+        $vehicleId = null;
+    }
+
+    $driverRowStmt = $conn->prepare('SELECT plant_id, role FROM drivers WHERE id = ? LIMIT 1');
+    $driverRowStmt->bind_param('i', $driverId);
+    $driverRowStmt->execute();
+    $driverRow = $driverRowStmt->get_result()->fetch_assoc();
+    $driverRowStmt->close();
 
 try {
+    $now = new DateTime('now');
+    $currentMonthStart = new DateTime($now->format('Y-m-01'));
+    $cutoffPassed = ((int) $now->format('j')) > 3;
+    if ($cutoffPassed && $proposedIn < $currentMonthStart) {
+        $advanceAllowed = false;
+        $flagStmt = $conn->prepare('SELECT advance_entry FROM users WHERE id = ? LIMIT 1');
+        if ($flagStmt) {
+            $flagStmt->bind_param('i', $requestedById);
+            $flagStmt->execute();
+            $flagRow = $flagStmt->get_result()->fetch_assoc();
+            $flagStmt->close();
+            $advanceAllowed = strtoupper((string)($flagRow['advance_entry'] ?? 'N')) === 'Y';
+        }
+        if ($advanceAllowed) {
+            $previousMonthStart = (clone $currentMonthStart)->modify('-1 month');
+            if ($proposedIn < $previousMonthStart) {
+                apiRespond(403, [
+                    'status' => 'error',
+                    'error' => 'backdate_locked',
+                    'message' => 'Past attendance requests are limited to current and last month.',
+                ]);
+            }
+        } else {
+            apiRespond(403, [
+                'status' => 'error',
+                'error' => 'backdate_locked',
+                'message' => 'Past attendance requests for previous months are closed after the 3rd.',
+            ]);
+        }
+    }
+
     // Resolve fallback plant/vehicle
     $assignmentId = null;
 
-    if (!$plantId || !$vehicleId) {
-        $driverStmt = $conn->prepare('SELECT plant_id FROM drivers WHERE id = ? LIMIT 1');
-        $driverStmt->bind_param('i', $driverId);
-        $driverStmt->execute();
-        $driverRow = $driverStmt->get_result()->fetch_assoc();
-        $driverStmt->close();
+    if (!$plantId && $driverRow && !empty($driverRow['plant_id'])) {
+        $plantId = (int) $driverRow['plant_id'];
+    }
 
-        if (!$plantId && $driverRow && !empty($driverRow['plant_id'])) {
-            $plantId = (int) $driverRow['plant_id'];
+    $isOfficeDriver = driverAllowsNullVehicle($driverRow);
+    $plantAllowsMissingVehicle = $plantId !== null && plantAllowsNullVehicle($conn, $plantId);
+    $allowMissingVehicle = $plantAllowsMissingVehicle || $isOfficeDriver;
+
+    if (!$plantId) {
+        apiRespond(400, ['status' => 'error', 'error' => 'Plant mapping missing for driver, please contact admin']);
+    }
+
+    if (!$allowMissingVehicle) {
+        if (!$vehicleId) {
+            $assignmentStmt = $conn->prepare(
+                'SELECT id, plant_id, vehicle_id
+                   FROM assignments
+                  WHERE driver_id = ?
+               ORDER BY assigned_date DESC
+                  LIMIT 1'
+            );
+            $assignmentStmt->bind_param('i', $driverId);
+        } else {
+            $assignmentStmt = $conn->prepare(
+                'SELECT id, plant_id, vehicle_id
+                   FROM assignments
+                  WHERE driver_id = ?
+                    AND vehicle_id = ?
+               ORDER BY assigned_date DESC
+                  LIMIT 1'
+            );
+            $assignmentStmt->bind_param('ii', $driverId, $vehicleId);
         }
 
-        $assignmentStmt = $conn->prepare(
-            'SELECT id, plant_id, vehicle_id
-               FROM assignments
-              WHERE driver_id = ?
-           ORDER BY assigned_date DESC
-              LIMIT 1'
-        );
-        $assignmentStmt->bind_param('i', $driverId);
         $assignmentStmt->execute();
         $assignmentRow = $assignmentStmt->get_result()->fetch_assoc();
         $assignmentStmt->close();
@@ -81,24 +183,9 @@ try {
         }
 
         $assignmentId = $assignmentRow['id'] ?? null;
-    } else {
-        $assignmentStmt = $conn->prepare(
-            'SELECT id
-               FROM assignments
-              WHERE driver_id = ?
-                AND vehicle_id = ?
-           ORDER BY assigned_date DESC
-              LIMIT 1'
-        );
-        $assignmentStmt->bind_param('ii', $driverId, $vehicleId);
-        $assignmentStmt->execute();
-        $assignmentRow = $assignmentStmt->get_result()->fetch_assoc();
-        $assignmentStmt->close();
-        $assignmentId = $assignmentRow['id'] ?? null;
-    }
-
-    if (!$plantId || !$vehicleId) {
-        apiRespond(400, ['status' => 'error', 'error' => 'Plant or vehicle mapping missing for driver']);
+        if (!$vehicleId) {
+            apiRespond(400, ['status' => 'error', 'error' => 'Vehicle mapping missing for driver, please contact admin']);
+        }
     }
 
     // Avoid duplicate attendance records for the same day
@@ -140,6 +227,7 @@ try {
     $conn->begin_transaction();
 
     $notes = mb_substr($reason, 0, 240, 'UTF-8');
+    $vehicleIdForInsert = $vehicleId ?? 0;
 
     $attendanceStmt = $conn->prepare(
         'INSERT INTO attendance (
@@ -152,7 +240,7 @@ try {
              source,
              approval_status,
              notes
-         ) VALUES (?, ?, ?, NULLIF(?, 0), ?, ?, "adjust_request", "Pending", ?)' // phpcs:ignore
+         ) VALUES (?, ?, NULLIF(?, 0), NULLIF(?, 0), ?, ?, "adjust_request", "Pending", ?)' // phpcs:ignore
     );
     $assignmentIdParam = $assignmentId ? (int) $assignmentId : 0;
     $inTimeStr = $proposedIn->format('Y-m-d H:i:s');
@@ -161,7 +249,7 @@ try {
         'iiiisss',
         $driverId,
         $plantId,
-        $vehicleId,
+        $vehicleIdForInsert,
         $assignmentIdParam,
         $inTimeStr,
         $outTimeStr,
@@ -211,7 +299,7 @@ try {
         'adjustRequestId' => $adjustRequestId,
     ]);
 } catch (Throwable $error) {
-    if ($conn->in_transaction) {
+    if (property_exists($conn, 'in_transaction') && $conn->in_transaction) {
         $conn->rollback();
     }
     apiRespond(500, ['status' => 'error', 'error' => $error->getMessage()]);

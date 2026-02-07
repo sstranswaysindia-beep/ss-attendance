@@ -2,12 +2,12 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/safety_models.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/services/notification_service.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/app_loader.dart';
 import 'spot_audit_wizard_screen.dart';
@@ -112,64 +112,88 @@ class _SafetyHubScreenState extends State<SafetyHubScreen> {
 
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(textScaleFactor: clampedTextScale),
-      child: AppGradientBackground(
-        child: Scaffold(
-          backgroundColor: Colors.transparent,
-          appBar: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            title: Text(
-              'Safety',
-              style: GoogleFonts.josefinSans(
-                textStyle: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF00296B),
+          foregroundColor: Colors.white,
+          title: Text(
+            'Safety',
+            style: GoogleFonts.josefinSans(
+              textStyle: theme.textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
               ),
             ),
           ),
-          body: FutureBuilder<List<SafetyModule>>(
-            future: _modulesFuture,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: AppLoader());
-              }
-              if (snapshot.hasError) {
-                return _SafetyError(
-                  message:
-                      snapshot.error?.toString() ?? 'Unable to load modules',
-                  onRetry: () {
-                    setState(() {
-                      _modulesFuture = _repository.fetchModules();
-                    });
-                  },
-                );
-              }
-              final modules = snapshot.data ?? const <SafetyModule>[];
-              final visibleModules = _visibleModulesForUser(modules);
-              if (visibleModules.isEmpty) {
-                return const _SafetyEmptyState();
-              }
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: GridView.builder(
-                  itemCount: visibleModules.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 1.05,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
+        ),
+        body: Stack(
+          children: [
+            FutureBuilder<List<SafetyModule>>(
+              future: _modulesFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: AppLoader());
+                }
+                if (snapshot.hasError) {
+                  return _SafetyError(
+                    message:
+                        snapshot.error?.toString() ?? 'Unable to load modules',
+                    onRetry: () {
+                      setState(() {
+                        _modulesFuture = _repository.fetchModules();
+                      });
+                    },
+                  );
+                }
+                final modules = snapshot.data ?? const <SafetyModule>[];
+                final visibleModules = _visibleModulesForUser(modules);
+                if (visibleModules.isEmpty) {
+                  return const _SafetyEmptyState();
+                }
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 240),
+                  child: GridView.builder(
+                    itemCount: visibleModules.length,
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      childAspectRatio: 1.05,
+                      crossAxisSpacing: 16,
+                      mainAxisSpacing: 16,
+                    ),
+                    itemBuilder: (context, index) {
+                      final module = visibleModules[index];
+                      return _SafetyModuleCard(
+                        module: module,
+                        onTap: () => _openModule(module),
+                      );
+                    },
                   ),
-                  itemBuilder: (context, index) {
-                    final module = visibleModules[index];
-                    return _SafetyModuleCard(
-                      module: module,
-                      onTap: () => _openModule(module),
-                    );
-                  },
+                );
+              },
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 12,
+              child: IgnorePointer(
+                child: Center(
+                  child: Lottie.asset(
+                    'downloads/safety.json',
+                    width: 360,
+                    height: 360,
+                    fit: BoxFit.contain,
+                    repeat: true,
+                    animate: true,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox.shrink();
+                    },
+                  ),
                 ),
-              );
-            },
-          ),
+              ),
+            ),
+          ],
         ),
       ),
     );

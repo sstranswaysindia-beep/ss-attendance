@@ -126,6 +126,9 @@ class AuthRepository {
       final bool trainingRequired = _parseFlag(
         userJson['training_req'] ?? userJson['trainingRequired'],
       );
+      final bool advanceEntryAllowed = _parseFlag(
+        userJson['advance_entry'] ?? userJson['advanceEntry'],
+      );
 
       Map<String, dynamic>? driverJson =
           payload['driver'] as Map<String, dynamic>?;
@@ -152,6 +155,7 @@ class AuthRepository {
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
+          advanceEntryAllowed: advanceEntryAllowed,
         );
       }
 
@@ -219,6 +223,7 @@ class AuthRepository {
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
+          advanceEntryAllowed: advanceEntryAllowed,
         );
       }
 
@@ -289,6 +294,44 @@ class AuthRepository {
           ? userJson['full_name']?.toString() ?? username
           : (driverJson['name']?.toString() ?? username);
 
+      String? pickString(Map<String, dynamic> source, List<String> keys) {
+        for (final key in keys) {
+          final value = source[key];
+          if (value == null) continue;
+          final trimmed = value.toString().trim();
+          if (trimmed.isNotEmpty) {
+            return trimmed;
+          }
+        }
+        return null;
+      }
+
+      final contactNumber = pickString(
+        driverJson,
+        const ['contact', 'contact_number', 'phone'],
+      );
+      final dlNumber = pickString(driverJson, const ['dlNumber', 'dl_number']);
+      final dlValidity = pickString(
+        driverJson,
+        const ['dlValidity', 'dl_validity', 'license_expiry_date'],
+      );
+      final dlIssueDate = pickString(
+        driverJson,
+        const ['dlIssueDate', 'dl_issue_date'],
+      );
+      final nomineeName = pickString(
+        driverJson,
+        const ['nomineeName', 'nominee_name'],
+      );
+      final nomineeRelation = pickString(
+        driverJson,
+        const ['nomineeRelation', 'relation_nominee'],
+      );
+      final nomineeContact = pickString(
+        driverJson,
+        const ['nomineeContact', 'nominee_contact'],
+      );
+
       return AppUser(
         id: userJson['id']?.toString() ?? username,
         displayName: displayName,
@@ -307,6 +350,7 @@ class AuthRepository {
         salary: driverJson['salary']?.toString(),
         profilePhoto: driverJson['profilePhoto']?.toString(),
         aadhaar: driverJson['aadhaar']?.toString(),
+        contactNumber: contactNumber,
         esiNumber: driverJson['esiNumber']?.toString(),
         uanNumber: driverJson['uanNumber']?.toString(),
         ifscCode: driverJson['ifsc']?.toString(),
@@ -315,6 +359,12 @@ class AuthRepository {
         branchName: driverJson['branchName']?.toString(),
         fatherName: driverJson['fatherName']?.toString(),
         address: driverJson['address']?.toString(),
+        dlNumber: dlNumber,
+        dlValidity: dlValidity,
+        dlIssueDate: dlIssueDate,
+        nomineeName: nomineeName,
+        nomineeRelation: nomineeRelation,
+        nomineeContact: nomineeContact,
         vehicleNumber: vehicleNumber,
         driverRole: driverJson['role']?.toString(),
         availableVehicles: vehicles,
@@ -329,6 +379,7 @@ class AuthRepository {
         geofencingEnabled: geofencingEnabled,
         proxyEnabled: proxyEnabled,
         trainingRequired: trainingRequired,
+        advanceEntryAllowed: advanceEntryAllowed,
       );
     } on AuthFailure {
       rethrow;

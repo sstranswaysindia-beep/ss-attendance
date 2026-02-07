@@ -106,7 +106,7 @@ if ($username === '' || $password === '') {
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
-$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable, proxy_enabled, training_req FROM users WHERE username = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable, proxy_enabled, training_req, advance_entry FROM users WHERE username = ? LIMIT 1');
 $stmt->bind_param('s', $username);
 $stmt->execute();
 $userRow = $stmt->get_result()->fetch_assoc();
@@ -398,6 +398,7 @@ if (!empty($userRow['driver_id'])) {
             'pincode'        => $driver['pincode_permanent'],
             'nomineeName'    => $driver['nominee_name'],
             'nomineeRelation'=> $driver['relation_nominee'],
+            'nomineeContact' => $driver['nominee_contact'],
             'ifsc'           => $driver['ifsc_code'],
             'ifscVerified'   => (bool)$driver['ifsc_code_verified'],
             'bankAccount'    => $driver['bank_account_number'],
@@ -483,6 +484,7 @@ apiRespond(200, [
         'geofencing_enable' => $userRow['geofencing_enable'] ?? null,
         'proxy_enabled' => $userRow['proxy_enabled'] ?? null,
         'training_req' => $userRow['training_req'] ?? null,
+        'advance_entry' => $userRow['advance_entry'] ?? null,
     ],
     'driver' => $driverInfo,
     'supervisor' => $supervisorInfo,

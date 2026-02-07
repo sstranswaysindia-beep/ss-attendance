@@ -7,6 +7,7 @@ import 'package:image/image.dart' as img;
 
 import '../models/admin_attendance_overview.dart';
 import '../models/attendance_record.dart';
+import '../models/attendance_salary_details.dart';
 import '../models/daily_attendance_summary.dart';
 import '../models/driver_absence_status.dart';
 import '../models/monthly_stat.dart';
@@ -59,6 +60,7 @@ class AttendanceRepository {
     Uri? adminTodayEndpoint,
     Uri? supervisorAbsentEndpoint,
     Uri? driverAbsentStatusEndpoint,
+    Uri? salaryDetailsEndpoint,
   }) : _client = client ?? http.Client(),
        _submitEndpoint = submitEndpoint ?? Uri.parse(_defaultSubmitEndpoint),
        _historyEndpoint = historyEndpoint ?? Uri.parse(_defaultHistoryEndpoint),
@@ -75,7 +77,9 @@ class AttendanceRepository {
        _supervisorAbsentEndpoint = supervisorAbsentEndpoint ??
            Uri.parse(_defaultSupervisorAbsentEndpoint),
        _driverAbsentStatusEndpoint = driverAbsentStatusEndpoint ??
-           Uri.parse(_defaultDriverAbsentStatusEndpoint);
+           Uri.parse(_defaultDriverAbsentStatusEndpoint),
+       _salaryDetailsEndpoint = salaryDetailsEndpoint ??
+           Uri.parse(_defaultSalaryDetailsEndpoint);
 
   static const String _defaultSubmitEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_submit.php';
@@ -97,6 +101,10 @@ class AttendanceRepository {
       'https://sstranswaysindia.com/api/mobile/attendance_supervisor_absent_toggle.php';
   static const String _defaultDriverAbsentStatusEndpoint =
       'https://sstranswaysindia.com/api/mobile/attendance_driver_absence_status.php';
+  static const String _defaultSalaryDetailsEndpoint =
+      'https://sstranswaysindia.com/api/mobile/attendance_salary_details.php';
+  static const String _defaultAdvanceEntryEndpoint =
+      'https://sstranswaysindia.com/api/mobile/user_advance_entry.php';
 
 
   final http.Client _client;
@@ -110,11 +118,13 @@ class AttendanceRepository {
   final Uri _adminTodayEndpoint;
   final Uri _supervisorAbsentEndpoint;
   final Uri _driverAbsentStatusEndpoint;
+  final Uri _advanceEntryEndpoint = Uri.parse(_defaultAdvanceEntryEndpoint);
+  final Uri _salaryDetailsEndpoint;
 
   Future<AttendanceSubmissionResult> submit({
     required String driverId,
     required String plantId,
-    required String vehicleId,
+    String? vehicleId,
     String? assignmentId,
     AttendanceAction action = AttendanceAction.checkIn,
     File? photoFile,
@@ -126,11 +136,13 @@ class AttendanceRepository {
     request.fields.addAll(<String, String>{
       'driverId': driverId,
       'plantId': plantId,
-      'vehicleId': vehicleId,
       'action': action == AttendanceAction.checkIn ? 'check_in' : 'check_out',
       'source': 'mobile',
       'timestamp': (timestamp ?? DateTime.now()).toIso8601String(),
     });
+    if (vehicleId != null && vehicleId.isNotEmpty) {
+      request.fields['vehicleId'] = vehicleId;
+    }
 
     if (assignmentId != null && assignmentId.isNotEmpty) {
       request.fields['assignmentId'] = assignmentId;
@@ -302,6 +314,39 @@ class AttendanceRepository {
         payload['error']?.toString() ?? 'Unable to submit request.',
       );
     }
+  }
+
+  Future<AttendanceSalaryDetails> fetchSalaryDetails({
+    required String driverId,
+    required DateTime month,
+  }) async {
+    final formattedMonth =
+        '${month.year.toString().padLeft(4, '0')}-${month.month.toString().padLeft(2, '0')}';
+    final response = await _client.post(
+      _salaryDetailsEndpoint,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(<String, dynamic>{
+        'driverId': driverId,
+        'month': formattedMonth,
+      }),
+    );
+
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      throw AttendanceFailure(
+        'Invalid response from server (status: ${response.statusCode}).',
+      );
+    }
+
+    if (response.statusCode != 200 || payload['status'] != 'ok') {
+      throw AttendanceFailure(
+        payload['error']?.toString() ?? 'Unable to load salary details.',
+      );
+    }
+
+    return AttendanceSalaryDetails.fromJson(payload);
   }
 
   Future<List<MonthlyStat>> fetchMonthlyStats({
@@ -549,6 +594,9 @@ class AttendanceRepository {
         () => _DailyAccumulator(date: inDateTime),
       );
       bucket.addInTime(inDateTime);
+      if (_isApprovalPending(record.status)) {
+        bucket.markApprovalPending();
+      }
 
       final outTimeRaw = record.outTime;
       if (outTimeRaw != null && outTimeRaw.isNotEmpty) {
@@ -576,9 +624,45 @@ class AttendanceRepository {
             outTimes: bucket.outTimes,
             totalMinutes: bucket.totalMinutes,
             hasOpenShift: bucket.hasOpenShift,
+            hasApprovalPending: bucket.hasApprovalPending,
           ),
         )
         .toList(growable: false);
+  }
+
+  Future<bool?> fetchAdvanceEntryAllowed({required String userId}) async {
+    if (userId.isEmpty) return null;
+    final uri = _advanceEntryEndpoint.replace(queryParameters: {
+      'userId': userId,
+    });
+    final response = await _client.get(uri);
+    final statusCode = response.statusCode;
+    Map<String, dynamic> payload;
+    try {
+      payload = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+    if (statusCode != 200 || payload['status'] != 'ok') {
+      return null;
+    }
+    final raw = payload['advance_entry'] ?? payload['advanceEntry'];
+    if (raw == null) return null;
+    final normalized = raw.toString().trim().toLowerCase();
+    return normalized == 'y' ||
+        normalized == 'yes' ||
+        normalized == '1' ||
+        normalized == 'true';
+  }
+
+  bool _isApprovalPending(String? status) {
+    if (status == null) return false;
+    final normalized = status.toLowerCase().trim();
+    if (normalized.isEmpty) return false;
+    if (normalized.contains('approved')) return false;
+    return normalized.contains('pending') ||
+        normalized.contains('approval') ||
+        normalized.contains('awaiting');
   }
 
   /// Compress photo for upload with proper quality and size
@@ -586,6 +670,11 @@ class AttendanceRepository {
     try {
       final file = File(imagePath);
       if (!await file.exists()) return null;
+
+      final fileSize = await file.length();
+      if (fileSize <= 350 * 1024) {
+        return await file.readAsBytes();
+      }
 
       final bytes = await file.readAsBytes();
       final image = img.decodeImage(bytes);
@@ -599,8 +688,8 @@ class AttendanceRepository {
         maintainAspect: true,
       );
 
-      // Compress as JPEG with 85% quality for optimal file size
-      final compressedBytes = img.encodeJpg(resizedImage, quality: 85);
+      // Compress as JPEG with 80% quality for smaller upload size
+      final compressedBytes = img.encodeJpg(resizedImage, quality: 80);
       return Uint8List.fromList(compressedBytes);
     } catch (e) {
       print('Error compressing photo for upload: $e');
@@ -617,6 +706,7 @@ class _DailyAccumulator {
   final List<String> outTimes = <String>[];
   Duration _total = Duration.zero;
   bool hasOpenShift = false;
+  bool hasApprovalPending = false;
 
   void addInTime(DateTime inTime) {
     inTimes.add(_formatTime(inTime));
@@ -632,6 +722,10 @@ class _DailyAccumulator {
 
   void markOpenShift() {
     hasOpenShift = true;
+  }
+
+  void markApprovalPending() {
+    hasApprovalPending = true;
   }
 
   int get totalMinutes => _total.inMinutes;

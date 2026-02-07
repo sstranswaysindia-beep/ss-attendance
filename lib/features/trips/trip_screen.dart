@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
 import '../../core/models/trip_driver.dart';
@@ -18,6 +19,8 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/glowing_badge.dart';
 import '../../core/services/notification_service.dart';
+
+const Color _adminPrimaryColor = Color(0xFF00296B);
 
 class TripScreen extends StatefulWidget {
   const TripScreen({required this.user, super.key});
@@ -69,6 +72,8 @@ class _TripScreenState extends State<TripScreen> {
   final TextEditingController _gatePassController = TextEditingController();
   final TextEditingController _cylInController = TextEditingController();
   final TextEditingController _cylOutController = TextEditingController();
+  bool _preservePeopleOnNextReload = false;
+  bool _preserveStartDateOnNextReload = false;
   DateTime _selectedStartDate = DateTime.now();
 
   // Ongoing trip variables
@@ -107,6 +112,8 @@ class _TripScreenState extends State<TripScreen> {
     _startDateController = TextEditingController(
       text: _formatDate(_selectedStartDate),
     );
+    _from = DateTime(_selectedStartDate.year, _selectedStartDate.month, 1);
+    _to = DateTime(_selectedStartDate.year, _selectedStartDate.month + 1, 0);
     _startKmController.addListener(_handleStartKmChanged);
 
     // Debug user assignment data
@@ -160,10 +167,16 @@ class _TripScreenState extends State<TripScreen> {
       _error = null;
     });
 
+    final selectedMonth = _selectedStartDate;
+    final rangeFrom = DateTime(selectedMonth.year, selectedMonth.month, 1);
+    final rangeTo = DateTime(selectedMonth.year, selectedMonth.month + 1, 0);
+    _from = rangeFrom;
+    _to = rangeTo;
+
     try {
       final response = await _repository.fetchOverview(
-        from: _from,
-        to: _to,
+        from: rangeFrom,
+        to: rangeTo,
         status: _status,
         plantId: _selectedPlantId,
         vehicleId: _selectedVehicle?.id.toString(),
@@ -305,69 +318,33 @@ class _TripScreenState extends State<TripScreen> {
     TripVehicle? vehicle, {
     int limit = 12,
   }) {
-    final seen = <String>{};
     final results = <String>[];
-
-    void addName(String? raw) {
-      if (raw == null) {
-        return;
-      }
-      final name = raw.trim();
-      if (name.isEmpty) {
-        return;
-      }
-      final key = name.toLowerCase();
-      if (seen.add(key)) {
-        results.add(name);
-      }
-    }
-
-    if (vehicle != null && _overview != null) {
-      final prioritized = <String>[];
-      final prioritizedSeen = <String>{};
-
-      for (final trip in _overview!.trips) {
-        if (trip.vehicleNumber != vehicle.number) {
-          continue;
-        }
-        final raw = trip.customers ?? '';
-        if (raw.isEmpty) {
-          continue;
-        }
-        for (final part in raw.split(',')) {
-          final name = part.trim();
-          if (name.isEmpty) {
-            continue;
-          }
-          final key = name.toLowerCase();
-          if (prioritizedSeen.add(key)) {
-            prioritized.add(name);
-          }
-        }
-        if (prioritized.length >= 7) {
-          break;
-        }
-      }
-
-      for (final name in prioritized) {
-        addName(name);
-      }
-    }
-
-    if (vehicle != null) {
-      for (final name in vehicle.recentCustomers) {
-        addName(name);
-      }
-    }
-
+    final seen = <String>{};
     for (final name in _globalCustomerSuggestions) {
-      addName(name);
-    }
-
-    if (results.length > limit) {
-      return results.sublist(0, limit);
+      final trimmed = name.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final key = trimmed.toLowerCase();
+      if (seen.add(key)) {
+        results.add(trimmed);
+      }
     }
     return results;
+  }
+
+  ({String code, String name}) _parseCustomerSuggestion(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return (code: '', name: '');
+    }
+    if (trimmed.contains(' - ')) {
+      final parts = trimmed.split(' - ');
+      final code = parts.first.trim();
+      final name = parts.length > 1 ? parts.sublist(1).join(' - ').trim() : '';
+      return (code: code, name: name.isNotEmpty ? name : trimmed);
+    }
+    return (code: '', name: trimmed);
   }
 
   List<String> _mergeRecentCustomerNames(
@@ -526,21 +503,37 @@ class _TripScreenState extends State<TripScreen> {
       _loadOngoingTripDataIntoForm(ongoingTrip);
     } else {
       // No ongoing trip - clear form and set suggested KM
-      _clearFormForNewTrip();
+      final preservePeople = _preservePeopleOnNextReload;
+      final preserveStartDate = _preserveStartDateOnNextReload;
+      _preservePeopleOnNextReload = false;
+      _preserveStartDateOnNextReload = false;
+      _clearFormForNewTrip(
+        preservePeople: preservePeople,
+        preserveStartDate: preserveStartDate,
+      );
       _setSuggestedStartKm(vehicle);
     }
   }
 
-  void _clearFormForNewTrip() {
+  void _clearFormForNewTrip({
+    bool preservePeople = false,
+    bool preserveStartDate = false,
+  }) {
     // Clear all form fields
     _startKmController.clear();
+    if (!preserveStartDate) {
+      _resetStartDateToToday();
+    }
     _noteController.clear();
     _customerController.clear();
     _customerNames = const <String>[];
-    _selectedHelpers = const <TripHelper>[];
-    _selectedDrivers = const <TripDriver>[];
+    if (!preservePeople) {
+      _selectedHelpers = const <TripHelper>[];
+      _selectedDrivers = const <TripDriver>[];
+    }
+  }
 
-    // Reset start date to today
+  void _resetStartDateToToday() {
     _selectedStartDate = DateTime.now();
     _startDateController.text = _formatDate(_selectedStartDate);
   }
@@ -814,6 +807,22 @@ class _TripScreenState extends State<TripScreen> {
                           const Duration(days: _maxBackDateDays),
                         ),
                         lastDate: DateTime.now().add(const Duration(days: 1)),
+                        builder: (context, child) {
+                          if (child == null) {
+                            return const SizedBox.shrink();
+                          }
+                          return Theme(
+                            data: Theme.of(context).copyWith(
+                              colorScheme: Theme.of(context)
+                                  .colorScheme
+                                  .copyWith(
+                                    surface: Colors.white,
+                                  ),
+                              dialogBackgroundColor: Colors.white,
+                            ),
+                            child: child,
+                          );
+                        },
                       );
                       if (date != null) {
                         endDateController.text = date.toIso8601String().split(
@@ -1017,6 +1026,24 @@ class _TripScreenState extends State<TripScreen> {
       // Reset start date to today
       _selectedStartDate = DateTime.now();
       _startDateController.text = _formatDate(_selectedStartDate);
+
+      // Update start KM to latest ended KM
+      final endKmText = endKm.toString();
+      _lastSuggestedStartKm = endKm;
+      _startKmController
+        ..text = endKmText
+        ..selection = TextSelection.collapsed(offset: endKmText.length);
+      if (_selectedVehicle != null) {
+        final updatedVehicle = _selectedVehicle!.copyWith(
+          lastEndKm: endKm,
+          lastEndDate: endDate,
+        );
+        _selectedVehicle = updatedVehicle;
+        _vehicles = _vehicles
+            .map((vehicle) =>
+                vehicle.id == updatedVehicle.id ? updatedVehicle : vehicle)
+            .toList(growable: false);
+      }
 
       // Refresh the data
       await _loadTrips();
@@ -1403,10 +1430,6 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _handleDriverRemoved(TripDriver driver) {
-    final currentDriverId = int.tryParse(widget.user.driverId ?? '');
-    if (currentDriverId != null && currentDriverId == driver.id) {
-      return;
-    }
     setState(() {
       _selectedDrivers = _selectedDrivers
           .where((selected) => selected.id != driver.id)
@@ -1468,8 +1491,29 @@ class _TripScreenState extends State<TripScreen> {
   }
 
   void _handleCustomerSubmitted() {
-    final value = _customerController.text;
-    _handleCustomerAdded(value);
+    final value = _customerController.text.trim();
+    if (value.isEmpty) {
+      return;
+    }
+    String? matchedName;
+    final query = value.toLowerCase();
+    for (final suggestion in _customerSuggestions) {
+      final parsed = _parseCustomerSuggestion(suggestion);
+      if (parsed.name.toLowerCase() == query ||
+          (parsed.code.isNotEmpty && parsed.code.toLowerCase() == query)) {
+        matchedName = parsed.name;
+        break;
+      }
+    }
+    if (matchedName == null) {
+      showAppToast(
+        context,
+        'Select customer from suggestions only.',
+        isError: true,
+      );
+      return;
+    }
+    _handleCustomerAdded(matchedName);
     _customerController.clear();
   }
 
@@ -1481,6 +1525,19 @@ class _TripScreenState extends State<TripScreen> {
         const Duration(days: _maxBackDateDays),
       ),
       lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (context, child) {
+        if (child == null) {
+          return const SizedBox.shrink();
+        }
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme:
+                Theme.of(context).colorScheme.copyWith(surface: Colors.white),
+            dialogBackgroundColor: Colors.white,
+          ),
+          child: child,
+        );
+      },
     );
     if (picked == null) {
       return;
@@ -1488,7 +1545,12 @@ class _TripScreenState extends State<TripScreen> {
     setState(() {
       _selectedStartDate = picked;
       _startDateController.text = _formatDate(picked);
+      _from = DateTime(picked.year, picked.month, 1);
+      _to = DateTime(picked.year, picked.month + 1, 0);
     });
+    _preservePeopleOnNextReload = true;
+    _preserveStartDateOnNextReload = true;
+    await _loadTrips();
   }
 
   Future<void> _handleCreateTrip() async {
@@ -1614,6 +1676,7 @@ class _TripScreenState extends State<TripScreen> {
         _lastSuggestedStartKm = null;
       });
 
+      _resetStartDateToToday();
       _ensureDefaultDriverSelected();
       await _loadTrips();
       if (_selectedPlantId != null) {
@@ -1666,8 +1729,19 @@ class _TripScreenState extends State<TripScreen> {
       focusNode: FocusNode(),
       onKeyEvent: _handleKeyEvent,
       child: Scaffold(
-        appBar: AppBar(title: const Text('Trips')),
-        body: AppGradientBackground(
+        appBar: AppBar(
+          backgroundColor: _adminPrimaryColor,
+          foregroundColor: Colors.white,
+          title: const Text(
+            'Trips',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+        ),
+        body: Container(
+          color: Colors.white,
           child: RefreshIndicator(
             onRefresh: () async {
               await Future.wait([_loadTrips(), _loadPlants(), _loadMeta()]);
@@ -1924,7 +1998,7 @@ class _SummarySection extends StatelessWidget {
           child: _SummaryCard(
             icon: Icons.alt_route,
             label: 'Total KM',
-            value: summary.totalRunKm.toStringAsFixed(1),
+            value: summary.totalRunKm.round().toString(),
             color: Colors.blueGrey.shade600,
           ),
         ),
@@ -2139,7 +2213,7 @@ class _TripTile extends StatelessWidget {
     final backgroundColor = isOngoing
         ? Colors.yellow.shade50
         : isEnded
-        ? const Color(0xFFC1E1C1) // Light green for ended trips
+        ? const Color(0xFFCEF9B4) // Light green for ended trips
         : null;
 
     return Card(
@@ -2174,7 +2248,9 @@ class _TripTile extends StatelessWidget {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        color: statusColor.withOpacity(0.12),
+                        color: isEnded
+                            ? Colors.green.shade600
+                            : statusColor.withOpacity(0.12),
                         borderRadius: BorderRadius.circular(12),
                         boxShadow: (isOngoing || isEnded)
                             ? [
@@ -2196,7 +2272,7 @@ class _TripTile extends StatelessWidget {
                               child: Text(
                                 trip.status.toUpperCase(),
                                 style: theme.textTheme.labelMedium?.copyWith(
-                                  color: statusColor,
+                                  color: isEnded ? Colors.white : statusColor,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -2204,7 +2280,7 @@ class _TripTile extends StatelessWidget {
                           : Text(
                               trip.status.toUpperCase(),
                               style: theme.textTheme.labelMedium?.copyWith(
-                                color: statusColor,
+                                color: isEnded ? Colors.white : statusColor,
                                 fontWeight: FontWeight.bold,
                               ),
                             ),
@@ -2551,15 +2627,6 @@ class _PlantVehicleCard extends StatelessWidget {
                     isExpanded: true,
                     items: vehicles
                         .map((vehicle) {
-                          final details = <String>[];
-                          if (vehicle.lastEndKm != null) {
-                            details.add('${vehicle.lastEndKm} km');
-                          }
-                          if (vehicle.lastEndDate != null &&
-                              vehicle.lastEndDate!.isNotEmpty) {
-                            details.add(vehicle.lastEndDate!);
-                          }
-                          final subtitle = details.join(' • ');
                           return DropdownMenuItem(
                             value: vehicle,
                             child: Row(
@@ -2572,9 +2639,7 @@ class _PlantVehicleCard extends StatelessWidget {
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
-                                    subtitle.isNotEmpty
-                                        ? '${vehicle.number} • $subtitle'
-                                        : vehicle.number,
+                                    vehicle.number,
                                     style: theme.textTheme.bodyMedium?.copyWith(
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -2843,9 +2908,7 @@ class _DriverHelperCard extends StatelessWidget {
                       ),
                       deleteIconColor: driverChipText,
                       label: Text(driverLabel(driver)),
-                      onDeleted: isCurrent
-                          ? null
-                          : () => onDriverRemoved(driver),
+                      onDeleted: () => onDriverRemoved(driver),
                     );
                   })
                   .toList(growable: false),
@@ -2989,15 +3052,36 @@ class _TripStartCard extends StatefulWidget {
 }
 
 class _TripStartCardState extends State<_TripStartCard> {
+  ({String code, String name}) _parseCustomerSuggestion(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return (code: '', name: '');
+    }
+    if (trimmed.contains(' - ')) {
+      final parts = trimmed.split(' - ');
+      final code = parts.first.trim();
+      final name = parts.length > 1 ? parts.sublist(1).join(' - ').trim() : '';
+      return (code: code, name: name.isNotEmpty ? name : trimmed);
+    }
+    return (code: '', name: trimmed);
+  }
+
   List<String> _getFilteredSuggestions(
     String searchText,
     List<String> suggestions,
   ) {
-    if (searchText.isEmpty) {
+    final query = searchText.trim().toLowerCase();
+    if (query.isEmpty) {
       return suggestions;
     }
     return suggestions.where((suggestion) {
-      return suggestion.toLowerCase().contains(searchText.toLowerCase());
+      final parsed = _parseCustomerSuggestion(suggestion);
+      final name = parsed.name.toLowerCase();
+      final code = parsed.code.toLowerCase();
+      if (code.isNotEmpty && code.startsWith(query)) {
+        return true;
+      }
+      return name.contains(query);
     }).toList();
   }
 
@@ -3160,7 +3244,10 @@ class _TripStartCardState extends State<_TripStartCard> {
                         )
                         .take(12)
                         .map(
-                          (suggestion) => ActionChip(
+                          (suggestion) {
+                            final displayName =
+                                _parseCustomerSuggestion(suggestion).name;
+                            return ActionChip(
                             backgroundColor: suggestionChipColor,
                             labelStyle: theme.textTheme.bodyMedium?.copyWith(
                               color: suggestionChipTextColor,
@@ -3172,9 +3259,11 @@ class _TripStartCardState extends State<_TripStartCard> {
                               size: 18,
                               color: Colors.deepOrange,
                             ),
-                            label: Text(suggestion),
-                            onPressed: () => widget.onCustomerAdded(suggestion),
-                          ),
+                              label: Text(displayName),
+                              onPressed: () =>
+                                  widget.onCustomerAdded(displayName),
+                            );
+                          },
                         )
                         .toList(growable: false),
               ),
@@ -3230,6 +3319,10 @@ class _TripStartCardState extends State<_TripStartCard> {
               alignment: Alignment.centerRight,
               child: FilledButton.icon(
                 onPressed: canStart ? () => widget.onStartTrip() : null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFA3EF4D),
+                  foregroundColor: Colors.black,
+                ),
                 icon: widget.isCreating
                     ? const SizedBox(
                         width: 16,
@@ -3303,14 +3396,35 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
                           color: Colors.orange.shade700,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: Text(
-                          "ONGOING",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            letterSpacing: 0.5,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Lottie.asset(
+                              'downloads/truck.json',
+                              width: 18,
+                              height: 18,
+                              fit: BoxFit.contain,
+                              repeat: true,
+                              animate: true,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Icon(
+                                  Icons.local_shipping,
+                                  size: 18,
+                                  color: Colors.white,
+                                );
+                              },
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              "ONGOING",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),

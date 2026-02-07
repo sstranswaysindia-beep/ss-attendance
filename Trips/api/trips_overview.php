@@ -10,8 +10,14 @@ function td_parse_date(string $value, string $fallback): string {
     return $value;
 }
 
+$monthParam = trim((string)td_request_value('month', ''));
 $from = td_parse_date((string)td_request_value('from', date('Y-m-01')), date('Y-m-01'));
 $to = td_parse_date((string)td_request_value('to', date('Y-m-d')), date('Y-m-d'));
+if ($monthParam !== '' && preg_match('/^\d{4}-\d{2}$/', $monthParam)) {
+    $monthStart = $monthParam . '-01';
+    $from = $monthStart;
+    $to = date('Y-m-d', strtotime($monthStart . ' +1 month -1 day'));
+}
 $status = (string)td_request_value('status', 'All');
 $plantIdRaw = td_request_value('plantId');
 $plantId = apiSanitizeInt($plantIdRaw);

@@ -112,7 +112,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisAlignment: MainAxisAlignment.start,
                           children: [
                             Image.asset(
                               AppAssets.logo,
@@ -127,26 +127,26 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(width: 16),
                             Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
                                   widget.appTitle,
-                                  textAlign: TextAlign.center,
+                                  textAlign: TextAlign.left,
                                   style: theme.textTheme.headlineSmall
                                       ?.copyWith(
                                         fontWeight: FontWeight.w700,
                                         color: const Color(0xFF000C66),
-                                        fontSize: 29,
+                                        fontSize: 24,
                                       ),
                                 ),
                                 if (widget.appSubtitle.isNotEmpty) ...[
                                   const SizedBox(height: 2),
                                   Text(
                                     widget.appSubtitle,
-                                    textAlign: TextAlign.right,
+                                    textAlign: TextAlign.left,
                                     style: theme.textTheme.bodySmall?.copyWith(
                                       color: const Color(0xFF000C66),
-                                      fontSize: 13,
+                                      fontSize: 11,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/services.dart';
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/advance_transaction.dart';
@@ -64,6 +66,13 @@ class _VehicleOption {
 
 class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   static final NumberFormat _inrNumber = NumberFormat.decimalPattern('en_IN');
+  static const String _prefHideChargesInDescriptionPicker =
+      'khata_hide_charges_description_picker';
+
+  bool _hideChargesInDescriptionPicker = true;
+  String? _selectedReceiptPath;
+  Uint8List? _selectedReceiptBytes;
+  String? _selectedReceiptName;
 
   String _selectedMonthCompactLabel() {
     if (_selectedMonth == 'All Months') return 'All';
@@ -89,6 +98,35 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   String _normalizeCategoryKey(String input) {
     return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
+  bool _isHiddenInDescriptionPicker(_DescriptionOption option) {
+    final key = _normalizeCategoryKey(option.label);
+    if (key == 'drivetrack') return true;
+    if (_hideChargesInDescriptionPicker && key == 'charges') return true;
+    return false;
+  }
+
+  Future<void> _loadHideChargesPreference() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getBool(_prefHideChargesInDescriptionPicker);
+      if (!mounted) return;
+      setState(() {
+        _hideChargesInDescriptionPicker = saved ?? true;
+      });
+    } catch (_) {
+      // Ignore preference failures and keep default.
+    }
+  }
+
+  Future<void> _setHideChargesPreference(bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_prefHideChargesInDescriptionPicker, value);
+    } catch (_) {
+      // Ignore preference failures.
+    }
   }
 
   bool _isEditLockedTransaction(AdvanceTransaction transaction) {
@@ -167,6 +205,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     super.initState();
     NotificationService().requestBellHide();
     _requestedBellHide = true;
+    _loadHideChargesPreference();
     final now = DateTime.now();
     _selectedMonth = _monthNames[now.month - 1];
     _selectedYear = now.year;
@@ -972,11 +1011,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.custom,
           allowedExtensions: const ['pdf'],
-          withData: false,
+          withData: true,
         );
         final file = result?.files.single;
+        final bytes = file?.bytes;
+        final name = file?.name;
         final path = file?.path;
-        if (path == null || path.isEmpty) {
+        if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) {
           showAppToast(
             context,
             'Unable to pick PDF on this device.',
@@ -985,7 +1026,15 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           return;
         }
         setSheetState(() {
-          onPathSelected(path);
+          final displayName = (path != null && path.isNotEmpty)
+              ? path
+              : (name ?? 'PDF receipt');
+          _selectedReceiptPath = displayName;
+          _selectedReceiptBytes =
+              (path == null || path.isEmpty) ? bytes : null;
+          _selectedReceiptName =
+              (path == null || path.isEmpty) ? name : null;
+          onPathSelected(displayName);
         });
         return;
       }
@@ -1000,6 +1049,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
         if (image != null) {
           setSheetState(() {
+            _selectedReceiptPath = image.path;
+            _selectedReceiptBytes = null;
+            _selectedReceiptName = null;
             onPathSelected(image.path);
           });
         }
@@ -1009,12 +1061,18 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
         if (images.length == 1) {
           setSheetState(() {
+            _selectedReceiptPath = images.first.path;
+            _selectedReceiptBytes = null;
+            _selectedReceiptName = null;
             onPathSelected(images.first.path);
           });
         } else {
           final pdfPath = await _generatePdfFromImages(images);
           if (pdfPath != null) {
             setSheetState(() {
+              _selectedReceiptPath = pdfPath;
+              _selectedReceiptBytes = null;
+              _selectedReceiptName = null;
               onPathSelected(pdfPath);
             });
           } else {
@@ -1092,10 +1150,14 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     bool showVehicleList = false;
     List<_VehicleOption> filteredVehicles = List.from(_vehicleOptions);
     DateTime selectedDate = DateTime.now();
-    String? selectedReceiptPath;
-    String? selectedDescriptionLabel = _descriptionOptions.isNotEmpty
-        ? _descriptionOptions.first.label
-        : null;
+    String? selectedDescriptionLabel;
+    if (_descriptionOptions.isNotEmpty) {
+      final visible = _descriptionOptions
+          .where((opt) => !_isHiddenInDescriptionPicker(opt))
+          .toList(growable: false);
+      selectedDescriptionLabel =
+          (visible.isNotEmpty ? visible.first : _descriptionOptions.first).label;
+    }
     // ignore: unused_local_variable
     int? selectedVehicleId;
     String? selectedVehicleNumber;
@@ -1122,7 +1184,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                   source: source,
                   setSheetState: setSheetState,
                   onPathSelected: (path) {
-                    selectedReceiptPath = path;
+                    _selectedReceiptPath = path;
                   },
                 );
               }
@@ -1298,14 +1360,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                             onTap: _descriptionOptions.isEmpty
                                 ? null
                                 : () async {
-                                    // Safety net: never show DRIVETRACK (or variants) in the picker.
-                                    String normalize(String s) => s
-                                        .toLowerCase()
-                                        .replaceAll(RegExp(r'[^a-z0-9]+'), '');
                                     final visibleDescriptions = _descriptionOptions
                                         .where(
                                           (opt) =>
-                                              normalize(opt.label) != 'drivetrack',
+                                              !_isHiddenInDescriptionPicker(opt),
                                         )
                                         .toList(growable: false);
                                     final selected =
@@ -1344,6 +1402,41 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                       });
                                     }
                                   },
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: () {
+                                final next = !_hideChargesInDescriptionPicker;
+                                setSheetState(() {
+                                  _hideChargesInDescriptionPicker = next;
+                                  if (next &&
+                                      selectedDescriptionLabel != null &&
+                                      _normalizeCategoryKey(
+                                            selectedDescriptionLabel!,
+                                          ) ==
+                                          'charges') {
+                                    final visible = _descriptionOptions
+                                        .where(
+                                          (opt) =>
+                                              !_isHiddenInDescriptionPicker(opt),
+                                        )
+                                        .toList(growable: false);
+                                    if (visible.isNotEmpty) {
+                                      selectedDescriptionLabel =
+                                          visible.first.label;
+                                    }
+                                  }
+                                });
+                                _setHideChargesPreference(next);
+                              },
+                              child: Text(
+                                _hideChargesInDescriptionPicker
+                                    ? 'Show CHARGES'
+                                    : 'Hide CHARGES',
+                              ),
+                            ),
                           ),
                           if (vehicleFieldNeeded) ...[
                             const SizedBox(height: 16),
@@ -1929,7 +2022,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                   const SizedBox(height: 8),
                                   Row(
                                     children: [
-                                      if (selectedReceiptPath != null)
+                                      if (_selectedReceiptPath != null)
                                         Expanded(
                                           child: Container(
                                             padding: const EdgeInsets.symmetric(
@@ -1952,7 +2045,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
                                                 Icon(
-                                                  selectedReceiptPath?.endsWith(
+                                                  _selectedReceiptPath?.endsWith(
                                                             '.pdf',
                                                           ) ==
                                                           true
@@ -1963,7 +2056,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                 ),
                                                 const SizedBox(width: 4),
                                                 Text(
-                                                  selectedReceiptPath?.endsWith(
+                                                  _selectedReceiptPath?.endsWith(
                                                             '.pdf',
                                                           ) ==
                                                           true
@@ -1979,7 +2072,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                             ),
                                           ),
                                         ),
-                                      if (selectedReceiptPath != null)
+                                      if (_selectedReceiptPath != null)
                                         const SizedBox(width: 12),
                                       GestureDetector(
                                         onTap: _isUploadingPhoto
@@ -2016,7 +2109,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                 )
                                               else
                                                 Icon(
-                                                  selectedReceiptPath != null
+                                                  _selectedReceiptPath != null
                                                       ? Icons.edit
                                                       : Icons.attach_file,
                                                   size: 16,
@@ -2028,7 +2121,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               Text(
                                                 _isUploadingPhoto
                                                     ? 'Selecting...'
-                                                    : (selectedReceiptPath !=
+                                                    : (_selectedReceiptPath !=
                                                               null
                                                           ? 'Change'
                                                           : 'Attach Receipt'),
@@ -2183,7 +2276,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                             '🔵 Description: $finalDescription',
                                           );
                                           print(
-                                            '🔵 Selected Receipt Path: $selectedReceiptPath',
+                                            '🔵 Selected Receipt Path: $_selectedReceiptPath',
                                           );
 
                                           // If this is an advance entry with a target driver, treat it like a fund transfer
@@ -2268,8 +2361,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                             '🔵 Transaction ID returned: $transactionId',
                                           );
                                           if (!isAdvanceReceived &&
-                                              selectedReceiptPath != null &&
-                                              transactionId != null) {
+                                              (transactionId != null) &&
+                                              (_selectedReceiptPath != null ||
+                                                  _selectedReceiptBytes !=
+                                                      null)) {
                                             try {
                                               print('🔵 RECEIPT UPLOAD START');
                                               print(
@@ -2278,23 +2373,29 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               print(
                                                 '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
                                               );
-                                              print(
-                                                '🔵 File path: $selectedReceiptPath',
-                                              );
-                                              final file = File(
-                                                selectedReceiptPath!,
-                                              );
-                                              final fileExists = await file
-                                                  .exists();
-                                              print(
-                                                '🔵 File exists: $fileExists',
-                                              );
-                                              if (fileExists) {
-                                                final fileSize = await file
-                                                    .length();
+                                              if (_selectedReceiptPath != null) {
                                                 print(
-                                                  '🔵 File size: $fileSize bytes',
+                                                  '🔵 File path: $_selectedReceiptPath',
                                                 );
+                                                try {
+                                                  final file = File(
+                                                    _selectedReceiptPath!,
+                                                  );
+                                                  final fileExists = await file
+                                                      .exists();
+                                                  print(
+                                                    '🔵 File exists: $fileExists',
+                                                  );
+                                                  if (fileExists) {
+                                                    final fileSize =
+                                                        await file.length();
+                                                    print(
+                                                      '🔵 File size: $fileSize bytes',
+                                                    );
+                                                  }
+                                                } catch (_) {
+                                                  // Ignore on web/no file access
+                                                }
                                               }
                                               final response =
                                                   await _financeRepository
@@ -2306,8 +2407,14 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                                 .user
                                                                 .driverId ??
                                                             widget.user.id,
-                                                        filePath:
-                                                            selectedReceiptPath!,
+                                                        filePath: _selectedReceiptBytes ==
+                                                                null
+                                                            ? _selectedReceiptPath
+                                                            : null,
+                                                        bytes:
+                                                            _selectedReceiptBytes,
+                                                        fileName:
+                                                            _selectedReceiptName,
                                                       );
                                               print(
                                                 '🟢 Upload response: $response',
@@ -2318,12 +2425,61 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                   'Receipt uploaded successfully',
                                                 );
                                                 print(
-                                                  '🟢 Receipt upload SUCCESS',
-                                                );
-                                                if (mounted) {
-                                                  await _loadData();
-                                                }
-                                              } else {
+                                               '🟢 Receipt upload SUCCESS',
+                                             );
+                                             if (mounted) {
+                                               final path =
+                                                   response['receiptPath']
+                                                       ?.toString();
+                                               if (path != null &&
+                                                   path.isNotEmpty) {
+                                                 final transactionIdStr =
+                                                     transactionId.toString();
+                                                 var updated = false;
+                                                 setState(() {
+                                                   _transactions =
+                                                       _transactions
+                                                           .map((txn) {
+                                                             if (txn.id ==
+                                                                 transactionIdStr) {
+                                                               updated = true;
+                                                               return txn.copyWith(
+                                                                 receiptPath:
+                                                                     path,
+                                                               );
+                                                             }
+                                                             return txn;
+                                                           })
+                                                           .toList();
+                                                   _filteredTransactions =
+                                                       _filteredTransactions
+                                                           .map((txn) {
+                                                             if (txn.id ==
+                                                                 transactionIdStr) {
+                                                               updated = true;
+                                                               return txn.copyWith(
+                                                                 receiptPath:
+                                                                     path,
+                                                               );
+                                                             }
+                                                             return txn;
+                                                           })
+                                                           .toList();
+                                                 });
+                                                 _filterTransactions();
+                                                 Future.delayed(
+                                                   const Duration(
+                                                     milliseconds: 600,
+                                                   ),
+                                                   () {
+                                                     if (mounted) {
+                                                       _loadData();
+                                                     }
+                                                   },
+                                                 );
+                                               }
+                                             }
+                                           } else {
                                                 print(
                                                   '🔴 Receipt upload FAILED: ${response['error']}',
                                                 );
@@ -2355,7 +2511,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               '🔵 isAdvanceReceived: $isAdvanceReceived',
                                             );
                                             print(
-                                              '🔵 selectedReceiptPath: $selectedReceiptPath',
+                                              '🔵 selectedReceiptPath: $_selectedReceiptPath',
                                             );
                                             print(
                                               '🔵 transactionId: $transactionId',
@@ -2681,14 +2837,6 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           ],
         ),
         const SizedBox(height: 6),
-        Text(
-          'Tip: Tap any entry row to view full details & edit.',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.blueGrey.shade700,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
         const SizedBox(height: 8),
         // Display transactions grouped by date
         ...sortedDates.map((dateKey) {
@@ -4590,7 +4738,17 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 }
                 return opt;
               })
-              .toList(growable: false);
+              .toList(growable: true);
+
+          // Ensure stable alphabetical ordering in UI (case-insensitive).
+          normalized.sort((a, b) {
+            final la = a.label.toLowerCase();
+            final lb = b.label.toLowerCase();
+            final cmp = la.compareTo(lb);
+            if (cmp != 0) return cmp;
+            return a.label.compareTo(b.label);
+          });
+          normalized = normalized.toList(growable: false);
 
           if (!mounted) return;
           setState(() {

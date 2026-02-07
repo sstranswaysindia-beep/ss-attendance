@@ -54,6 +54,26 @@ class AdvanceTransaction {
   final String? receiptPath;
   final String? category;
 
+  AdvanceTransaction copyWith({
+    String? receiptPath,
+  }) {
+    return AdvanceTransaction(
+      id: id,
+      driverId: driverId,
+      type: type,
+      amount: amount,
+      description: description,
+      createdAt: createdAt,
+      vehicleId: vehicleId,
+      vehiclePlantId: vehiclePlantId,
+      counterpartyDriverId: counterpartyDriverId,
+      counterpartyPlantId: counterpartyPlantId,
+      runningBalance: runningBalance,
+      receiptPath: receiptPath ?? this.receiptPath,
+      category: category,
+    );
+  }
+
   bool get isAdvanceReceived => type == 'advance_received';
   bool get isExpense => type == 'expense';
 

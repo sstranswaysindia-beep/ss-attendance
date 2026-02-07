@@ -1,0 +1,4 @@
+- Enforced realtime backdate rule for past attendance requests with advance-entry override.
+- Added advance-entry flag lookup API and wired app to refresh without re-login.
+- Fixed biometric unlock on Android by using FlutterFragmentActivity.
+- Updated past attendance request date/time picker theming to white background.

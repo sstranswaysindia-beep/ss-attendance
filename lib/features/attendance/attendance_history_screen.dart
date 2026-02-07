@@ -10,6 +10,7 @@ import '../../core/widgets/app_toast.dart';
 
 const Color _historyPrimaryColor = Color(0xFF00296B);
 const Color _historyAccentLight = Color(0xFFE3F2FD);
+const Color _historyPendingColor = Color(0xFFFFBB39);
 const LinearGradient _historyCardGradient = LinearGradient(
   colors: [Colors.white, _historyAccentLight],
   begin: Alignment.topLeft,
@@ -150,6 +151,28 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     }
   }
 
+  Color _statusChipColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green.shade100;
+      case 'rejected':
+        return Colors.red.shade100;
+      default:
+        return _historyPendingColor;
+    }
+  }
+
+  Color _chipLabelColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'approved':
+        return Colors.green.shade900;
+      case 'rejected':
+        return Colors.red.shade900;
+      default:
+        return Colors.black87;
+    }
+  }
+
   String _extractAdjustReason(String raw) {
     final delimiterIndex = raw.indexOf(':');
     if (delimiterIndex == -1) {
@@ -225,8 +248,19 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     final filteredRecords = _filteredRecords;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Attendance History')),
-      body: AppGradientBackground(
+      appBar: AppBar(
+        backgroundColor: _historyPrimaryColor,
+        foregroundColor: Colors.white,
+        title: const Text(
+          'Attendance History',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
+      ),
+      body: ColoredBox(
+        color: Colors.white,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -331,6 +365,10 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                     itemBuilder: (context, index) {
                       final record = filteredRecords[index];
                       final statusColor = _statusColor(record.status);
+                      final statusLabel =
+                          record.status?.isNotEmpty == true
+                              ? record.status!
+                              : 'Pending';
                       final inTime = _formatTime(record.inTime);
                       final outTime = _formatTime(record.outTime);
                       final parsedDate =
@@ -408,14 +446,20 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
                                 Chip(
-                                  label: Text(record.status ?? 'Unknown'),
-                                  labelStyle: TextStyle(
-                                    color: statusColor.withOpacity(0.9),
+                                  label: Text(
+                                    statusLabel,
+                                    style: TextStyle(
+                                      color: _chipLabelColor(statusLabel),
+                                      fontWeight: FontWeight.w600,
+                                    ),
                                   ),
-                                  backgroundColor:
-                                      statusColor.withOpacity(0.12),
+                                  backgroundColor: _statusChipColor(
+                                    statusLabel,
+                                  ),
                                   side: BorderSide(
-                                    color: statusColor.withOpacity(0.3),
+                                    color: _chipLabelColor(
+                                      statusLabel,
+                                    ).withOpacity(0.3),
                                   ),
                                 ),
                                 if (record.isAdjustRequest) ...[

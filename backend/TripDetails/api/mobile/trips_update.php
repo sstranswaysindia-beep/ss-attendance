@@ -71,19 +71,8 @@ function get_trip_vehicle_and_plant(mysqli $db, int $trip_id): ?array {
   return $ok ? ['vehicle_id'=>(int)$vid, 'plant_id'=>(int)$pid] : null;
 }
 function upsert_assignment(mysqli $db, int $driver_id, int $vehicle_id, int $plant_id): void {
-  if (!table_exists($db,'assignments')) return;
-  $sql = "
-    INSERT INTO assignments (driver_id, plant_id, vehicle_id, assigned_date)
-    VALUES (?, ?, ?, CURDATE())
-    ON DUPLICATE KEY UPDATE
-      plant_id      = VALUES(plant_id),
-      vehicle_id    = VALUES(vehicle_id),
-      assigned_date = VALUES(assigned_date)
-  ";
-  $st = $db->prepare($sql);
-  $st->bind_param('iii', $driver_id, $plant_id, $vehicle_id);
-  $st->execute();
-  $st->close();
+  // assignments writes disabled (requested)
+  return;
 }
 /* Helper name resolver */
 function norm_list($v): array {
@@ -112,6 +101,114 @@ function find_helpers_by_labels(mysqli $db, array $labels, int $limitPer = 5): a
   return array_map('intval', array_keys($out));
 }
 
+function m_extract_customer_code(string $value): string {
+  $raw = trim($value);
+  if ($raw === '') return '';
+  $candidate = $raw;
+  foreach ([' - ', '-', '•', '|'] as $sep) {
+    if (strpos($candidate, $sep) !== false) {
+      $parts = explode($sep, $candidate, 2);
+      $candidate = $parts[0];
+      break;
+    }
+  }
+  if (strpos($candidate, '(') !== false) {
+    $candidate = trim(explode('(', $candidate, 2)[0]);
+  }
+  $candidate = preg_replace('/[^A-Za-z0-9]/', '', $candidate) ?? '';
+  return $candidate !== '' ? strtoupper($candidate) : '';
+}
+
+function m_resolve_customers(mysqli $db, array $inputs): array {
+  $names = [];
+  $ids = [];
+  if (empty($inputs)) return [$names, $ids];
+  if (!table_exists($db, 'customers_master') || !has_col($db, 'customers_master', 'customer_name')) {
+    foreach ($inputs as $raw) {
+      $names[] = $raw;
+      $ids[] = null;
+    }
+    return [$names, $ids];
+  }
+
+  $hasShort = has_col($db, 'customers_master', 'short_code');
+  $hasStatus = has_col($db, 'customers_master', 'status');
+
+  $keys = [];
+  foreach ($inputs as $raw) {
+    $value = trim((string)$raw);
+    if ($value === '') continue;
+    $keys[] = strtolower($value);
+    $code = m_extract_customer_code($value);
+    if ($code !== '') $keys[] = strtolower($code);
+  }
+  $keys = array_values(array_unique(array_filter($keys, fn($v)=>$v!=='')));
+  if (empty($keys)) {
+    foreach ($inputs as $raw) {
+      $names[] = $raw;
+      $ids[] = null;
+    }
+    return [$names, $ids];
+  }
+
+  $placeholders = implode(',', array_fill(0, count($keys), '?'));
+  $cols = $hasShort ? 'short_code' : 'NULL AS short_code';
+  $sql = "SELECT id, customer_name, {$cols} FROM customers_master";
+  $clauses = [];
+  if ($hasShort) {
+    $clauses[] = "LOWER(short_code) IN ({$placeholders})";
+  }
+  $clauses[] = "LOWER(customer_name) IN ({$placeholders})";
+  $sql .= ' WHERE (' . implode(' OR ', $clauses) . ')';
+  if ($hasStatus) {
+    $sql .= " AND (LOWER(status) = 'active' OR status = '1')";
+  }
+  $sql .= ' ORDER BY customer_name';
+
+  $stmt = $db->prepare($sql);
+  $params = $hasShort ? array_merge($keys, $keys) : $keys;
+  $types = str_repeat('s', count($params));
+  $bind = [$types];
+  foreach ($params as $k => $v) {
+    $bind[] = &$params[$k];
+  }
+  call_user_func_array([$stmt, 'bind_param'], $bind);
+  $stmt->execute();
+  $rs = $stmt->get_result();
+  $shortMap = [];
+  $nameMap = [];
+  while ($row = $rs->fetch_assoc()) {
+    $rowName = trim((string)($row['customer_name'] ?? ''));
+    $rowShort = trim((string)($row['short_code'] ?? ''));
+    if ($rowShort !== '') $shortMap[strtolower($rowShort)] = $row;
+    if ($rowName !== '') $nameMap[strtolower($rowName)] = $row;
+  }
+  $stmt->close();
+
+  foreach ($inputs as $raw) {
+    $value = trim((string)$raw);
+    if ($value === '') continue;
+    $code = m_extract_customer_code($value);
+    $row = null;
+    if ($code !== '' && isset($shortMap[strtolower($code)])) {
+      $row = $shortMap[strtolower($code)];
+    } elseif (isset($nameMap[strtolower($value)])) {
+      $row = $nameMap[strtolower($value)];
+    }
+    if ($row) {
+      $resolvedName = trim((string)($row['customer_name'] ?? ''));
+      $names[] = $resolvedName !== '' ? $resolvedName : $value;
+      $id = isset($row['id']) ? (int)$row['id'] : 0;
+      $ids[] = $id > 0 ? (string)$id : null;
+    } else {
+      $names[] = $value;
+      $ids[] = null;
+    }
+  }
+
+  return [$names, $ids];
+}
+
 /* ---------- Method guard ---------- */
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') json_out(['ok'=>false,'error'=>'Method not allowed'], 405);
 
@@ -137,6 +234,14 @@ try {
   $set_customers = (isset($in['set_customer_names']) && is_array($in['set_customer_names']))
     ? array_values(array_filter(array_map(fn($c)=> trim((string)$c), $in['set_customer_names']), fn($x)=> $x !== ''))
     : [];
+  $add_customer_ids = [];
+  $set_customer_ids = [];
+  if (!empty($add_customers)) {
+    [$add_customers, $add_customer_ids] = m_resolve_customers($db, $add_customers);
+  }
+  if (!empty($set_customers)) {
+    [$set_customers, $set_customer_ids] = m_resolve_customers($db, $set_customers);
+  }
 
   // helpers: ids and/or names
   $helper_id = (array_key_exists('helper_id',$in))
@@ -261,12 +366,23 @@ try {
     $del->bind_param('i',$trip_id);
     $del->execute(); $del->close();
 
-    $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)");
-    foreach ($set_customers as $c) {
-      $ins->bind_param('is',$trip_id,$c);
-      $ins->execute();
+    $hasCustomerId = has_col($db, 'trip_customers', 'customer_id');
+    if ($hasCustomerId) {
+      $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name, customer_id) VALUES (?, ?, ?)");
+      foreach ($set_customers as $idx => $c) {
+        $cid = $set_customer_ids[$idx] ?? null;
+        $ins->bind_param('iss', $trip_id, $c, $cid);
+        $ins->execute();
+      }
+      $ins->close();
+    } else {
+      $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)");
+      foreach ($set_customers as $c) {
+        $ins->bind_param('is',$trip_id,$c);
+        $ins->execute();
+      }
+      $ins->close();
     }
-    $ins->close();
   } elseif (!empty($add_customers) && table_exists($db,'trip_customers')) {
     $existing = [];
     $q = $db->prepare("SELECT customer_name FROM trip_customers WHERE trip_id=?");
@@ -278,14 +394,27 @@ try {
     }
     $q->close();
 
-    $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)");
-    foreach ($add_customers as $c) {
-      $key = strtolower(trim($c)); if ($key==='' || isset($existing[$key])) continue;
-      $ins->bind_param('is',$trip_id,$c);
-      $ins->execute();
-      $existing[$key] = true;
+    $hasCustomerId = has_col($db, 'trip_customers', 'customer_id');
+    if ($hasCustomerId) {
+      $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name, customer_id) VALUES (?, ?, ?)");
+      foreach ($add_customers as $idx => $c) {
+        $key = strtolower(trim($c)); if ($key==='' || isset($existing[$key])) continue;
+        $cid = $add_customer_ids[$idx] ?? null;
+        $ins->bind_param('iss', $trip_id, $c, $cid);
+        $ins->execute();
+        $existing[$key] = true;
+      }
+      $ins->close();
+    } else {
+      $ins = $db->prepare("INSERT INTO trip_customers (trip_id, customer_name) VALUES (?, ?)");
+      foreach ($add_customers as $c) {
+        $key = strtolower(trim($c)); if ($key==='' || isset($existing[$key])) continue;
+        $ins->bind_param('is',$trip_id,$c);
+        $ins->execute();
+        $existing[$key] = true;
+      }
+      $ins->close();
     }
-    $ins->close();
   }
 
   // Driver sync

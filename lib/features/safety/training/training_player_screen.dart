@@ -85,6 +85,7 @@ class _TrainingPlayerScreenState extends State<TrainingPlayerScreen>
   int _ttsChunkIndex = 0;
   bool _ttsChunkingActive = false;
   bool _hasStartedTtsOnce = false;
+  int _leadingPauseCount = 0;
 
   // ✅ NEW: line anchors for accurate auto-scroll
   final List<_LineAnchor> _lineAnchors = [];
@@ -319,6 +320,7 @@ class _TrainingPlayerScreenState extends State<TrainingPlayerScreen>
     final transcript = widget.module.transcript ?? '';
     _ttsChunks.clear();
     _lineAnchors.clear();
+    _leadingPauseCount = 0;
 
     if (transcript.trim().isEmpty) {
       _ttsWords = const [];
@@ -354,6 +356,9 @@ class _TrainingPlayerScreenState extends State<TrainingPlayerScreen>
           _ttsChunks[_ttsChunks.length - 1] = _ttsChunks.last.copyWith(
             pauseAfter: true,
           );
+        } else {
+          // Leading blank lines should still count as intentional pauses.
+          _leadingPauseCount += 1;
         }
         continue;
       }
@@ -371,6 +376,10 @@ class _TrainingPlayerScreenState extends State<TrainingPlayerScreen>
           _ttsChunks[_ttsChunks.length - 1] = _ttsChunks.last.copyWith(
             pauseAfter: true,
           );
+        } else {
+          // Leading pause markers before any spoken chunk were previously ignored.
+          final count = _pauseRegex.allMatches(trimmedRight).length;
+          _leadingPauseCount += (count > 0) ? count : 1;
         }
         continue;
       }
@@ -788,6 +797,14 @@ class _TrainingPlayerScreenState extends State<TrainingPlayerScreen>
     _ttsChunkIndex = 0;
     _ttsChunkingActive = true;
     _hasStartedTtsOnce = true;
+
+    // Apply leading pauses (blank lines / [pause] markers) before the first spoken chunk.
+    final startingAtTop = restartFromTop || _currentWordIndex == 0;
+    if (startingAtTop && _leadingPauseCount > 0) {
+      final delaySeconds = 3 * _leadingPauseCount;
+      await Future.delayed(Duration(seconds: delaySeconds));
+      if (!mounted || !_ttsStarting) return;
+    }
 
     await _speakCurrentChunk();
   }

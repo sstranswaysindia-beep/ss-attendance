@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -406,7 +407,9 @@ class FinanceRepository {
   Future<Map<String, dynamic>> uploadReceipt({
     required String transactionId,
     required String driverId,
-    required String filePath,
+    String? filePath,
+    Uint8List? bytes,
+    String? fileName,
   }) async {
     final stopwatch = Stopwatch()..start();
     final uri = Uri.parse(
@@ -414,20 +417,10 @@ class FinanceRepository {
     );
 
     try {
-      // Check if file exists
-      final file = File(filePath);
-      if (!await file.exists()) {
-        throw FinanceFailure('File does not exist: $filePath');
-      }
-
-      final requestData = {
+      final Map<String, dynamic> requestData = {
         'transactionId': transactionId,
         'driverId': driverId,
-        'filePath': filePath,
-        'fileSize': await file.length(),
       };
-
-      ApiLogger.logApiCall('POST', uri.toString(), requestData);
 
       // Create multipart request
       final request = http.MultipartRequest('POST', uri);
@@ -436,14 +429,33 @@ class FinanceRepository {
       request.fields['transactionId'] = transactionId;
       request.fields['driverId'] = driverId;
 
-      // Add file
-      final bytes = await file.readAsBytes();
-      final multipartFile = http.MultipartFile.fromBytes(
-        'receipt',
-        bytes,
-        filename: filePath.split('/').last,
-      );
+      http.MultipartFile multipartFile;
+      if (bytes != null) {
+        final name = fileName ?? 'receipt_${transactionId}';
+        requestData['fileSize'] = bytes.length;
+        multipartFile = http.MultipartFile.fromBytes(
+          'receipt',
+          bytes,
+          filename: name,
+        );
+      } else if (filePath != null) {
+        final file = File(filePath);
+        if (!await file.exists()) {
+          throw FinanceFailure('File does not exist: $filePath');
+        }
+        requestData['filePath'] = filePath;
+        requestData['fileSize'] = await file.length();
+        multipartFile = await http.MultipartFile.fromPath(
+          'receipt',
+          filePath,
+          filename: filePath.split('/').last,
+        );
+      } else {
+        throw FinanceFailure('No receipt file provided.');
+      }
       request.files.add(multipartFile);
+
+      ApiLogger.logApiCall('POST', uri.toString(), requestData);
 
       // Send request
       final streamedResponse = await request.send();

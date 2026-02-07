@@ -17,6 +17,7 @@ import '../../core/services/gps_ping_service.dart';
 import '../../core/services/profile_repository.dart';
 import '../../core/services/app_update_service.dart';
 import '../../core/services/notification_service.dart';
+import '../../core/services/biometric_unlock_service.dart';
 import '../../core/services/safety_repository.dart';
 import '../../core/services/auth_storage_service.dart';
 import '../../core/services/training_flag_service.dart';
@@ -31,6 +32,8 @@ import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
 import '../finance/salary_advance_screen.dart';
 import '../finance/advance_salary_screen.dart';
+import '../leave/apply_leave_screen.dart';
+import '../documents/personal_documents_sheet.dart';
 import '../profile/driver_profile_screen.dart';
 import '../settings/notification_settings_screen.dart';
 import '../safety/safety_hub_screen.dart';
@@ -67,6 +70,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   final GpsPingRepository _gpsPingRepository = GpsPingRepository();
   final ProfileRepository _profileRepository = ProfileRepository();
   final AppUpdateService _appUpdateService = AppUpdateService();
+  final BiometricUnlockService _biometricService = BiometricUnlockService();
   late SafetyRepository _safetyRepository;
   GpsPingService? _gpsPingService;
 
@@ -77,6 +81,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   bool _isAttendanceLockedToday = false;
   bool _isCheckingAbsence = false;
   bool _checkingTraining = false;
+  bool _biometricEnabled = false;
+  bool _biometricSupported = false;
 
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
@@ -133,6 +139,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     _loadActiveShift();
     _loadNotifications();
     _loadAppVersion();
+    _loadBiometricSetting();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForAppUpdate();
       _checkTrainingRequirement();
@@ -147,6 +154,30 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
               }
             },
           );
+  }
+
+  Future<void> _loadBiometricSetting() async {
+    final enabled = await _biometricService.isEnabledForUser(widget.user.id);
+    final supported = await _biometricService.isSupported();
+    if (!mounted) return;
+    setState(() {
+      _biometricEnabled = enabled;
+      _biometricSupported = supported;
+    });
+  }
+
+  Future<void> _toggleBiometric(bool value) async {
+    final supported = await _biometricService.isSupported();
+    if (!supported && value) {
+      showAppToast(
+        context,
+        'Biometric unlock is not available on this device.',
+        isError: true,
+      );
+      return;
+    }
+    setState(() => _biometricEnabled = value);
+    await _biometricService.setEnabledForUser(widget.user.id, value);
   }
 
   @override
@@ -926,12 +957,35 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                 },
               ),
               ListTile(
+                leading: const Icon(Icons.folder_shared),
+                title: const Text('Personal Documents'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  showPersonalDocumentsSheet(context, widget.user);
+                },
+              ),
+              ListTile(
                 leading: const Icon(Icons.play_circle_fill_outlined),
                 title: const Text('Watch Ads & Earn'),
                 onTap: () {
                   Navigator.of(context).pop();
                   _openScreen(WatchAdsScreen(user: widget.user));
                 },
+              ),
+              SwitchListTile(
+                secondary: const Icon(Icons.fingerprint),
+                title: const Text('Biometric Unlock'),
+                subtitle: Text(
+                  _biometricSupported
+                      ? 'Unlock with fingerprint or face'
+                      : 'Not supported on this device',
+                ),
+                value: _biometricEnabled,
+                onChanged: _biometricSupported ? _toggleBiometric : null,
+                activeColor: Colors.green,
+                activeTrackColor: Colors.green.shade200,
+                inactiveThumbColor: Colors.red,
+                inactiveTrackColor: Colors.red.shade200,
               ),
               ListTile(
                 leading: const Icon(Icons.logout),
@@ -1130,6 +1184,12 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
                         onTap: () => _openScreen(
                           MonthlyStatisticsScreen(user: widget.user),
                         ),
+                      ),
+                      const Divider(height: 0),
+                      HoverListTile(
+                        leading: const Icon(Icons.beach_access),
+                        title: const Text('Apply Leave'),
+                        onTap: () => showApplyLeaveSheet(context, widget.user),
                       ),
                       const Divider(height: 0),
                       HoverListTile(

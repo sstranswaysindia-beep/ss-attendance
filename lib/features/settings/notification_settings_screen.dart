@@ -76,6 +76,8 @@ class _NotificationSettingsScreenState
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    const primaryGreen = Color(0xFF1B8E3E);
+    const lightGreen = Color(0xFFE8F7EE);
 
     if (_isLoading) {
       return Scaffold(
@@ -85,15 +87,25 @@ class _NotificationSettingsScreenState
     }
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Notification Settings'),
-        backgroundColor: theme.colorScheme.primary,
+        title: const Text(
+          'Notification Settings',
+          style: TextStyle(color: Colors.white),
+        ),
+        backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           Card(
+            color: Colors.white,
+            surfaceTintColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: primaryGreen.withOpacity(0.25)),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -103,6 +115,7 @@ class _NotificationSettingsScreenState
                     'Notification Preferences',
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
+                      color: primaryGreen,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -117,6 +130,8 @@ class _NotificationSettingsScreenState
                     onChanged: (value) {
                       setState(() => _tripNotifications = value);
                     },
+                    activeColor: primaryGreen,
+                    activeTrackColor: lightGreen,
                   ),
 
                   // Attendance Notifications
@@ -129,6 +144,8 @@ class _NotificationSettingsScreenState
                     onChanged: (value) {
                       setState(() => _attendanceNotifications = value);
                     },
+                    activeColor: primaryGreen,
+                    activeTrackColor: lightGreen,
                   ),
 
                   // Salary Notifications
@@ -139,6 +156,8 @@ class _NotificationSettingsScreenState
                     onChanged: (value) {
                       setState(() => _salaryNotifications = value);
                     },
+                    activeColor: primaryGreen,
+                    activeTrackColor: lightGreen,
                   ),
 
                   // Advance Notifications
@@ -151,6 +170,8 @@ class _NotificationSettingsScreenState
                     onChanged: (value) {
                       setState(() => _advanceNotifications = value);
                     },
+                    activeColor: primaryGreen,
+                    activeTrackColor: lightGreen,
                   ),
                 ],
               ),
@@ -160,6 +181,12 @@ class _NotificationSettingsScreenState
           const SizedBox(height: 16),
 
           Card(
+            color: Colors.white,
+            surfaceTintColor: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: primaryGreen.withOpacity(0.25)),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -169,6 +196,7 @@ class _NotificationSettingsScreenState
                     'Notification Info',
                     style: theme.textTheme.titleLarge?.copyWith(
                       fontWeight: FontWeight.bold,
+                      color: primaryGreen,
                     ),
                   ),
                   const SizedBox(height: 8),
