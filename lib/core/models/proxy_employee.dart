@@ -51,36 +51,42 @@ class ProxyEmployee {
   final DateTime? lastCheckIn;
   final DateTime? lastCheckOut;
 
-  DateTime _today() {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
+  DateTime _normalizeDate(DateTime value) =>
+      DateTime(value.year, value.month, value.day);
 
-  bool _isSameDay(DateTime? value) {
+  bool _isSameDay(DateTime? value, DateTime referenceDate) {
     if (value == null) return false;
-    final normalized = DateTime(value.year, value.month, value.day);
-    return normalized == _today();
+    final normalized = _normalizeDate(value);
+    return normalized == _normalizeDate(referenceDate);
   }
 
-  bool get hasCheckInToday => _isSameDay(lastCheckIn);
+  bool hasCheckInOn(DateTime referenceDate) =>
+      _isSameDay(lastCheckIn, referenceDate);
 
-  bool get hasCheckOutToday => _isSameDay(lastCheckOut);
+  bool hasCheckOutOn(DateTime referenceDate) =>
+      _isSameDay(lastCheckOut, referenceDate);
 
-  bool get hasOpenShiftToday => hasOpenShift && hasCheckInToday && !hasCheckOutToday;
+  bool hasOpenShiftOn(DateTime referenceDate) =>
+      hasOpenShift &&
+      hasCheckInOn(referenceDate) &&
+      !hasCheckOutOn(referenceDate);
 
-  bool get attendanceCompletedToday =>
-      hasCheckInToday && hasCheckOutToday && !hasOpenShiftToday;
+  bool attendanceCompletedOn(DateTime referenceDate) =>
+      hasCheckInOn(referenceDate) &&
+      hasCheckOutOn(referenceDate) &&
+      !hasOpenShiftOn(referenceDate);
 
-  bool get hasAttendanceToday => hasCheckInToday || hasCheckOutToday;
+  bool hasAttendanceOn(DateTime referenceDate) =>
+      hasCheckInOn(referenceDate) || hasCheckOutOn(referenceDate);
 
-  String get statusLabel {
-    if (hasOpenShiftToday) {
+  String statusLabelFor(DateTime referenceDate) {
+    if (hasOpenShiftOn(referenceDate)) {
       return 'Checked in';
     }
-    if (attendanceCompletedToday) {
+    if (attendanceCompletedOn(referenceDate)) {
       return 'Checked out';
     }
-    if (!hasAttendanceToday) {
+    if (!hasAttendanceOn(referenceDate)) {
       return 'No attendance';
     }
     return 'Pending';
@@ -99,20 +105,53 @@ class ProxyEmployee {
 
   String lastCheckInDisplay([DateFormat? formatter]) {
     final date = lastCheckIn;
-    if (!hasCheckInToday || date == null) return '—';
+    if (date == null) return '—';
     final fmt = formatter ?? DateFormat('dd MMM • HH:mm');
     return fmt.format(date);
   }
 
+  String lastCheckInDisplayFor(
+    DateTime referenceDate, [
+    DateFormat? formatter,
+  ]) {
+    if (!hasCheckInOn(referenceDate)) return '—';
+    return lastCheckInDisplay(formatter);
+  }
+
   String lastCheckOutDisplay([DateFormat? formatter]) {
     final date = lastCheckOut;
-    if (hasOpenShiftToday) return 'Pending';
-    if (!hasCheckOutToday || date == null) {
+    if (date == null) {
       return '—';
     }
     final fmt = formatter ?? DateFormat('dd MMM • HH:mm');
     return fmt.format(date);
   }
+
+  String lastCheckOutDisplayFor(
+    DateTime referenceDate, [
+    DateFormat? formatter,
+  ]) {
+    if (hasOpenShiftOn(referenceDate)) return 'Pending';
+    if (!hasCheckOutOn(referenceDate)) return '—';
+    return lastCheckOutDisplay(formatter);
+  }
+
+  DateTime _today() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  bool get hasCheckInToday => hasCheckInOn(_today());
+
+  bool get hasCheckOutToday => hasCheckOutOn(_today());
+
+  bool get hasOpenShiftToday => hasOpenShiftOn(_today());
+
+  bool get attendanceCompletedToday => attendanceCompletedOn(_today());
+
+  bool get hasAttendanceToday => hasAttendanceOn(_today());
+
+  String get statusLabel => statusLabelFor(_today());
 }
 
 class ProxyAttendanceResponse {

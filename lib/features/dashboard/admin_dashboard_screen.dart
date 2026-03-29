@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 import 'package:lottie/lottie.dart';
 
 import '../../core/models/app_user.dart';
+import '../../core/navigation/app_route_observer.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_toast.dart';
 import '../approvals/approvals_screen.dart';
 import '../attendance/admin_today_attendance_screen.dart';
@@ -33,7 +35,71 @@ class AdminDashboardScreen extends StatefulWidget {
   State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
 }
 
-class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+class _AdminDashboardScreenState extends State<AdminDashboardScreen>
+    with RouteAware {
+  bool _dashboardBellHiddenByOverlay = false;
+  ModalRoute<dynamic>? _observedRoute;
+
+  @override
+  void initState() {
+    super.initState();
+    NotificationService().forceShowBell();
+    unawaited(NotificationService().bindInboxUser(widget.user.id));
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route == _observedRoute) {
+      return;
+    }
+    if (_observedRoute is PageRoute<dynamic>) {
+      appRouteObserver.unsubscribe(this);
+    }
+    _observedRoute = route;
+    if (route is PageRoute<dynamic>) {
+      appRouteObserver.subscribe(this, route);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
+    }
+    if (_observedRoute is PageRoute<dynamic>) {
+      appRouteObserver.unsubscribe(this);
+    }
+    super.dispose();
+  }
+
+  @override
+  void didPush() {
+    NotificationService().forceShowBell();
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
+    }
+  }
+
+  @override
+  void didPopNext() {
+    NotificationService().forceShowBell();
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
+    }
+  }
+
+  @override
+  void didPushNext() {
+    if (_dashboardBellHiddenByOverlay) return;
+    NotificationService().requestBellHide();
+    _dashboardBellHiddenByOverlay = true;
+  }
+
   bool _matchesHrAttendance(AppUser user) {
     final patterns = <String>[
       'hrattendence',
@@ -53,7 +119,8 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
       // Aggressive check: remove all non-word characters (spaces, underscores, punctuation)
       final stripped = normalized.replaceAll(RegExp(r'[\s\W_]+'), '');
-      return stripped.contains('hrattendence') || stripped.contains('hrattendance');
+      return stripped.contains('hrattendence') ||
+          stripped.contains('hrattendance');
     }
 
     return check(user.id) ||
@@ -69,7 +136,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     final now = DateTime.now();
     final date = DateFormat('dd-MM-yyyy').format(now);
     final isHrAttendanceUser = _isHrAttendanceUser(widget.user);
-    
+
     print('DEBUG: AdminDashboard User Check');
     print('DEBUG: ID: ${widget.user.id}');
     print('DEBUG: Name: ${widget.user.displayName}');
@@ -189,8 +256,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     icon: Icons.person_pin_circle,
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) =>
-                            AdminProxyScreen(user: widget.user),
+                        builder: (_) => AdminProxyScreen(user: widget.user),
                       ),
                     ),
                   ),
@@ -254,7 +320,6 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       ),
     );
   }
-
 }
 
 class _AdminCard extends StatelessWidget {
@@ -311,11 +376,8 @@ class _AdminCard extends StatelessWidget {
 }
 
 class _AdminWelcomeHeader extends StatefulWidget {
-  const _AdminWelcomeHeader({
-    Key? key,
-    required this.user,
-    required this.date,
-  }) : super(key: key);
+  const _AdminWelcomeHeader({Key? key, required this.user, required this.date})
+    : super(key: key);
 
   final AppUser user;
   final String date;

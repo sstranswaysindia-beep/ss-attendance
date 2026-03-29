@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SS Transways India — Trusted Transportation & Logistics Partner</title>
+    <meta name="description"
+        content="SS Transways India provides reliable, safe, and efficient transportation and logistics solutions across India. Fleet management, GPS tracking, and dedicated freight services.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>🚛</text></svg>">
+</head>
+
+<body>
+
+    <!-- ===== Loader ===== -->
+    <div class="loader-screen" id="loader">
+        <div class="loader-spinner"></div>
+        <p class="loader-text">SS Transways India</p>
+    </div>
+
+    <!-- ===== Navbar ===== -->
+    <nav class="navbar" id="navbar">
+        <div class="container nav-inner">
+            <a href="#" class="nav-logo">
+                <div class="nav-logo-icon">SS</div>
+                <div class="nav-logo-text">SS Trans<span>ways</span></div>
+            </a>
+            <div class="nav-links" id="navLinks">
+                <a href="#services">Services</a>
+                <a href="#about">About Us</a>
+                <a href="#fleet">Our Fleet</a>
+                <a href="#process">How It Works</a>
+                <a href="#testimonials">Testimonials</a>
+                <a href="#callback" class="nav-cta">Request Callback</a>
+            </div>
+            <button class="hamburger" id="hamburger" aria-label="Menu">
+                <span></span><span></span><span></span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ===== Hero ===== -->
+    <section class="hero" id="hero">
+        <div class="hero-blob hero-blob-1"></div>
+        <div class="hero-blob hero-blob-2"></div>
+        <div class="hero-content container">
+            <div class="hero-grid">
+                <div class="hero-left">
+                    <div class="hero-badge"><span class="pulse"></span> India's Reliable Transport Partner</div>
+                    <h1>Moving India<br>Forward With<br><span class="highlight">Safe & Smart</span><br>Logistics</h1>
+                    <p class="hero-desc">End-to-end transportation solutions powered by technology, driven by trust. We
+                        deliver your cargo safely, on-time, every time — across every corner of India.</p>
+                    <div class="hero-buttons">
+                        <a href="#callback" class="btn-primary">Get Free Quote ➜</a>
+                        <a href="#services" class="btn-secondary">
+                            <span>▶</span> Explore Services
+                        </a>
+                    </div>
+                    <div class="hero-stats">
+                        <div class="hero-stat">
+                            <div class="num" data-target="500">0<span>+</span></div>
+                            <div class="label">Fleet Vehicles</div>
+                        </div>
+                        <div class="hero-stat">
+                            <div class="num" data-target="28">0<span>+</span></div>
+                            <div class="label">States Covered</div>
+                        </div>
+                        <div class="hero-stat">
+                            <div class="num" data-target="15">0<span>+</span></div>
+                            <div class="label">Years Experience</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="hero-visual">
+                    <div class="hero-image-wrapper">
+                        <img src="https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=800&q=80"
+                            alt="SS Transways Fleet" loading="eager">
+                    </div>
+                    <div class="hero-float-card card-1">
+                        <div class="float-card-icon">📍</div>
+                        <div class="float-card-title">Live Tracking</div>
+                        <div class="float-card-desc">Real-time GPS monitoring</div>
+                    </div>
+                    <div class="hero-float-card card-2">
+                        <div class="float-card-icon">✅</div>
+                        <div class="float-card-title">99.2% On-Time</div>
+                        <div class="float-card-desc">Delivery success rate</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="road-animation">
+            <div class="road-line"></div>
+        </div>
+    </section>
+
+    <!-- ===== Marquee / Trusted By ===== -->
+    <section class="marquee-section">
+        <p class="marquee-label">Trusted by leading companies across India</p>
+        <div class="marquee-track">
+            <div class="marquee-item"><span class="m-icon">🏭</span> Tata Motors</div>
+            <div class="marquee-item"><span class="m-icon">⚡</span> Reliance Industries</div>
+            <div class="marquee-item"><span class="m-icon">🔧</span> Mahindra Logistics</div>
+            <div class="marquee-item"><span class="m-icon">🏗️</span> UltraTech Cement</div>
+            <div class="marquee-item"><span class="m-icon">🛢️</span> Indian Oil Corp</div>
+            <div class="marquee-item"><span class="m-icon">📦</span> Flipkart Supply Chain</div>
+            <div class="marquee-item"><span class="m-icon">🚗</span> Maruti Suzuki</div>
+            <div class="marquee-item"><span class="m-icon">🏥</span> Apollo Logistics</div>
+            <!-- Duplicate for seamless loop -->
+            <div class="marquee-item"><span class="m-icon">🏭</span> Tata Motors</div>
+            <div class="marquee-item"><span class="m-icon">⚡</span> Reliance Industries</div>
+            <div class="marquee-item"><span class="m-icon">🔧</span> Mahindra Logistics</div>
+            <div class="marquee-item"><span class="m-icon">🏗️</span> UltraTech Cement</div>
+            <div class="marquee-item"><span class="m-icon">🛢️</span> Indian Oil Corp</div>
+            <div class="marquee-item"><span class="m-icon">📦</span> Flipkart Supply Chain</div>
+            <div class="marquee-item"><span class="m-icon">🚗</span> Maruti Suzuki</div>
+            <div class="marquee-item"><span class="m-icon">🏥</span> Apollo Logistics</div>
+        </div>
+    </section>
+
+    <!-- ===== Services ===== -->
+    <section class="services-section section-padding" id="services">
+        <div class="container">
+            <div class="text-center">
+                <div class="section-label mx-auto"><span class="dot"></span> Our Services</div>
+                <h2 class="section-title">Comprehensive Transport<br>& Logistics Solutions</h2>
+                <p class="section-subtitle mx-auto">From full-truckload freight to last-mile delivery, we handle every
+                    aspect of your supply chain with precision and care.</p>
+            </div>
+            <div class="services-grid">
+                <div class="service-card reveal">
+                    <div class="service-icon orange">🚛</div>
+                    <h3>Full Truckload (FTL)</h3>
+                    <p>Dedicated truck services for large shipments across India. Optimized routes, guaranteed capacity,
+                        and competitive pricing.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+                <div class="service-card reveal">
+                    <div class="service-icon blue">📦</div>
+                    <h3>Part Truckload (PTL)</h3>
+                    <p>Cost-effective shared freight services for smaller consignments. Pay only for the space you use
+                        with reliable transit times.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+                <div class="service-card reveal">
+                    <div class="service-icon green">📍</div>
+                    <h3>GPS Fleet Tracking</h3>
+                    <p>Real-time vehicle tracking with live updates. Monitor your shipment's exact location, speed, and
+                        estimated arrival time 24/7.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+                <div class="service-card reveal">
+                    <div class="service-icon gold">🏭</div>
+                    <h3>Warehouse Solutions</h3>
+                    <p>Modern warehousing facilities with advanced inventory management, pick-pack services, and
+                        seamless distribution networks.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+                <div class="service-card reveal">
+                    <div class="service-icon purple">🛡️</div>
+                    <h3>Cargo Insurance</h3>
+                    <p>Comprehensive cargo protection with end-to-end insurance coverage. Your goods are safeguarded
+                        against all transit risks.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+                <div class="service-card reveal">
+                    <div class="service-icon pink">📋</div>
+                    <h3>Fleet Management</h3>
+                    <p>Complete fleet lifecycle management including driver management, vehicle maintenance, fuel
+                        optimization, and compliance tracking.</p>
+                    <span class="learn-more">Learn More →</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== About / Why Us ===== -->
+    <section class="about-section section-padding" id="about">
+        <div class="container">
+            <div class="about-grid">
+                <div class="about-image-wrapper reveal-left">
+                    <div class="about-image">
+                        <img src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=800&q=80"
+                            alt="About SS Transways">
+                    </div>
+                    <div class="about-experience-badge">
+                        <div class="years">15+</div>
+                        <div class="exp-label">Years of<br>Excellence</div>
+                    </div>
+                </div>
+                <div class="about-text reveal-right">
+                    <div class="section-label"><span class="dot"></span> Why Choose Us</div>
+                    <h2 class="section-title">Your Cargo, Our Commitment</h2>
+                    <p class="section-subtitle">SS Transways India has been a trusted name in transportation since 2010.
+                        We combine modern technology with deep industry experience to deliver excellence.</p>
+                    <div class="check-list">
+                        <div class="check-item">
+                            <div class="check-icon">✓</div>
+                            <span><strong>Pan-India Network</strong> — Coverage across all 28 states with 200+ hub
+                                locations for seamless connectivity.</span>
+                        </div>
+                        <div class="check-item">
+                            <div class="check-icon">✓</div>
+                            <span><strong>Technology-Driven</strong> — Advanced GPS tracking, AI route optimization, and
+                                real-time analytics dashboard.</span>
+                        </div>
+                        <div class="check-item">
+                            <div class="check-icon">✓</div>
+                            <span><strong>Safety First</strong> — Rigorous driver training, in-cab assessments, and 24/7
+                                control room monitoring.</span>
+                        </div>
+                        <div class="check-item">
+                            <div class="check-icon">✓</div>
+                            <span><strong>On-Time Guarantee</strong> — 99.2% on-time delivery rate backed by robust
+                                operational processes.</span>
+                        </div>
+                        <div class="check-item">
+                            <div class="check-icon">✓</div>
+                            <span><strong>Dedicated Support</strong> — Personal account managers and round-the-clock
+                                customer support.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Stats Counter ===== -->
+    <section class="stats-section">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-card reveal">
+                    <div class="stat-number"><span class="counter" data-target="500">0</span><span>+</span></div>
+                    <div class="stat-label">Fleet Vehicles</div>
+                    <div class="stat-divider"></div>
+                </div>
+                <div class="stat-card reveal">
+                    <div class="stat-number"><span class="counter" data-target="10000">0</span><span>+</span></div>
+                    <div class="stat-label">Deliveries Completed</div>
+                    <div class="stat-divider"></div>
+                </div>
+                <div class="stat-card reveal">
+                    <div class="stat-number"><span class="counter" data-target="200">0</span><span>+</span></div>
+                    <div class="stat-label">Happy Clients</div>
+                    <div class="stat-divider"></div>
+                </div>
+                <div class="stat-card reveal">
+                    <div class="stat-number"><span class="counter" data-target="28">0</span><span>+</span></div>
+                    <div class="stat-label">States Covered</div>
+                    <div class="stat-divider"></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Fleet ===== -->
+    <section class="fleet-section section-padding" id="fleet">
+        <div class="container">
+            <div class="text-center">
+                <div class="section-label mx-auto"><span class="dot"></span> Our Fleet</div>
+                <h2 class="section-title">Modern & Well-Maintained Fleet</h2>
+                <p class="section-subtitle mx-auto">Our diverse fleet of vehicles is equipped with the latest technology
+                    to ensure safe and efficient transportation.</p>
+            </div>
+            <div class="fleet-grid">
+                <div class="fleet-card reveal">
+                    <img src="https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?w=600&q=80"
+                        alt="Heavy Trucks">
+                    <div class="fleet-overlay">
+                        <h3>Heavy-Duty Trucks</h3>
+                        <p>40-ton capacity for bulk freight</p>
+                    </div>
+                </div>
+                <div class="fleet-card reveal">
+                    <img src="https://images.unsplash.com/photo-1519003722824-194d4455a60c?w=600&q=80"
+                        alt="Container Trucks">
+                    <div class="fleet-overlay">
+                        <h3>Container Carriers</h3>
+                        <p>20ft & 40ft container transport</p>
+                    </div>
+                </div>
+                <div class="fleet-card reveal">
+                    <img src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?w=600&q=80"
+                        alt="Logistics Vehicles">
+                    <div class="fleet-overlay">
+                        <h3>Mini & LCV Fleet</h3>
+                        <p>Last-mile & express deliveries</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Process ===== -->
+    <section class="process-section section-padding" id="process">
+        <div class="container">
+            <div class="text-center">
+                <div class="section-label mx-auto"><span class="dot"></span> How It Works</div>
+                <h2 class="section-title">Simple 4-Step Process</h2>
+                <p class="section-subtitle mx-auto">Getting started with SS Transways is effortless. Here's how we make
+                    your logistics seamless.</p>
+            </div>
+            <div class="process-grid">
+                <div class="process-step reveal">
+                    <div class="process-num">01</div>
+                    <h4>Request a Quote</h4>
+                    <p>Share your shipment details and get a competitive quote within hours.</p>
+                </div>
+                <div class="process-step reveal">
+                    <div class="process-num">02</div>
+                    <h4>Schedule Pickup</h4>
+                    <p>Choose a convenient pickup date and time. We'll be there on the dot.</p>
+                </div>
+                <div class="process-step reveal">
+                    <div class="process-num">03</div>
+                    <h4>Track in Real-Time</h4>
+                    <p>Monitor your cargo live via GPS with instant status notifications.</p>
+                </div>
+                <div class="process-step reveal">
+                    <div class="process-num">04</div>
+                    <h4>Safe Delivery</h4>
+                    <p>Your goods arrive safely at the destination, on time and in perfect condition.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Testimonials ===== -->
+    <section class="testimonials-section section-padding" id="testimonials">
+        <div class="container">
+            <div class="text-center">
+                <div class="section-label mx-auto"><span class="dot"></span> Testimonials</div>
+                <h2 class="section-title">What Our Clients Say</h2>
+                <p class="section-subtitle mx-auto">Hear from businesses who trust SS Transways India for their
+                    logistics needs.</p>
+            </div>
+            <div class="testimonials-grid">
+                <div class="testimonial-card reveal">
+                    <div class="quote-icon">❝</div>
+                    <div class="stars">★ ★ ★ ★ ★</div>
+                    <p>"SS Transways has transformed our supply chain operations. Their GPS tracking and on-time
+                        delivery record is exceptional. Highly recommended for any business."</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar">RK</div>
+                        <div class="testimonial-info">
+                            <div class="name">Rajesh Kumar</div>
+                            <div class="role">Supply Chain Head, Manufacturing Co.</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="testimonial-card reveal">
+                    <div class="quote-icon">❝</div>
+                    <div class="stars">★ ★ ★ ★ ★</div>
+                    <p>"Professional, reliable, and always available. Their fleet management technology gives us
+                        complete visibility and peace of mind for every shipment."</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar">PS</div>
+                        <div class="testimonial-info">
+                            <div class="name">Priya Sharma</div>
+                            <div class="role">Operations Director, FMCG Pvt Ltd</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="testimonial-card reveal">
+                    <div class="quote-icon">❝</div>
+                    <div class="stars">★ ★ ★ ★ ★</div>
+                    <p>"We've been working with SS Transways for 5+ years. Their dedication to safety, driver quality,
+                        and customer service is second to none in the industry."</p>
+                    <div class="testimonial-author">
+                        <div class="testimonial-avatar">AM</div>
+                        <div class="testimonial-info">
+                            <div class="name">Anil Mehta</div>
+                            <div class="role">CEO, Logistics Solutions India</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== CTA / Callback ===== -->
+    <section class="cta-section" id="callback">
+        <div class="container">
+            <div class="cta-grid">
+                <div class="cta-text reveal-left">
+                    <div class="section-label" style="color:rgba(255,255,255,0.6)"><span class="dot"></span> Get In
+                        Touch</div>
+                    <h2>Ready to Streamline<br>Your Logistics?</h2>
+                    <p>Fill in the form and our expert team will contact you within 30 minutes with a customised
+                        transportation solution and quote.</p>
+                    <div class="cta-features">
+                        <div class="cta-feature"><span class="cf-icon">✦</span> Free consultation & route planning</div>
+                        <div class="cta-feature"><span class="cf-icon">✦</span> Competitive pricing — no hidden charges
+                        </div>
+                        <div class="cta-feature"><span class="cf-icon">✦</span> Dedicated account manager assigned</div>
+                        <div class="cta-feature"><span class="cf-icon">✦</span> 24/7 support & real-time tracking access
+                        </div>
+                    </div>
+                </div>
+                <div class="callback-form reveal-right" id="callbackForm">
+                    <h3>Request a Callback</h3>
+                    <p class="form-subtitle">We'll get back to you within 30 minutes</p>
+                    <form id="contactForm" onsubmit="handleSubmit(event)">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="fullName">Full Name *</label>
+                                <input type="text" id="fullName" placeholder="Your full name" required>
+                            </div>
+                            <div class="form-group">
+                                <label for="phone">Phone Number *</label>
+                                <input type="tel" id="phone" placeholder="+91 XXXXX XXXXX" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email Address</label>
+                            <input type="email" id="email" placeholder="you@company.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="serviceType">Service Required</label>
+                            <select id="serviceType">
+                                <option value="">Select a service</option>
+                                <option value="ftl">Full Truckload (FTL)</option>
+                                <option value="ptl">Part Truckload (PTL)</option>
+                                <option value="fleet">Fleet Management</option>
+                                <option value="warehouse">Warehouse Solutions</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="message">Message</label>
+                            <textarea id="message" placeholder="Tell us about your requirements..."></textarea>
+                        </div>
+                        <button type="submit" class="btn-submit" id="submitBtn">Request Callback ➜</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Footer ===== -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-grid">
+                <div class="footer-brand">
+                    <div class="footer-logo">
+                        <div class="fl-icon">SS</div>
+                        <div class="fl-text">SS Trans<span>ways</span></div>
+                    </div>
+                    <p>Your trusted partner for safe, reliable, and technology-driven transportation and logistics
+                        across India since 2010.</p>
+                    <div class="social-links">
+                        <a href="#" aria-label="Facebook">f</a>
+                        <a href="#" aria-label="Twitter">𝕏</a>
+                        <a href="#" aria-label="LinkedIn">in</a>
+                        <a href="#" aria-label="Instagram">📷</a>
+                    </div>
+                </div>
+                <div class="footer-col">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="#services">Our Services</a></li>
+                        <li><a href="#about">About Us</a></li>
+                        <li><a href="#fleet">Our Fleet</a></li>
+                        <li><a href="#process">How It Works</a></li>
+                        <li><a href="#testimonials">Testimonials</a></li>
+                        <li><a href="#callback">Contact Us</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Services</h4>
+                    <ul>
+                        <li><a href="#">Full Truckload</a></li>
+                        <li><a href="#">Part Truckload</a></li>
+                        <li><a href="#">Fleet Management</a></li>
+                        <li><a href="#">GPS Tracking</a></li>
+                        <li><a href="#">Warehousing</a></li>
+                        <li><a href="#">Cargo Insurance</a></li>
+                    </ul>
+                </div>
+                <div class="footer-col">
+                    <h4>Contact Info</h4>
+                    <div class="footer-contact-item">
+                        <span class="fci-icon">📍</span>
+                        <span>SS Transways India,<br>New Delhi, India</span>
+                    </div>
+                    <div class="footer-contact-item">
+                        <span class="fci-icon">📞</span>
+                        <span>+91 98XXX XXXXX</span>
+                    </div>
+                    <div class="footer-contact-item">
+                        <span class="fci-icon">✉️</span>
+                        <span>info@sstranswaysindia.com</span>
+                    </div>
+                    <div class="footer-contact-item">
+                        <span class="fci-icon">🕐</span>
+                        <span>Mon - Sun: 24/7 Support</span>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>© 2026 SS Transways India. All rights reserved.</p>
+                <div class="footer-bottom-links">
+                    <a href="#">Privacy Policy</a>
+                    <a href="#">Terms of Service</a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Back to Top -->
+    <button class="back-to-top" id="backToTop" aria-label="Back to top">↑</button>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

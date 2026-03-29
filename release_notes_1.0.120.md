@@ -1,3 +1,0 @@
-- Safety training: transcript-based playback with Hindi TTS fallback and progress tracking; audio URLs normalized.
-- In-cab UI: styling tweaks and field ordering refinements.
-- Safety backend: training modules/progress APIs with absolute/fallback audio URLs.

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -16,7 +17,13 @@ import 'document_file_helper_stub.dart'
     if (dart.library.io) 'document_file_helper_io.dart'
     as doc_helper;
 
-const Color _adminPrimaryColor = Color(0xFF00296B);
+// ─── Design tokens (matches salary_advance_screen.dart) ───────────────────────
+const Color _primaryColor = Color(0xFF12355B);
+const Color _accentColor = Color(0xFF00BFA6);
+const Color _gradientStart = Color(0xFF0A1628);
+const Color _gradientEnd = Color(0xFF1B3A5C);
+const Color _surfaceCard = Color(0xFFF8FAFF);
+const Color _pageBackground = Color(0xFFF0F4F8);
 
 Future<void> showPersonalDocumentsSheet(BuildContext context, AppUser user) {
   return showModalBottomSheet<void>(
@@ -39,9 +46,14 @@ class _PersonalDocumentsSheet extends StatefulWidget {
       _PersonalDocumentsSheetState();
 }
 
-class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
+class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet>
+    with SingleTickerProviderStateMixin {
   static const String _listUrl =
       'https://sstranswaysindia.com/api/mobile/driver_documents_list.php';
+  static final Set<Factory<OneSequenceGestureRecognizer>>
+  _webViewGestureRecognizers = {
+    Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
+  };
   final DateFormat _dateFormat = DateFormat('dd-MM-yyyy');
   final DocumentsRepository _documentsRepository = DocumentsRepository();
   bool _canPreviewInline = false;
@@ -59,13 +71,26 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
   String? _previewUrl;
   bool _isSharing = false;
 
+  late final AnimationController _fadeIn;
+
   @override
   void initState() {
     super.initState();
-    _canPreviewInline = !kIsWeb &&
+    _fadeIn = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    _canPreviewInline =
+        !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
             defaultTargetPlatform == TargetPlatform.iOS);
     _loadDocuments();
+  }
+
+  @override
+  void dispose() {
+    _fadeIn.dispose();
+    super.dispose();
   }
 
   int? _resolveDriverId() {
@@ -116,7 +141,9 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
         final docs = (data['documents'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
             .where((doc) {
-              final name = (doc['document_name'] ?? '').toString().toLowerCase();
+              final name = (doc['document_name'] ?? '')
+                  .toString()
+                  .toLowerCase();
               return !name.contains('reason: not applicable');
             })
             .toList(growable: false);
@@ -125,16 +152,17 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
           _documents = docs;
           _documentTypes = _buildDocumentTypes(docs);
           _typeLabels = _buildTypeLabels(_documentTypes);
-          _selectedType =
-              _documentTypes.isNotEmpty ? _documentTypes.first : null;
+          _selectedType = _documentTypes.isNotEmpty
+              ? _documentTypes.first
+              : null;
           _selectedDoc = _firstDocForType(_selectedType);
           _loadPreviewForDoc(_selectedDoc);
         });
+        _fadeIn.forward(from: 0);
       } else {
         if (!mounted) return;
         setState(() {
-          _error =
-              data['error']?.toString() ?? 'Unable to load documents.';
+          _error = data['error']?.toString() ?? 'Unable to load documents.';
           _documents = const [];
           _documentTypes = const [];
           _typeLabels = const {};
@@ -212,9 +240,7 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
   List<Map<String, dynamic>> _docsForType(String? type) {
     if (type == null) return const [];
     return _documents
-        .where(
-          (doc) => (doc['document_type'] ?? '').toString() == type,
-        )
+        .where((doc) => (doc['document_type'] ?? '').toString() == type)
         .toList(growable: false);
   }
 
@@ -276,7 +302,9 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
     }
     if (!_canPreviewInline) {
       setState(() {
-        _previewError = kIsWeb ? null : 'Inline preview not supported on this device.';
+        _previewError = kIsWeb
+            ? null
+            : 'Inline preview not supported on this device.';
         _previewController = null;
         _previewUrl = url;
       });
@@ -316,8 +344,7 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
   String? _resolveDocUrl(Map<String, dynamic> doc) {
     final localPath = (doc['local_path'] ?? '').toString().trim();
     if (localPath.isNotEmpty) {
-      if (localPath.startsWith('http://') ||
-          localPath.startsWith('https://')) {
+      if (localPath.startsWith('http://') || localPath.startsWith('https://')) {
         return localPath;
       }
       final normalized = localPath.startsWith('/')
@@ -404,39 +431,31 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
         return;
       }
       if (_previewUrl == null || _previewUrl!.isEmpty) {
-        showAppToast(
-          context,
-          'Preview link not available.',
-          isError: true,
-        );
+        showAppToast(context, 'Preview link not available.', isError: true);
         return;
       }
       if (_isImageDoc(doc)) {
         final imageUrl = _resolveDocUrl(doc);
         if (imageUrl == null) {
-          showAppToast(
-            context,
-            'Preview link not available.',
-            isError: true,
-          );
+          showAppToast(context, 'Preview link not available.', isError: true);
           return;
         }
-        await Navigator.of(context, rootNavigator: true).push(
-          MaterialPageRoute(
-            builder: (_) => _ImagePreviewScreen(
-              title: _docTypeLabel(doc),
-              imageUrl: imageUrl,
-            ),
+        await showDialog<void>(
+          context: context,
+          useRootNavigator: true,
+          builder: (_) => DocumentImagePreviewDialog(
+            title: _docTypeLabel(doc),
+            imageUrl: imageUrl,
           ),
         );
         return;
       }
-      await Navigator.of(context, rootNavigator: true).push(
-        MaterialPageRoute(
-          builder: (_) => DocumentPreviewScreen(
-            title: _docTypeLabel(doc),
-            initialUri: Uri.parse(url),
-          ),
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (_) => DocumentPreviewDialog(
+          title: _docTypeLabel(doc),
+          initialUri: Uri.parse(url),
         ),
       );
       return;
@@ -458,361 +477,842 @@ class _PersonalDocumentsSheetState extends State<_PersonalDocumentsSheet> {
       setState(() => _isSharing = false);
       return;
     }
-    await Share.shareXFiles(
-      [XFile(result.path, mimeType: result.mimeType, name: result.fileName)],
-      subject: record.name,
-    );
+    await Share.shareXFiles([
+      XFile(result.path, mimeType: result.mimeType, name: result.fileName),
+    ], subject: record.name);
     if (mounted) {
       setState(() => _isSharing = false);
     }
   }
 
-  Widget _buildDocumentDetails() {
+  // ─── Premium helper widgets ─────────────────────────────────────────────────
+
+  Widget _glassCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(12),
+    EdgeInsetsGeometry? margin,
+    Color? color,
+  }) {
+    return Container(
+      margin: margin ?? const EdgeInsets.symmetric(vertical: 4),
+      decoration: BoxDecoration(
+        color: color ?? _surfaceCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: _primaryColor.withOpacity(0.07),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+
+  Widget _sectionTitle(String text, {IconData? icon}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6, top: 2),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_primaryColor, _accentColor],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1A1A2E),
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPremiumDropdown<T>({
+    required T? value,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+    required String label,
+    IconData? icon,
+  }) {
+    return _glassCard(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          items: items,
+          isExpanded: true,
+          icon: const Icon(Icons.expand_more_rounded, color: _accentColor),
+          dropdownColor: Colors.white,
+          hint: Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18, color: _accentColor),
+                const SizedBox(width: 8),
+              ],
+              Text(
+                label,
+                style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+              ),
+            ],
+          ),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDocumentInfoCard() {
     if (_selectedDoc == null) {
-      return const Text('Select a document to view details.');
+      return _glassCard(
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.folder_open_rounded,
+                color: Colors.grey.shade400,
+                size: 24,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Text(
+              'Select a document to view details.',
+              style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+            ),
+          ],
+        ),
+      );
     }
 
     final doc = _selectedDoc!;
     final expiry = _formatDate(doc['expiry_date']?.toString());
     final mime = (doc['mime_type'] ?? '').toString();
+    final docName = (doc['document_name'] ?? '').toString();
+    final isPdf = _isPdfDoc(doc);
+    final isImg = _isImageDoc(doc);
+    final typeLabel = _docTypeLabel(doc);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          _docTypeLabel(doc),
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 6),
-        Text('Document Name: ${(doc['document_name'] ?? '').toString()}'),
-        if (mime.isNotEmpty) Text('Mime: $mime'),
-        if (expiry.isNotEmpty) Text('Expiry: $expiry'),
-      ],
+    IconData docIcon = Icons.description_rounded;
+    if (isPdf) docIcon = Icons.picture_as_pdf_rounded;
+    if (isImg) docIcon = Icons.image_rounded;
+
+    return _glassCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Gradient icon container
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [_primaryColor, _accentColor],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _accentColor.withOpacity(0.25),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(docIcon, color: Colors.white, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      typeLabel,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        color: Color(0xFF1A1A2E),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    if (docName.isNotEmpty && docName != typeLabel) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        docName,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                    if (mime.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        mime.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 0.5,
+                          color: _accentColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (expiry.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Container(height: 1, color: Colors.grey.shade100),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Icon(
+                  Icons.event_rounded,
+                  size: 16,
+                  color: Colors.grey.shade500,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'Expires:',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade500,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                _statusPill(expiry, _accentColor),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
-  Widget _buildBody(TextTheme textTheme) {
+  Widget _buildBody() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_accentColor),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Loading documents…',
+              style: TextStyle(
+                color: Colors.grey.shade500,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      );
     }
     if (_error != null) {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            _error!,
-            style: textTheme.bodyMedium?.copyWith(color: Colors.red.shade700),
-          ),
-          const SizedBox(height: 12),
-          ElevatedButton(
-            onPressed: _loadDocuments,
-            child: const Text('Retry'),
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: Colors.red.shade100),
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: Colors.red.shade400,
+                  size: 36,
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  _error!,
+                  style: TextStyle(color: Colors.red.shade700, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 14),
+                _buildGradientButton(
+                  label: 'Try Again',
+                  icon: Icons.refresh_rounded,
+                  onTap: _loadDocuments,
+                  colors: [Colors.red.shade400, Colors.red.shade600],
+                ),
+              ],
+            ),
           ),
         ],
       );
     }
     if (_documents.isEmpty) {
-      return Text(
-        'No personal documents available.',
-        style: textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
+      return _glassCard(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.blueGrey.shade50,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.folder_off_rounded,
+                color: Colors.blueGrey.shade300,
+                size: 36,
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'No personal documents available.',
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF1A1A2E),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Documents will appear here once uploaded.',
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+            ),
+          ],
+        ),
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        DropdownButtonFormField<String>(
-          value: _selectedType,
-          items: _documentTypes
-              .map(
-                (type) => DropdownMenuItem(
-                  value: type,
-                  child: Text(_typeLabels[type] ?? _toTitleCase(type)),
-                ),
-              )
-              .toList(),
-          decoration: const InputDecoration(
-            labelText: 'Document Type',
-          ),
-          dropdownColor: Colors.white,
-          onChanged: (value) {
-            setState(() {
-              _selectedType = value;
-              final docsForType = _docsForType(value);
-              _selectedDoc = docsForType.isNotEmpty ? docsForType.first : null;
-              _loadPreviewForDoc(_selectedDoc);
-            });
-          },
-        ),
-        if (_uniqueDocNameCount(_selectedType) > 1) ...[
-          const SizedBox(height: 16),
-          DropdownButtonFormField<Map<String, dynamic>>(
-            value: _selectedDoc,
-            items: _docsForType(_selectedType)
+    return FadeTransition(
+      opacity: _fadeIn,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Document type selector ─────────────────────────────
+          _sectionTitle('Document Type', icon: Icons.category_rounded),
+          _buildPremiumDropdown<String>(
+            value: _selectedType,
+            label: 'Select document type',
+            icon: Icons.folder_rounded,
+            items: _documentTypes
                 .map(
-                  (doc) => DropdownMenuItem(
-                    value: doc,
-                    child:
-                        Text((doc['document_name'] ?? '').toString()),
+                  (type) => DropdownMenuItem(
+                    value: type,
+                    child: Text(
+                      _typeLabels[type] ?? _toTitleCase(type),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1A1A2E),
+                      ),
+                    ),
                   ),
                 )
                 .toList(),
-            decoration: const InputDecoration(
-              labelText: 'Document Name',
-            ),
-            dropdownColor: Colors.white,
             onChanged: (value) {
               setState(() {
-                _selectedDoc = value;
+                _selectedType = value;
+                final docsForType = _docsForType(value);
+                _selectedDoc = docsForType.isNotEmpty
+                    ? docsForType.first
+                    : null;
                 _loadPreviewForDoc(_selectedDoc);
               });
             },
           ),
-        ],
-        const SizedBox(height: 16),
-        Card(
-          elevation: 0.5,
-          color: Colors.white,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: _buildDocumentDetails(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _openDocument(isDownload: false),
-                icon: const Icon(Icons.preview),
-                label: const Text('Preview'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue.shade600,
-                  foregroundColor: Colors.white,
+
+          // ── Sub-document selector (when multiple names exist) ──
+          if (_uniqueDocNameCount(_selectedType) > 1) ...[
+            const SizedBox(height: 8),
+            _sectionTitle('Document Name', icon: Icons.description_rounded),
+            _buildPremiumDropdown<Map<String, dynamic>>(
+              value: _selectedDoc,
+              label: 'Select document',
+              icon: Icons.insert_drive_file_rounded,
+              items: _docsForType(_selectedType)
+                  .map(
+                    (doc) => DropdownMenuItem(
+                      value: doc,
+                      child: Text(
+                        (doc['document_name'] ?? '').toString(),
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF1A1A2E),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedDoc = value;
+                  _loadPreviewForDoc(_selectedDoc);
+                });
+              },
+            ),
+          ],
+
+          const SizedBox(height: 8),
+
+          // ── Document info card ─────────────────────────────────
+          _sectionTitle('Document Info', icon: Icons.info_rounded),
+          _buildDocumentInfoCard(),
+
+          const SizedBox(height: 16),
+
+          // ── Action buttons ─────────────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: _buildGradientButton(
+                  label: 'Preview',
+                  icon: Icons.preview_rounded,
+                  onTap: () => _openDocument(isDownload: false),
+                  colors: const [Color(0xFF1B64D8), Color(0xFF0097A7)],
                 ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed:
-                    _isSharing ? null : () => _openDocument(isDownload: true),
-                icon: _isSharing
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    : const Icon(Icons.share),
-                label: const Text('Share'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade600,
-                  foregroundColor: Colors.white,
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildGradientButton(
+                  label: _isSharing ? 'Sharing…' : 'Share',
+                  icon: _isSharing ? null : Icons.share_rounded,
+                  isLoading: _isSharing,
+                  onTap: _isSharing
+                      ? null
+                      : () => _openDocument(isDownload: true),
+                  colors: const [Color(0xFF00897B), Color(0xFF00BFA6)],
                 ),
+              ),
+            ],
+          ),
+
+          // ── Inline preview ─────────────────────────────────────
+          if ((_canPreviewInline && _previewController != null) ||
+              (kIsWeb && _previewUrl != null && _previewUrl!.isNotEmpty)) ...[
+            const SizedBox(height: 20),
+            _sectionTitle('Preview', icon: Icons.visibility_rounded),
+            _buildPreviewContainer(),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGradientButton({
+    required String label,
+    IconData? icon,
+    required VoidCallback? onTap,
+    required List<Color> colors,
+    bool isLoading = false,
+  }) {
+    final bool disabled = onTap == null;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 50,
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: disabled
+                ? [Colors.grey.shade300, Colors.grey.shade400]
+                : colors,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: disabled
+              ? []
+              : [
+                  BoxShadow(
+                    color: colors.last.withOpacity(0.35),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            if (isLoading)
+              const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                ),
+              )
+            else if (icon != null)
+              Icon(icon, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
               ),
             ),
           ],
         ),
-        if ((_canPreviewInline && _previewController != null) ||
-            (kIsWeb && _previewUrl != null && _previewUrl!.isNotEmpty)) ...[
-          const SizedBox(height: 16),
-          Text(
-            'Preview',
-            style: textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          if (_canPreviewInline &&
-              _previewController != null &&
-              _selectedDoc != null &&
-              !_isImageDoc(_selectedDoc!))
-            Container(
-              height: 360,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(12),
+      ),
+    );
+  }
+
+  Widget _buildPreviewContainer() {
+    if (_canPreviewInline &&
+        _previewController != null &&
+        _selectedDoc != null &&
+        !_isImageDoc(_selectedDoc!)) {
+      return Container(
+        height: 380,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: _primaryColor.withOpacity(0.07),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          children: [
+            WebViewWidget(
+              controller: _previewController!,
+              gestureRecognizers: _webViewGestureRecognizers,
+            ),
+            if (_previewProgress < 1)
+              LinearProgressIndicator(
+                value: _previewProgress,
+                backgroundColor: Colors.transparent,
+                valueColor: const AlwaysStoppedAnimation<Color>(_accentColor),
               ),
-              clipBehavior: Clip.hardEdge,
-              child: Stack(
-                children: [
-                  WebViewWidget(controller: _previewController!),
-                  if (_previewProgress < 1)
-                    LinearProgressIndicator(value: _previewProgress),
-                  if (_previewError != null)
-                    Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline, size: 40),
-                            const SizedBox(height: 8),
-                            Text(
-                              _previewError!,
-                              textAlign: TextAlign.center,
-                            ),
-                          ],
-                        ),
+            if (_previewError != null)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.error_outline_rounded,
+                        size: 40,
+                        color: Colors.red.shade300,
                       ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _previewError!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.grey.shade600),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
-            )
-          else if (_selectedDoc != null && _isImageDoc(_selectedDoc!))
+          ],
+        ),
+      );
+    } else if (_selectedDoc != null && _isImageDoc(_selectedDoc!)) {
+      return Container(
+        height: 360,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade200),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: _primaryColor.withOpacity(0.07),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Image.network(
+          _resolveDocUrl(_selectedDoc!) ?? '',
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) {
+            return const Center(child: Icon(Icons.broken_image_outlined));
+          },
+        ),
+      );
+    } else {
+      return _glassCard(
+        child: Row(
+          children: [
             Container(
-              height: 360,
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(12),
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(10),
               ),
-              clipBehavior: Clip.hardEdge,
-              child: Image.network(
-                _resolveDocUrl(_selectedDoc!) ?? '',
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Icon(Icons.broken_image_outlined),
-                  );
-                },
-              ),
-            )
-          else
-            Container(
-              height: 160,
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Preview not available inside the app on this device.',
-                      style: textTheme.bodyMedium,
-                    ),
-                  ),
-                ],
+              child: Icon(
+                Icons.info_rounded,
+                color: Colors.blue.shade400,
+                size: 20,
               ),
             ),
-        ],
-      ],
-    );
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Preview not available inside the app on this device.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return DraggableScrollableSheet(
       expand: false,
-      initialChildSize: 0.85,
+      initialChildSize: 0.87,
       minChildSize: 0.6,
       maxChildSize: 0.98,
       builder: (context, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            color: _pageBackground,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
           ),
-          child: Column(
+          child: Stack(
             children: [
-              Container(
-                width: double.infinity,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: const BoxDecoration(
-                  color: _adminPrimaryColor,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Personal Documents',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
+              Column(
+                children: [
+                  // ── Gradient header ───────────────────────────────────
+                  Container(
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          _gradientStart,
+                          _gradientEnd,
+                          Color(0xFF0D4F6B),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.vertical(
+                        top: Radius.circular(28),
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close, color: Colors.white),
+                    child: Column(
+                      children: [
+                        // Drag handle
+                        const SizedBox(height: 10),
+                        Center(
+                          child: Container(
+                            width: 44,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.35),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                        // Title row
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(14, 8, 8, 14),
+                          child: Row(
+                            children: [
+                              // Icon badge
+                              Container(
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.13),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.2),
+                                  ),
+                                ),
+                                child: const Icon(
+                                  Icons.folder_special_rounded,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Personal Documents',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.2,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${_documents.length} document${_documents.length == 1 ? '' : 's'} available',
+                                      style: const TextStyle(
+                                        color: Colors.white60,
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              // Close button
+                              Material(
+                                color: Colors.white.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(12),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(12),
+                                  onTap: () => Navigator.of(context).pop(),
+                                  child: const Padding(
+                                    padding: EdgeInsets.all(8),
+                                    child: Icon(
+                                      Icons.close_rounded,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+
+                  // ── Scrollable content ────────────────────────────────
+                  Expanded(
+                    child: SingleChildScrollView(
+                      controller: scrollController,
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
+                      child: _buildBody(),
+                    ),
+                  ),
+                ],
               ),
-              Expanded(
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Personal Documents',
-                        style: theme.textTheme.titleLarge,
+              if (_isSharing)
+                Positioned.fill(
+                  child: AbsorbPointer(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.18),
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(28),
+                        ),
                       ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Select a document to view and download.',
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: theme.hintColor),
+                      child: Center(
+                        child: Container(
+                          width: 220,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 16,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(18),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.12),
+                                blurRadius: 18,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
+                          ),
+                          child: const Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 26,
+                                height: 26,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.6,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    _accentColor,
+                                  ),
+                                ),
+                              ),
+                              SizedBox(height: 12),
+                              Text(
+                                'Preparing document...',
+                                style: TextStyle(
+                                  color: Color(0xFF10233D),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Please wait while sharing starts',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Color(0xFF61718A),
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      _buildBody(theme.textTheme),
-                    ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         );
       },
-    );
-  }
-}
-
-class _ImagePreviewScreen extends StatelessWidget {
-  const _ImagePreviewScreen({
-    required this.title,
-    required this.imageUrl,
-  });
-
-  final String title;
-  final String imageUrl;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: Container(
-        color: Colors.black,
-        alignment: Alignment.center,
-        child: InteractiveViewer(
-          minScale: 0.8,
-          maxScale: 4.0,
-          child: Image.network(
-            imageUrl,
-            fit: BoxFit.contain,
-            errorBuilder: (context, error, stackTrace) {
-              return const Center(
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white70,
-                  size: 48,
-                ),
-              );
-            },
-          ),
-        ),
-      ),
     );
   }
 }

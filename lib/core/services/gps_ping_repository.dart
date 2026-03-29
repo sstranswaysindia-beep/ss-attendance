@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
@@ -21,6 +22,7 @@ class GpsPingRepository {
 
   final http.Client _client;
   final Uri _endpoint;
+  static const Duration _requestTimeout = Duration(seconds: 15);
 
   Future<void> sendPing({
     required String driverId,
@@ -41,25 +43,40 @@ class GpsPingRepository {
       if (timestamp != null) 'capturedAt': timestamp.toIso8601String(),
     };
 
-    try {
-      final response = await _client.post(
-        _endpoint,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      );
+    for (var attempt = 1; attempt <= 2; attempt++) {
+      try {
+        final response = await _client
+            .post(
+              _endpoint,
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode(body),
+            )
+            .timeout(_requestTimeout);
 
-      if (response.statusCode >= 300) {
-        throw GpsPingFailure('Unable to record GPS ping (status: ${response.statusCode}).');
-      }
+        if (response.statusCode >= 300) {
+          throw GpsPingFailure(
+            'Unable to record GPS ping (status: ${response.statusCode}).',
+          );
+        }
 
-      final payload = jsonDecode(response.body) as Map<String, dynamic>;
-      if (payload['status'] != 'ok') {
-        throw GpsPingFailure(payload['error']?.toString() ?? 'Unable to record GPS ping.');
+        final payload = jsonDecode(response.body) as Map<String, dynamic>;
+        if (payload['status'] != 'ok') {
+          throw GpsPingFailure(
+            payload['error']?.toString() ?? 'Unable to record GPS ping.',
+          );
+        }
+        return;
+      } on GpsPingFailure {
+        rethrow;
+      } on TimeoutException {
+        if (attempt == 2) {
+          throw GpsPingFailure('GPS ping timed out.');
+        }
+      } catch (_) {
+        if (attempt == 2) {
+          throw GpsPingFailure('Unable to record GPS ping.');
+        }
       }
-    } on GpsPingFailure {
-      rethrow;
-    } catch (_) {
-      throw GpsPingFailure('Unable to record GPS ping.');
     }
   }
 }

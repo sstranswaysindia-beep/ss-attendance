@@ -31,7 +31,7 @@ val dartDefines = dartDefinesEncoded.mapNotNull { encoded ->
 val isAdminBuild = dartDefines.contains("APP_VARIANT=admin")
 val baseApplicationId = "com.sstranswaysindia.app"
 val adminApplicationId = "com.sstranswaysindia.admin"
-val bundleBaseName = if (isAdminBuild) "admin-app" else "main-app"
+val bundleBaseName = if (isAdminBuild) "admin-app" else "app"
 
 android {
     namespace = "com.sstranswaysindia.app"

@@ -1,3 +1,0 @@
-- Updated Safety hub header styling with a white background and approvals-style app bar.
-- Added and resized Safety hub bottom animation using downloads/safety.json.
-- Attendance history status chips now match approvals styling.

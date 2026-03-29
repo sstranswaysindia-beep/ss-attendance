@@ -1,3 +1,0 @@
-- Added pending-approval (yellow) status to attendance calendars and monthly statistics.
-- Compacted monthly statistics layout and removed daily breakdown list.
-- Refined attendance summaries and legend counts for present/pending/open/absent days.

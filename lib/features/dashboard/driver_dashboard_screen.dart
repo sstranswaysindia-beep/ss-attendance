@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:lottie/lottie.dart';
@@ -9,6 +11,7 @@ import 'package:lottie/lottie.dart';
 import '../../core/models/app_user.dart';
 import '../../core/models/driver_vehicle.dart';
 import '../../core/models/attendance_record.dart';
+import '../../core/navigation/app_route_observer.dart';
 import '../../core/services/assignment_repository.dart';
 import '../../core/services/finance_repository.dart';
 import '../../core/services/attendance_repository.dart';
@@ -27,6 +30,7 @@ import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/widgets/in_app_notification_banner.dart';
 import '../../core/widgets/update_available_sheet.dart';
+import '../../core/widgets/biometric_enable_sheet.dart';
 import '../attendance/attendance_adjust_request_screen.dart';
 import '../attendance/attendance_history_screen.dart';
 import '../attendance/check_in_out_screen.dart';
@@ -40,7 +44,10 @@ import '../safety/safety_hub_screen.dart';
 import '../safety/training/training_screen.dart';
 import '../statistics/monthly_statistics_screen.dart';
 import '../trips/trip_screen.dart';
+import '../trips/trip_sheet_screen.dart';
+import '../referral/referral_tracker_screen.dart';
 import '../watch_ads/watch_ads_screen.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 class DriverDashboardScreen extends StatefulWidget {
   const DriverDashboardScreen({
@@ -57,7 +64,11 @@ class DriverDashboardScreen extends StatefulWidget {
 }
 
 class _DriverDashboardScreenState extends State<DriverDashboardScreen>
-    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver, RouteAware {
+  static const int _driverDocumentWarningDays = 12;
+  static const String _driverDocumentsListUrl =
+      'https://sstranswaysindia.com/api/mobile/driver_documents_list.php';
+
   late DateTime _now;
   Timer? _ticker;
   late String? _selectedVehicleId;
@@ -83,6 +94,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   bool _checkingTraining = false;
   bool _biometricEnabled = false;
   bool _biometricSupported = false;
+  bool _dashboardBellHiddenByOverlay = false;
+  ModalRoute<dynamic>? _observedRoute;
 
   late final AnimationController _glowController;
   late final Animation<double> _glowAnimation;
@@ -90,18 +103,24 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   List<_NotificationItem> _systemNotifications = [
     const _NotificationItem(message: 'Loading...', type: NotificationType.info),
   ];
-  final List<_NotificationItem> _pushNotifications = [];
-  StreamSubscription<InAppNotificationData>? _pushNotificationSubscription;
-  StreamSubscription<List<InAppNotificationData>>?
-  _pushNotificationListSubscription;
   String? _appVersion;
+
+  // ── Bottom navigation ──
+  int _selectedTabIndex = 0;
+
+  // ── Current Month Trips state ──
+  bool _isLoadingTrips = true;
+  List<Map<String, dynamic>> _currentMonthTrips = [];
+  String? _tripsError;
+  _DriverDocumentAlert? _driverDocumentAlert;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _now = DateTime.now();
-    _initializePushNotifications();
+    NotificationService().forceShowBell();
+    unawaited(NotificationService().bindInboxUser(widget.user.id));
     _selectedVehicleNumber = widget.user.vehicleNumber;
     final vehicles = widget.user.availableVehicles;
     if (vehicles.isNotEmpty) {
@@ -143,17 +162,11 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkForAppUpdate();
       _checkTrainingRequirement();
+      _loadCurrentMonthTrips();
     });
+    unawaited(_loadDriverDocumentAlert());
 
-    _gpsPingService =
-        GpsPingService(user: widget.user, repository: _gpsPingRepository)
-          ..start(
-            showToast: (message, {bool isError = false}) {
-              if (mounted) {
-                showAppToast(context, message, isError: isError);
-              }
-            },
-          );
+    _startGpsPingService();
   }
 
   Future<void> _loadBiometricSetting() async {
@@ -166,28 +179,45 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     });
   }
 
-  Future<void> _toggleBiometric(bool value) async {
-    final supported = await _biometricService.isSupported();
-    if (!supported && value) {
-      showAppToast(
-        context,
-        'Biometric unlock is not available on this device.',
-        isError: true,
-      );
+  Future<void> _openBiometricSheet() async {
+    await BiometricEnableSheet.show(context, userId: widget.user.id);
+    // Sync state from the sheet result
+    final currentEnabled = await _biometricService.isEnabledForUser(
+      widget.user.id,
+    );
+    if (!mounted) return;
+    setState(() => _biometricEnabled = currentEnabled);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route == _observedRoute) {
       return;
     }
-    setState(() => _biometricEnabled = value);
-    await _biometricService.setEnabledForUser(widget.user.id, value);
+    if (_observedRoute is PageRoute<dynamic>) {
+      appRouteObserver.unsubscribe(this);
+    }
+    _observedRoute = route;
+    if (route is PageRoute<dynamic>) {
+      appRouteObserver.subscribe(this, route);
+    }
   }
 
   @override
   void dispose() {
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
+    }
+    if (_observedRoute is PageRoute<dynamic>) {
+      appRouteObserver.unsubscribe(this);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _ticker?.cancel();
     _glowController.dispose();
     _gpsPingService?.stop();
-    _pushNotificationSubscription?.cancel();
-    _pushNotificationListSubscription?.cancel();
     super.dispose();
   }
 
@@ -195,58 +225,56 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      _startGpsPingService();
+      unawaited(
+        NotificationService().syncInboxFromServer(userId: widget.user.id),
+      );
+      unawaited(_loadDriverDocumentAlert());
       _checkForAppUpdate();
       _checkTrainingRequirement();
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _gpsPingService?.stop();
     }
   }
 
-  void _initializePushNotifications() {
-    final notificationService = NotificationService();
-    final recent = notificationService.recentInAppNotifications;
-    if (recent.isNotEmpty) {
-      _pushNotifications
-        ..clear()
-        ..addAll(recent.map(_mapPushNotification));
+  @override
+  void didPush() {
+    NotificationService().forceShowBell();
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
     }
-
-    _pushNotificationSubscription = notificationService.inAppNotifications
-        .listen((notification) {
-          if (!mounted) return;
-          setState(() {
-            _pushNotifications.insert(0, _mapPushNotification(notification));
-            _systemNotifications = _systemNotifications
-                .where((item) => !item.isPlaceholder)
-                .toList(growable: false);
-          });
-        });
-    _pushNotificationListSubscription = notificationService
-        .inAppNotificationList
-        .listen((notifications) {
-          if (!mounted) return;
-          setState(() {
-            _pushNotifications
-              ..clear()
-              ..addAll(notifications.map(_mapPushNotification));
-            _systemNotifications = _systemNotifications
-                .where((item) => !item.isPlaceholder)
-                .toList(growable: false);
-          });
-        });
   }
 
-  _NotificationItem _mapPushNotification(InAppNotificationData notification) {
-    final fallbackMessage = notification.body.isNotEmpty
-        ? notification.body
-        : (notification.data['body']?.toString() ??
-              notification.data['message']?.toString() ??
-              'Notification received.');
-    return _NotificationItem(
-      title: notification.title,
-      message: fallbackMessage,
-      type: NotificationType.alert,
-      timestamp: notification.receivedAt,
-      metadata: notification.data,
-      isPush: true,
+  @override
+  void didPopNext() {
+    NotificationService().forceShowBell();
+    if (_dashboardBellHiddenByOverlay) {
+      NotificationService().releaseBellHide();
+      _dashboardBellHiddenByOverlay = false;
+    }
+  }
+
+  @override
+  void didPushNext() {
+    if (_dashboardBellHiddenByOverlay) return;
+    NotificationService().requestBellHide();
+    _dashboardBellHiddenByOverlay = true;
+  }
+
+  void _startGpsPingService() {
+    _gpsPingService ??= GpsPingService(
+      user: widget.user,
+      repository: _gpsPingRepository,
+    );
+    _gpsPingService?.start(
+      showToast: (message, {bool isError = false}) {
+        if (mounted) {
+          showAppToast(context, message, isError: isError);
+        }
+      },
     );
   }
 
@@ -258,9 +286,8 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     final detailMessage = _resolveNotificationMessage(item);
     return showNotificationDetailDialog(
       context,
-      title: item.title,
+      title: 'Dashboard Alert',
       message: detailMessage,
-      timestamp: item.timestamp,
     );
   }
 
@@ -268,18 +295,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     if (item.message.trim().isNotEmpty) {
       return item.message;
     }
-    final metadata = item.metadata;
-    if (metadata == null || metadata.isEmpty) {
-      return 'Notification received.';
-    }
-    return metadata['body']?.toString() ??
-        metadata['message']?.toString() ??
-        metadata.values.map((value) => value?.toString() ?? '').join('\n');
-  }
-
-  String? _formatNotificationTime(DateTime? timestamp) {
-    if (timestamp == null) return null;
-    return DateFormat('hh:mm a').format(timestamp);
+    return 'Notification received.';
   }
 
   void _handleVehicleUpdated(DriverVehicle vehicle) {
@@ -559,10 +575,10 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
         }
       }
 
-      if (items.isEmpty && _pushNotifications.isEmpty) {
+      if (items.isEmpty) {
         items.add(
           const _NotificationItem(
-            message: 'No new notifications',
+            message: 'No dashboard alerts right now',
             type: NotificationType.info,
             isPlaceholder: true,
           ),
@@ -655,10 +671,35 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     setState(() => _isLoadingShift = true);
     try {
       final today = DateTime.now();
-      final record = await _attendanceRepository.fetchLatestRecord(
+      final currentMonthRecords = await _attendanceRepository.fetchHistory(
         driverId: driverId,
         month: DateTime(today.year, today.month),
       );
+      final previousMonthRecords = await _attendanceRepository.fetchHistory(
+        driverId: driverId,
+        month: DateTime(today.year, today.month - 1),
+      );
+      DateTime? recordTime(AttendanceRecord item) {
+        final inTime = _parseDate(item.inTime);
+        final outTime = _parseDate(item.outTime);
+        if (inTime == null) return outTime;
+        if (outTime == null) return inTime;
+        return outTime.isAfter(inTime) ? outTime : inTime;
+      }
+
+      final candidates = <AttendanceRecord>[
+        ...currentMonthRecords,
+        ...previousMonthRecords,
+      ];
+      AttendanceRecord? record;
+      for (final item in candidates) {
+        final itemTime = recordTime(item);
+        final selectedTime = record == null ? null : recordTime(record);
+        if (itemTime != null &&
+            (selectedTime == null || itemTime.isAfter(selectedTime))) {
+          record = item;
+        }
+      }
       if (!mounted) return;
 
       final now = DateTime.now();
@@ -667,8 +708,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
       if (record != null) {
         final inTime = _parseDate(record.inTime);
         final outTime = _parseDate(record.outTime);
-        if (inTime != null &&
-            (record.outTime == null || record.outTime!.isEmpty)) {
+        if (inTime != null && _isMissingTimeValue(record.outTime)) {
           summary =
               'Checked in at ${DateFormat('dd MMM • HH:mm').format(inTime)}';
         } else if (outTime != null) {
@@ -704,8 +744,25 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     return DateTime.tryParse(raw);
   }
 
+  bool _isMissingTimeValue(String? raw) {
+    if (raw == null) return true;
+    final v = raw.trim().toLowerCase();
+    return v.isEmpty ||
+        v == 'null' ||
+        v == 'none' ||
+        v == 'na' ||
+        v == 'n/a' ||
+        v == '0' ||
+        v.startsWith('0000-00-00');
+  }
+
   bool _isSameDay(DateTime a, DateTime b) =>
       a.year == b.year && a.month == b.month && a.day == b.day;
+
+  bool _isBeforeToday(DateTime candidate, DateTime reference) {
+    final todayStart = DateTime(reference.year, reference.month, reference.day);
+    return candidate.isBefore(todayStart);
+  }
 
   bool get _hasOpenShift {
     final record = _latestShift;
@@ -716,8 +773,19 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     if (inTime == null || !_isSameDay(inTime, DateTime.now())) {
       return false;
     }
-    final outTimeRaw = record.outTime;
-    return outTimeRaw == null || outTimeRaw.isEmpty;
+    return _isMissingTimeValue(record.outTime);
+  }
+
+  bool get _hasPastOpenShift {
+    final record = _latestShift;
+    if (record == null) {
+      return false;
+    }
+    final inTime = _parseDate(record.inTime);
+    if (inTime == null || !_isBeforeToday(inTime, DateTime.now())) {
+      return false;
+    }
+    return _isMissingTimeValue(record.outTime);
   }
 
   String get _attendanceButtonLabel {
@@ -726,6 +794,9 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     }
     if (_hasOpenShift) {
       return 'Check-out Pending';
+    }
+    if (_hasPastOpenShift) {
+      return 'Mark Previous Day';
     }
     if (_isAttendanceLockedToday) {
       return 'Attendance Completed';
@@ -743,7 +814,7 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
   }
 
   Future<void> _handleAttendanceButtonTap() async {
-    if (_isAttendanceLockedToday && !_hasOpenShift) {
+    if (_isAttendanceLockedToday && !_hasOpenShift && !_hasPastOpenShift) {
       showAppToast(
         context,
         'Attendance already marked for today.',
@@ -844,6 +915,87 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     return parts.join(' & ');
   }
 
+  // ── Load current month trips ──
+  Future<void> _loadCurrentMonthTrips() async {
+    final driverId = widget.user.driverId;
+    if (driverId == null || driverId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoadingTrips = false;
+          _currentMonthTrips = [];
+          _tripsError = null;
+        });
+      }
+      return;
+    }
+
+    final now = DateTime.now();
+    final from = DateTime(now.year, now.month, 1);
+    final to = DateTime(now.year, now.month + 1, 0); // last day of month
+    final fromStr = DateFormat('yyyy-MM-dd').format(from);
+    final toStr = DateFormat('yyyy-MM-dd').format(to);
+
+    try {
+      final response = await http.post(
+        Uri.parse(
+          'https://sstranswaysindia.com/api/mobile/driver_trip_details_by_date.php',
+        ),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'driverId': driverId, 'from': fromStr, 'to': toStr}),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['status'] == 'ok') {
+          final byDateRaw = data['byDate'];
+          final allTrips = <Map<String, dynamic>>[];
+          if (byDateRaw is Map) {
+            for (final dateEntry in byDateRaw.entries) {
+              final trips = dateEntry.value;
+              if (trips is List) {
+                for (final trip in trips) {
+                  if (trip is Map<String, dynamic>) {
+                    allTrips.add(trip);
+                  }
+                }
+              }
+            }
+          }
+          // Sort by startDate descending
+          allTrips.sort((a, b) {
+            final aDate = (a['startDate'] ?? '') as String;
+            final bDate = (b['startDate'] ?? '') as String;
+            return bDate.compareTo(aDate);
+          });
+          setState(() {
+            _currentMonthTrips = allTrips;
+            _isLoadingTrips = false;
+            _tripsError = null;
+          });
+        } else {
+          setState(() {
+            _isLoadingTrips = false;
+            _tripsError = data['error'] as String? ?? 'Failed to load trips';
+          });
+        }
+      } else {
+        setState(() {
+          _isLoadingTrips = false;
+          _tripsError = 'Server error (${response.statusCode})';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingTrips = false;
+          _tripsError = 'Unable to load trips: $e';
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final dateFormatter = DateFormat('dd-MM-yyyy');
@@ -864,147 +1016,133 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
     final tenureSubtitle = tenureText != null
         ? 'Working for $tenureText'
         : null;
-    final notifications = [..._pushNotifications, ..._systemNotifications];
+
+    // ── Brand colors ──
+    const navyDark = Color(0xFF0A1628);
+    const navyBrand = Color(0xFF153753);
+    const goldAccent = Color(0xFFD4A843);
+    const surfaceBg = Color(0xFFF4F7FC);
+    const cardBg = Color(0xFFFFFFFE);
+
+    final isDriver =
+        widget.user.role == 'Driver' || widget.user.role == 'Helper';
+    final roleLabel = isHelper ? 'Helper' : 'Driver';
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        leadingWidth: 36,
-        leading: Builder(
-          builder: (context) => IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
-            iconSize: 20,
-            icon: const Icon(Icons.menu),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: Lottie.asset(
-                'assets/animations/green_flashing_circle_icon.json',
-                repeat: true,
-              ),
-            ),
-            const SizedBox(width: 2),
-            Text(
-              isHelper ? 'Helper Dashboard' : 'Driver Dashboard',
-              style: textTheme.titleLarge?.copyWith(
-                fontSize: 24,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            onPressed: () {
-              widget.onLogout();
-              showAppToast(context, 'You have been logged out');
-            },
-            icon: const Icon(Icons.logout),
-          ),
-        ],
-      ),
+      backgroundColor: surfaceBg,
       drawer: Drawer(
         backgroundColor: Colors.white,
         child: SafeArea(
+          top: false,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               DrawerHeader(
                 decoration: const BoxDecoration(
-                  gradient: AppGradientBackground.primaryLinearGradient,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF0A1628), Color(0xFF153753)],
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    ProfilePhotoWithUpload(
-                      user: widget.user,
-                      radius: 28,
-                      onPhotoSelected: _handlePhotoSelected,
-                      isUploading: _isUploadingPhoto,
-                    ),
+                    ProfilePhotoWidget(user: widget.user, radius: 28),
                     const SizedBox(height: 12),
                     Text(
                       widget.user.displayName,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleMedium?.copyWith(color: Colors.white),
+                      style: GoogleFonts.poppins(
+                        fontSize: 16,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      roleLabel,
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        color: goldAccent,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ],
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.person),
-                title: const Text('Profile'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _openScreen(DriverProfileScreen(user: widget.user));
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.notifications),
-                title: const Text('Notification Settings'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  _openScreen(const NotificationSettingsScreen());
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.folder_shared),
-                title: const Text('Personal Documents'),
-                onTap: () {
+              _drawerTile(Icons.person_outline, 'Profile', () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => DriverProfileScreen(user: widget.user),
+                  ),
+                );
+              }),
+              _drawerTile(Icons.bar_chart_rounded, 'Monthly Statistics', () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MonthlyStatisticsScreen(user: widget.user),
+                  ),
+                );
+              }),
+              _drawerTile(Icons.notifications_outlined, 'Notifications', () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationSettingsScreen(),
+                  ),
+                );
+              }),
+              _drawerTile(
+                Icons.folder_shared_outlined,
+                'Personal Documents',
+                () {
                   Navigator.of(context).pop();
                   showPersonalDocumentsSheet(context, widget.user);
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.play_circle_fill_outlined),
-                title: const Text('Watch Ads & Earn'),
-                onTap: () {
+              _drawerTile(Icons.play_circle_outline, 'Watch Ads & Earn', () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => WatchAdsScreen(user: widget.user),
+                  ),
+                );
+              }),
+              _drawerTile(Icons.card_giftcard_rounded, 'Referral Program', () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ReferralTrackerScreen(user: widget.user),
+                  ),
+                );
+              }),
+              _drawerTile(
+                Icons.fingerprint,
+                _biometricEnabled ? 'Biometric (Enabled)' : 'Biometric Unlock',
+                () {
                   Navigator.of(context).pop();
-                  _openScreen(WatchAdsScreen(user: widget.user));
+                  _openBiometricSheet();
                 },
+                iconColor: _biometricEnabled ? Colors.green : null,
               ),
-              SwitchListTile(
-                secondary: const Icon(Icons.fingerprint),
-                title: const Text('Biometric Unlock'),
-                subtitle: Text(
-                  _biometricSupported
-                      ? 'Unlock with fingerprint or face'
-                      : 'Not supported on this device',
-                ),
-                value: _biometricEnabled,
-                onChanged: _biometricSupported ? _toggleBiometric : null,
-                activeColor: Colors.green,
-                activeTrackColor: Colors.green.shade200,
-                inactiveThumbColor: Colors.red,
-                inactiveTrackColor: Colors.red.shade200,
-              ),
-              ListTile(
-                leading: const Icon(Icons.logout),
-                title: const Text('Logout'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  widget.onLogout();
-                  showAppToast(context, 'You have been logged out');
-                },
-              ),
+              const Divider(),
+              _drawerTile(Icons.logout_rounded, 'Logout', () {
+                Navigator.of(context).pop();
+                widget.onLogout();
+                showAppToast(context, 'Logged out successfully');
+              }, iconColor: Colors.red.shade400),
               const Spacer(),
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   'Version ${_appVersion ?? '...'}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Colors.blue[600],
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: navyBrand.withOpacity(0.4),
+                    fontWeight: FontWeight.w500,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -1013,340 +1151,663 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
           ),
         ),
       ),
-      body: AppGradientBackground(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: ListView(
-              children: [
-                // First line: Profile photo + Welcome, Name
-                Row(
-                  children: [
-                    ProfilePhotoWithUpload(
-                      user: widget.user,
-                      radius: 24,
-                      onPhotoSelected: _handlePhotoSelected,
-                      isUploading: _isUploadingPhoto,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          SizedBox(
-                            width: 130,
-                            height: 34,
-                            child: Lottie.asset(
-                              'downloads/welcome.json',
-                              repeat: true,
-                              fit: BoxFit.contain,
-                            ),
-                          ),
-                          const SizedBox(width: 0),
-                          Flexible(
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 8, left: 2),
-                              child: Text(
-                                widget.user.displayName,
-                                overflow: TextOverflow.ellipsis,
-                                style: textTheme.titleMedium?.copyWith(
-                                  fontSize:
-                                      (textTheme.titleMedium?.fontSize ?? 16) +
-                                          6,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Second line: Working for X years + Date & Time
-                Row(
-                  children: [
-                    if (tenureSubtitle != null) ...[
-                      Chip(
-                        label: Text(tenureSubtitle),
-                        labelStyle: textTheme.labelSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        backgroundColor: Theme.of(
-                          context,
-                        ).colorScheme.primary.withOpacity(0.12),
-                        visualDensity: VisualDensity.compact,
-                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      const SizedBox(width: 12),
-                    ],
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Chip(
-                            label: Text(
-                              dateFormatter.format(_now),
-                              style: textTheme.labelSmall?.copyWith(
-                                fontSize: 11,
-                              ),
-                            ),
-                            avatar: const Icon(Icons.calendar_today, size: 14),
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                          const SizedBox(width: 8),
-                          Chip(
-                            label: Text(
-                              timeFormatter.format(_now),
-                              style: textTheme.labelSmall?.copyWith(
-                                fontSize: 11,
-                              ),
-                            ),
-                            avatar: const Icon(Icons.access_time, size: 14),
-                            materialTapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            visualDensity: VisualDensity.compact,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                GlowingAttendanceButton(
-                  animation: _glowAnimation,
-                  onTap: _handleAttendanceButtonTap,
-                  isLoading: _isCheckingAbsence,
-                  label: _attendanceButtonLabel,
-                  gradient: _hasOpenShift
-                      ? const LinearGradient(
-                          colors: [Color(0xFFE0BC00), Color(0xFFFFE082)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : _isAttendanceLockedToday
-                      ? const LinearGradient(
-                          colors: [Color(0xFFB0BEC5), Color(0xFFECEFF1)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : null,
-                  icon: _hasOpenShift
-                      ? Icons.access_time
-                      : _isAttendanceLockedToday
-                      ? Icons.verified
-                      : Icons.arrow_right_alt,
-                  iconColor: _hasOpenShift
-                      ? const Color(0xFF3B2F00)
-                      : _isAttendanceLockedToday
-                      ? const Color(0xFF37474F)
-                      : Colors.black,
-                  textColor: _hasOpenShift
-                      ? const Color(0xFF3B2F00)
-                      : _isAttendanceLockedToday
-                      ? const Color(0xFF37474F)
-                      : Colors.black,
-                ),
-                if (_shiftSummary != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    _shiftSummary!,
-                    style: Theme.of(context).textTheme.bodySmall,
+      body: switch (_selectedTabIndex) {
+        0 => _buildHomeTab(
+          context,
+          theme: theme,
+          textTheme: textTheme,
+          dateFormatter: dateFormatter,
+          timeFormatter: timeFormatter,
+          isHelper: isHelper,
+          plantDisplay: plantDisplay,
+          vehicleDisplay: vehicleDisplay,
+          supervisorName: supervisorName,
+          tenureSubtitle: tenureSubtitle,
+          navyDark: navyDark,
+          navyBrand: navyBrand,
+          goldAccent: goldAccent,
+          surfaceBg: surfaceBg,
+          cardBg: cardBg,
+        ),
+        1 => AdvanceSalaryScreen(user: widget.user),
+        2 => SalaryAdvanceScreen(user: widget.user),
+        3 => TripScreen(
+          user: widget.user,
+          onBack: () => setState(() => _selectedTabIndex = 0),
+        ),
+        _ => const SizedBox.shrink(),
+      },
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+      floatingActionButton: AnimatedBuilder(
+        animation: _glowAnimation,
+        builder: (context, child) {
+          final statusColor = _hasOpenShift
+              ? const Color(0xFFE0BC00)
+              : _hasPastOpenShift
+              ? const Color(0xFFD8B4FE)
+              : _isAttendanceLockedToday
+              ? const Color(0xFFB0BEC5)
+              : const Color(0xFF00EB5E);
+          return Container(
+            height: 76,
+            width: 76,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: statusColor.withOpacity(
+                    0.4 + _glowAnimation.value * 0.3,
                   ),
-                ],
-                const SizedBox(height: 16),
-                Text(
-                  'Quick Links',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  blurRadius: 10 + _glowAnimation.value * 12,
+                  spreadRadius: 2 + _glowAnimation.value * 4,
                 ),
-                const SizedBox(height: 8),
-                Card(
-                  color: Colors.white,
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Column(
-                    children: [
-                      HoverListTile(
-                        leading: const Icon(Icons.history),
-                        title: const Text('Attendance History'),
-                        onTap: () => _openScreen(
-                          AttendanceHistoryScreen(user: widget.user),
-                        ),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.bar_chart),
-                        title: const Text('Monthly Statistics'),
-                        onTap: () => _openScreen(
-                          MonthlyStatisticsScreen(user: widget.user),
-                        ),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.beach_access),
-                        title: const Text('Apply Leave'),
-                        onTap: () => showApplyLeaveSheet(context, widget.user),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.payments),
-                        title: const Text('Salary / Advance'),
-                        onTap: () =>
-                            _openScreen(SalaryAdvanceScreen(user: widget.user)),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.account_balance_wallet),
-                        title: const Text('Khata Book'),
-                        onTap: () =>
-                            _openScreen(AdvanceSalaryScreen(user: widget.user)),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.edit_calendar),
-                        title: const Text('Request Past Attendance'),
-                        onTap: () => _openScreen(
-                          AttendanceAdjustRequestScreen(user: widget.user),
-                        ),
-                      ),
-                      const Divider(height: 0),
-                      HoverListTile(
-                        leading: const Icon(Icons.safety_check),
-                        title: const Text('Safety'),
-                        onTap: () =>
-                            _openScreen(SafetyHubScreen(user: widget.user)),
-                      ),
-                      if (!isHelper) ...[
-                        const Divider(height: 0),
-                        HoverListTile(
-                          leading: const Icon(Icons.local_shipping),
-                          title: const Text('Trips'),
-                          onTap: () =>
-                              _openScreen(TripScreen(user: widget.user)),
-                        ),
-                      ],
-                    ],
+              ],
+            ),
+            child: FloatingActionButton.large(
+              onPressed: _isCheckingAbsence ? null : _handleAttendanceButtonTap,
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              shape: CircleBorder(
+                side: BorderSide(color: statusColor, width: 3.5),
+              ),
+              child: ClipOval(
+                child: SizedBox.expand(
+                  child: Image.asset(
+                    'assets/images/attendance_mark.gif',
+                    fit: BoxFit.cover,
                   ),
                 ),
-                const SizedBox(height: 16),
-                Text(
-                  'Notifications',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Container(
+              ),
+            ),
+          );
+        },
+      ),
+      bottomNavigationBar: BottomAppBar(
+        color: Colors.white,
+        elevation: 0,
+        height: 58,
+        surfaceTintColor: Colors.transparent,
+        shape: const CircularNotchedRectangle(),
+        notchMargin: 6,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            Expanded(
+              child: _buildNavItem(0, Icons.home_rounded, 'Home', navyBrand),
+            ),
+            Expanded(
+              child: _buildNavItem(
+                1,
+                Icons.account_balance_wallet_rounded,
+                'Khatabook',
+                navyBrand,
+              ),
+            ),
+            const SizedBox(width: 72), // space for FAB
+            Expanded(
+              child: _buildNavItem(
+                2,
+                Icons.payments_rounded,
+                'Salary',
+                navyBrand,
+              ),
+            ),
+            Expanded(
+              child: _buildNavItem(
+                3,
+                Icons.local_shipping_rounded,
+                'Trips',
+                navyBrand,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(
+    int index,
+    IconData icon,
+    String label,
+    Color activeColor,
+  ) {
+    final isActive = _selectedTabIndex == index;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedTabIndex = index),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isActive ? activeColor : Colors.grey.shade400,
+            ),
+            Text(
+              label,
+              style: GoogleFonts.poppins(
+                fontSize: 9,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w400,
+                color: isActive ? activeColor : Colors.grey.shade500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerTile(
+    IconData icon,
+    String title,
+    VoidCallback onTap, {
+    Color? iconColor,
+  }) {
+    return ListTile(
+      leading: Icon(icon, color: iconColor ?? const Color(0xFF153753)),
+      title: Text(
+        title,
+        style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      onTap: onTap,
+      dense: true,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  Widget _buildHomeTab(
+    BuildContext context, {
+    required ThemeData theme,
+    required TextTheme textTheme,
+    required DateFormat dateFormatter,
+    required DateFormat timeFormatter,
+    required bool isHelper,
+    required String plantDisplay,
+    required String vehicleDisplay,
+    required String? supervisorName,
+    required String? tenureSubtitle,
+    required Color navyDark,
+    required Color navyBrand,
+    required Color goldAccent,
+    required Color surfaceBg,
+    required Color cardBg,
+  }) {
+    const headerExpandedHeight = 184.0;
+    final attendanceAccent = _hasOpenShift
+        ? const Color(0xFFE0BC00)
+        : _hasPastOpenShift
+        ? const Color(0xFFD8B4FE)
+        : _isAttendanceLockedToday
+        ? const Color(0xFFB0BEC5)
+        : const Color(0xFF00EB5E);
+    final attendanceChipBackground = _hasOpenShift
+        ? const Color(0xFFE0BC00).withOpacity(0.18)
+        : _hasPastOpenShift
+        ? const Color(0xFFD8B4FE).withOpacity(0.18)
+        : _isAttendanceLockedToday
+        ? const Color(0xFFB0BEC5).withOpacity(0.18)
+        : const Color(0xFF00EB5E).withOpacity(0.16);
+    final attendanceChipTextColor = _hasOpenShift
+        ? const Color(0xFFFFF6CC)
+        : _hasPastOpenShift
+        ? const Color(0xFFF5EAFF)
+        : _isAttendanceLockedToday
+        ? const Color(0xFFF4F7F9)
+        : const Color(0xFFEFFFEF);
+
+    return CustomScrollView(
+      physics: const BouncingScrollPhysics(),
+      slivers: [
+        // ── Pinned header: profile/name stays visible on scroll ──
+        SliverAppBar(
+          pinned: true,
+          floating: false,
+          snap: false,
+          backgroundColor: navyBrand,
+          surfaceTintColor: Colors.transparent,
+          automaticallyImplyLeading: false,
+          toolbarHeight: 72,
+          expandedHeight: headerExpandedHeight,
+          title: _DriverCollapsedHeaderTitle(
+            user: widget.user,
+            onLogout: () {
+              widget.onLogout();
+              showAppToast(context, 'You have been logged out');
+            },
+          ),
+          flexibleSpace: FlexibleSpaceBar(
+            background: LayoutBuilder(
+              builder: (context, constraints) {
+                final settings = context
+                    .dependOnInheritedWidgetOfExactType<
+                      FlexibleSpaceBarSettings
+                    >();
+                final minExtent = settings?.minExtent ?? kToolbarHeight;
+                final maxExtent = settings?.maxExtent ?? headerExpandedHeight;
+                final currentExtent = settings?.currentExtent ?? maxExtent;
+                final rawT =
+                    (currentExtent - minExtent) / (maxExtent - minExtent);
+                final t = rawT.clamp(0.0, 1.0);
+                final upperSectionVisibility = ((t - 0.26) / 0.24).clamp(
+                  0.0,
+                  1.0,
+                );
+                final lowerSectionVisibility = ((t - 0.42) / 0.16).clamp(
+                  0.0,
+                  1.0,
+                );
+
+                return Container(
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFE3F2FD), Colors.white],
+                    gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
+                      colors: [navyDark, navyBrand],
                     ),
-                    borderRadius: BorderRadius.circular(18),
                   ),
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    children: [
-                      for (
-                        int index = 0;
-                        index < notifications.length;
-                        index++
-                      ) ...[
-                        Builder(
-                          builder: (context) {
-                            final item = notifications[index];
-                            final hasTitle =
-                                item.title != null &&
-                                item.title!.trim().isNotEmpty;
-                            final timeLabel = _formatNotificationTime(
-                              item.timestamp,
-                            );
-                            return Card(
-                              margin: EdgeInsets.zero,
-                              elevation: 2,
-                              color: Colors.white,
-                              surfaceTintColor: Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(14),
-                              ),
-                              child: ListTile(
-                                leading: Icon(
-                                  item.type.icon,
-                                  color: item.type.color,
-                                ),
-                                title: Text(
-                                  hasTitle ? item.title!.trim() : item.message,
-                                ),
-                                subtitle: hasTitle ? Text(item.message) : null,
-                                trailing: timeLabel != null
-                                    ? Text(
-                                        timeLabel,
-                                        style: theme.textTheme.labelSmall
-                                            ?.copyWith(
-                                              color: theme.colorScheme.outline,
+                  child: SafeArea(
+                    top: false,
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          ClipRect(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              heightFactor: upperSectionVisibility,
+                              child: Opacity(
+                                opacity: upperSectionVisibility,
+                                child: Row(
+                                  children: [
+                                    Builder(
+                                      builder: (ctx) => GestureDetector(
+                                        onTap: () =>
+                                            Scaffold.of(ctx).openDrawer(),
+                                        child: Container(
+                                          padding: const EdgeInsets.all(8),
+                                          decoration: BoxDecoration(
+                                            color: Colors.white.withOpacity(
+                                              0.1,
                                             ),
-                                      )
-                                    : null,
-                                onTap: item.isPlaceholder
-                                    ? null
-                                    : () => _showNotificationDetails(item),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: const Icon(
+                                            Icons.menu_rounded,
+                                            color: Colors.white70,
+                                            size: 20,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    ProfilePhotoWithUpload(
+                                      user: widget.user,
+                                      radius: 22,
+                                      onPhotoSelected: _handlePhotoSelected,
+                                      isUploading: _isUploadingPhoto,
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          ClipRect(
+                                            child: Align(
+                                              alignment: Alignment.topLeft,
+                                              heightFactor:
+                                                  upperSectionVisibility,
+                                              child: Opacity(
+                                                opacity: upperSectionVisibility,
+                                                child: Wrap(
+                                                  crossAxisAlignment:
+                                                      WrapCrossAlignment.center,
+                                                  spacing: 6,
+                                                  runSpacing: 4,
+                                                  children: [
+                                                    _heroPill(
+                                                      icon:
+                                                          Icons.badge_outlined,
+                                                      text: isHelper
+                                                          ? 'Helper'
+                                                          : 'Driver',
+                                                      color: goldAccent,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            widget.user.displayName,
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 20,
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: Colors.white.withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                      child: IconButton(
+                                        onPressed: () {
+                                          widget.onLogout();
+                                          showAppToast(
+                                            context,
+                                            'You have been logged out',
+                                          );
+                                        },
+                                        icon: const Icon(
+                                          Icons.logout_rounded,
+                                          color: Colors.white70,
+                                          size: 20,
+                                        ),
+                                        constraints:
+                                            const BoxConstraints.tightFor(
+                                              width: 40,
+                                              height: 40,
+                                            ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            );
-                          },
-                        ),
-                        if (index < notifications.length - 1)
-                          const SizedBox(height: 8),
-                      ],
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'Plant & Vehicle',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _InfoCard(
-                        icon: Icons.factory_outlined,
-                        label: 'Plant',
-                        value: plantDisplay,
-                        helperText:
-                            supervisorName != null && supervisorName.isNotEmpty
-                            ? 'Supervisor: $supervisorName'
-                            : null,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: [
+                                if (tenureSubtitle != null) ...[
+                                  _heroPill(
+                                    icon: Icons.access_time_rounded,
+                                    text: tenureSubtitle,
+                                    color: const Color(0xFF9AE630),
+                                  ),
+                                ],
+                                const SizedBox(width: 8),
+                                _heroPill(
+                                  icon: Icons.calendar_today_rounded,
+                                  text: dateFormatter.format(_now),
+                                  color: Colors.white70,
+                                ),
+                                const SizedBox(width: 8),
+                                _heroPill(
+                                  icon: Icons.schedule_rounded,
+                                  text: timeFormatter.format(_now),
+                                  color: Colors.white70,
+                                ),
+                              ],
+                            ),
+                          ),
+                          ClipRect(
+                            child: Align(
+                              alignment: Alignment.topCenter,
+                              heightFactor: lowerSectionVisibility,
+                              child: Opacity(
+                                opacity: lowerSectionVisibility,
+                                child: Transform.translate(
+                                  offset: Offset(
+                                    0,
+                                    10 * (1 - lowerSectionVisibility),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const SizedBox(height: 6),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _heroInfoChip(
+                                              icon: Icons.factory_outlined,
+                                              label: '',
+                                              value: plantDisplay,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: _heroInfoChip(
+                                              icon:
+                                                  Icons.local_shipping_rounded,
+                                              label: 'Vehicle',
+                                              value: vehicleDisplay,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      if (supervisorName != null &&
+                                          supervisorName.isNotEmpty) ...[
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              Icons.person_outline,
+                                              size: 14,
+                                              color: Colors.white.withOpacity(
+                                                0.5,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              'Supervisor: $supervisorName',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 11.5,
+                                                color: Colors.white.withOpacity(
+                                                  0.6,
+                                                ),
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                      if (_shiftSummary != null) ...[
+                                        const SizedBox(height: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: attendanceChipBackground,
+                                            borderRadius: BorderRadius.circular(
+                                              999,
+                                            ),
+                                            border: Border.all(
+                                              color: attendanceAccent
+                                                  .withOpacity(0.42),
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.info_outline,
+                                                size: 11,
+                                                color: attendanceAccent,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Flexible(
+                                                child: Text(
+                                                  _shiftSummary!,
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 9.25,
+                                                    color:
+                                                        attendanceChipTextColor,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _InfoCard(
-                        icon: Icons.fire_truck,
-                        label: 'Vehicle',
-                        value: vehicleDisplay,
-                        helperText: null,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+
+        // ── Body Content ──
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Quick Actions Grid ──
+                _buildDashboardSectionHeader(
+                  title: 'Quick Actions',
+                  icon: Icons.grid_view_rounded,
+                  navyBrand: navyBrand,
+                ),
+                const SizedBox(height: 12),
+                GridView.count(
+                  crossAxisCount: 4,
+                  padding: EdgeInsets.zero,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 6,
+                  childAspectRatio: 1.1,
+                  children: [
+                    _quickActionTile(
+                      icon: Icons.history_rounded,
+                      label: 'History',
+                      gradient: const [Color(0xFF667eea), Color(0xFF764ba2)],
+                      onTap: () => _openScreen(
+                        AttendanceHistoryScreen(user: widget.user),
                       ),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.beach_access_rounded,
+                      label: 'Leave',
+                      gradient: const [Color(0xFF11998e), Color(0xFF38ef7d)],
+                      onTap: () => showApplyLeaveSheet(context, widget.user),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.account_balance_wallet_rounded,
+                      label: 'Khata',
+                      gradient: const [Color(0xFFf7971e), Color(0xFFffd200)],
+                      onTap: () =>
+                          _openScreen(AdvanceSalaryScreen(user: widget.user)),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.safety_check_rounded,
+                      label: 'Safety',
+                      gradient: const [Color(0xFFe53935), Color(0xFFff7043)],
+                      onTap: () =>
+                          _openScreen(SafetyHubScreen(user: widget.user)),
+                    ),
+                    if (!isHelper)
+                      _quickActionTile(
+                        icon: Icons.local_shipping_rounded,
+                        label: 'Trips',
+                        gradient: const [Color(0xFF0A1628), Color(0xFF153753)],
+                        onTap: () => _openScreen(TripScreen(user: widget.user)),
+                      ),
+                    _quickActionTile(
+                      icon: Icons.description_rounded,
+                      label: 'Trip Sheet',
+                      gradient: const [Color(0xFF1565C0), Color(0xFF42A5F5)],
+                      onTap: () =>
+                          _openScreen(TripSheetScreen(user: widget.user)),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.edit_calendar_rounded,
+                      label: 'Adjust',
+                      gradient: const [Color(0xFF7B1FA2), Color(0xFFBA68C8)],
+                      onTap: () => _openScreen(
+                        AttendanceAdjustRequestScreen(user: widget.user),
+                      ),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.card_giftcard_rounded,
+                      label: 'Refer',
+                      gradient: const [Color(0xFFE91E63), Color(0xFFF48FB1)],
+                      onTap: () =>
+                          _openScreen(ReferralTrackerScreen(user: widget.user)),
+                    ),
+                    _quickActionTile(
+                      icon: Icons.swap_horiz_rounded,
+                      label: 'Vehicle',
+                      gradient: const [Color(0xFF00796B), Color(0xFF4DB6AC)],
+                      onTap: _isChangingVehicle ? null : _openVehiclePicker,
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: OutlinedButton.icon(
-                    onPressed: _isChangingVehicle ? null : _openVehiclePicker,
-                    icon: _isChangingVehicle
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: AppLoader(size: 16),
-                          )
-                        : const Icon(Icons.swap_horiz),
-                    label: Text(
-                      _isChangingVehicle ? 'Updating...' : 'Change Vehicle',
+
+                if (_driverDocumentAlert != null) ...[
+                  const SizedBox(height: 0),
+                  Transform.translate(
+                    offset: const Offset(0, -16),
+                    child: _buildDriverDocumentAlertBanner(),
+                  ),
+                ],
+
+                const SizedBox(height: 0),
+
+                // ── Current Month Trips Section ──
+                Transform.translate(
+                  offset: const Offset(0, -12),
+                  child: _buildCurrentMonthTripsSection(theme, textTheme),
+                ),
+
+                const SizedBox(height: 16),
+
+                // ── Biometric Security Card ──
+                _BiometricSecurityCard(
+                  isEnabled: _biometricEnabled,
+                  isSupported: _biometricSupported,
+                  onTap: _openBiometricSheet,
+                ),
+
+                // ── Notifications ──
+                const SizedBox(height: 16),
+                _buildNotificationsCard(navyBrand, cardBg),
+
+                const SizedBox(height: 16),
+
+                // Version
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text(
+                      'Version ${_appVersion ?? '...'}',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: navyBrand.withOpacity(0.35),
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ),
@@ -1354,7 +1815,846 @@ class _DriverDashboardScreenState extends State<DriverDashboardScreen>
             ),
           ),
         ),
+      ],
+    );
+  }
+
+  // ── Hero pill (small tag in header) ──
+  Widget _heroPill({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.12)),
       ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            text,
+            style: GoogleFonts.poppins(
+              fontSize: 9.5,
+              color: color,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Hero info chip (plant/vehicle in header) ──
+  Widget _heroInfoChip({
+    required IconData icon,
+    required String label,
+    required String value,
+  }) {
+    final hasLabel = label.trim().isNotEmpty;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withOpacity(0.1)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(icon, size: 14, color: Colors.white70),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasLabel)
+                  Text(
+                    label,
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      color: Colors.white.withOpacity(0.5),
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                if (hasLabel) const SizedBox(height: 1),
+                Text(
+                  value,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Quick action tile in grid ──
+  Widget _quickActionTile({
+    required IconData icon,
+    required String label,
+    required List<Color> gradient,
+    VoidCallback? onTap,
+    Widget? statusWidget,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: gradient,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [
+                BoxShadow(
+                  color: gradient.first.withOpacity(0.25),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: 32),
+          ),
+          if (statusWidget != null) ...[
+            const SizedBox(height: 5),
+            statusWidget,
+          ] else
+            const SizedBox(height: 1),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w500,
+              color: const Color(0xFF153753),
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  int? _resolveDriverDocumentDriverId() {
+    final driverId = (widget.user.driverId ?? '').trim();
+    final userId = widget.user.id.trim();
+    return int.tryParse(driverId) ?? int.tryParse(userId);
+  }
+
+  Future<void> _loadDriverDocumentAlert() async {
+    final driverId = _resolveDriverDocumentDriverId();
+    if (driverId == null) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _driverDocumentAlert = null);
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse(_driverDocumentsListUrl),
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode({'driverId': driverId}),
+      );
+      final body = utf8.decode(response.bodyBytes);
+      final payload = jsonDecode(body) as Map<String, dynamic>? ?? const {};
+      if (response.statusCode != 200 || payload['status'] != 'ok') {
+        return;
+      }
+
+      final documents = (payload['documents'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+      final alert = _buildDriverDocumentAlertFromDocuments(documents);
+      if (!mounted) {
+        return;
+      }
+      setState(() => _driverDocumentAlert = alert);
+    } catch (_) {
+      // Keep the current UI state unchanged on fetch failure.
+    }
+  }
+
+  String _normalizeAlertDocumentName(String rawName) {
+    final trimmed = rawName.trim();
+    if (trimmed.isEmpty) {
+      return 'Document';
+    }
+
+    final displayName = widget.user.displayName.trim();
+    if (displayName.isNotEmpty) {
+      final lowerName = trimmed.toLowerCase();
+      final lowerDisplayName = displayName.toLowerCase();
+      final dashedPrefix = '$lowerDisplayName - ';
+      final colonPrefix = '$lowerDisplayName: ';
+      if (lowerName.startsWith(dashedPrefix)) {
+        return trimmed.substring(displayName.length + 3).trim();
+      }
+      if (lowerName.startsWith(colonPrefix)) {
+        return trimmed.substring(displayName.length + 2).trim();
+      }
+    }
+
+    return trimmed;
+  }
+
+  _DriverDocumentAlert? _buildDriverDocumentAlertFromDocuments(
+    List<Map<String, dynamic>> documents,
+  ) {
+    if (documents.isEmpty) {
+      return null;
+    }
+
+    final today = DateUtils.dateOnly(DateTime.now());
+    String? expiredDocumentName;
+    DateTime? expiredAt;
+    String? expiringDocumentName;
+    int? expiringDays;
+    String? expiringDateLabel;
+
+    for (final document in documents) {
+      final rawExpiry = (document['expiry_date'] ?? '').toString().trim();
+      if (rawExpiry.isEmpty || rawExpiry == '0000-00-00') {
+        continue;
+      }
+      final expiry = DateTime.tryParse(rawExpiry);
+      if (expiry == null) {
+        continue;
+      }
+      final expiryLabel = DateFormat('dd MMM yy').format(expiry);
+
+      final daysUntilExpiry = DateUtils.dateOnly(
+        expiry,
+      ).difference(today).inDays;
+      final documentName =
+          (document['document_name'] ?? document['document_type'] ?? 'Document')
+              .toString()
+              .trim();
+      final normalizedDocumentName = _normalizeAlertDocumentName(documentName);
+      if (daysUntilExpiry < 0) {
+        if (expiredAt == null || expiry.isBefore(expiredAt)) {
+          expiredAt = expiry;
+          expiredDocumentName = normalizedDocumentName.isEmpty
+              ? 'Document'
+              : normalizedDocumentName;
+        }
+        continue;
+      }
+      if (daysUntilExpiry <= _driverDocumentWarningDays &&
+          (expiringDays == null || daysUntilExpiry < expiringDays)) {
+        expiringDays = daysUntilExpiry;
+        expiringDocumentName = normalizedDocumentName.isEmpty
+            ? 'Document'
+            : normalizedDocumentName;
+        expiringDateLabel = expiryLabel;
+      }
+    }
+
+    if (expiredDocumentName != null) {
+      return _DriverDocumentAlert(
+        documentName: expiredDocumentName,
+        statusText:
+            'Expired (Expired: ${DateFormat('dd MMM yy').format(expiredAt!)})',
+        icon: Icons.warning_amber_rounded,
+        backgroundColor: const Color(0xFFE53935),
+        foregroundColor: Colors.white,
+        borderColor: const Color(0xFFFFCDD2),
+      );
+    }
+
+    if (expiringDocumentName == null || expiringDays == null) {
+      return null;
+    }
+
+    return _DriverDocumentAlert(
+      documentName: expiringDocumentName,
+      statusText:
+          'Due in $expiringDays ${expiringDays == 1 ? 'day' : 'days'} (Expiring: ${expiringDateLabel ?? ''})',
+      icon: Icons.warning_amber_rounded,
+      backgroundColor: const Color(0xFFFFC107),
+      foregroundColor: const Color(0xFF4E342E),
+      borderColor: const Color(0xFFFFECB3),
+    );
+  }
+
+  Widget _buildDriverDocumentAlertBanner() {
+    final alert = _driverDocumentAlert;
+    if (alert == null) {
+      return const SizedBox.shrink();
+    }
+
+    return AnimatedBuilder(
+      animation: _glowAnimation,
+      builder: (context, child) {
+        final pulse = ((_glowAnimation.value - 0.35) / 0.5).clamp(0.0, 1.0);
+        final isExpired = alert.statusText.startsWith('Expired');
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: alert.backgroundColor.withOpacity(
+              isExpired ? (0.48 + pulse * 0.5) : (0.56 + pulse * 0.34),
+            ),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: alert.borderColor.withOpacity(
+                isExpired ? (0.65 + pulse * 0.35) : (0.58 + pulse * 0.34),
+              ),
+              width: isExpired ? 1.2 : 1.1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: alert.backgroundColor.withOpacity(
+                  isExpired ? (0.24 + pulse * 0.34) : (0.2 + pulse * 0.28),
+                ),
+                blurRadius: isExpired ? (12 + pulse * 12) : (10 + pulse * 10),
+                spreadRadius: isExpired
+                    ? (0.8 + pulse * 2.4)
+                    : (0.6 + pulse * 1.8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Icon(alert.icon, size: 16, color: alert.foregroundColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '${alert.documentName}: ${alert.statusText}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 10.4,
+                    fontWeight: FontWeight.w700,
+                    color: alert.foregroundColor,
+                    letterSpacing: 0.15,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDashboardSectionHeader({
+    required String title,
+    required IconData icon,
+    required Color navyBrand,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [navyBrand, const Color(0xFF1E5A8C)],
+            ),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: Colors.white, size: 14),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontSize: 17,
+            fontWeight: FontWeight.w700,
+            color: navyBrand,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Notifications card ──
+  Widget _buildNotificationsCard(Color navyBrand, Color cardBg) {
+    return Container(
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: navyBrand.withOpacity(0.06)),
+        boxShadow: [
+          BoxShadow(
+            color: navyBrand.withOpacity(0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [navyBrand, const Color(0xFF1E5A8C)],
+                    ),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(
+                    Icons.notifications_active_rounded,
+                    color: Colors.white,
+                    size: 14,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Alerts',
+                  style: GoogleFonts.poppins(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: navyBrand,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          ..._systemNotifications.map(
+            (notif) => InkWell(
+              onTap: () => _showNotificationDetails(notif),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: notif.type.color,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        notif.message,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12.5,
+                          color: navyBrand.withOpacity(0.75),
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                    Icon(
+                      Icons.chevron_right,
+                      size: 18,
+                      color: navyBrand.withOpacity(0.3),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentMonthTripsSection(ThemeData theme, TextTheme textTheme) {
+    final monthLabel = DateFormat('MMMM yyyy').format(DateTime.now());
+    final totalTrips = _currentMonthTrips.length;
+    int totalKm = 0;
+    for (final trip in _currentMonthTrips) {
+      final startKm = trip['startKm'] as int?;
+      final endKm = trip['endKm'] as int?;
+      if (startKm != null && endKm != null && endKm > startKm) {
+        totalKm += (endKm - startKm);
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.local_shipping, size: 20),
+            const SizedBox(width: 6),
+            Text('Trips — $monthLabel', style: textTheme.titleMedium),
+            const Spacer(),
+            if (_isLoadingTrips)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.refresh, size: 20),
+                onPressed: () {
+                  setState(() => _isLoadingTrips = true);
+                  _loadCurrentMonthTrips();
+                },
+                tooltip: 'Refresh trips',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 32,
+                  height: 32,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (_isLoadingTrips)
+          Card(
+            color: Colors.white,
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: AppLoader()),
+            ),
+          )
+        else if (_tripsError != null && _currentMonthTrips.isEmpty)
+          Card(
+            color: Colors.white,
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: theme.colorScheme.error,
+                    size: 32,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _tripsError!,
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () {
+                      setState(() => _isLoadingTrips = true);
+                      _loadCurrentMonthTrips();
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else if (_currentMonthTrips.isEmpty)
+          // No trips — always show for drivers with contact message
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFFFFF3E0), Color(0xFFFFE0B2)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFFFCC80), width: 1),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+            child: Column(
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: Colors.orange.shade700,
+                  size: 40,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'No Trips Added',
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Colors.orange.shade900,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Contact Supervisor',
+                  style: textTheme.bodyMedium?.copyWith(
+                    color: Colors.orange.shade800,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          )
+        else ...[
+          // Summary row
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF667eea), Color(0xFF764ba2)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        '$totalTrips',
+                        style: textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Trips',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF11998e), Color(0xFF38ef7d)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        NumberFormat('#,###').format(totalKm),
+                        style: textTheme.headlineSmall?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'KM Run',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: Colors.white70,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Individual trip cards (show max 10, most recent first)
+          ..._currentMonthTrips.take(10).map((trip) {
+            final startDate = trip['startDate'] as String? ?? '';
+            final vehicle = trip['vehicleNumber'] as String? ?? '';
+            final status = trip['status'] as String? ?? '';
+            final startKm = trip['startKm'] as int?;
+            final endKm = trip['endKm'] as int?;
+            final runKm = (startKm != null && endKm != null && endKm > startKm)
+                ? (endKm - startKm)
+                : null;
+            final customers = trip['customers'] as String? ?? '';
+            final isOngoing =
+                status.toLowerCase() == 'ongoing' ||
+                status.toLowerCase() == 'started';
+
+            String displayDate = startDate;
+            try {
+              displayDate = DateFormat(
+                'dd MMM yyyy',
+              ).format(DateTime.parse(startDate));
+            } catch (_) {}
+
+            return Card(
+              color: Colors.white,
+              elevation: 1,
+              margin: const EdgeInsets.only(bottom: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(
+                  color: isOngoing
+                      ? Colors.amber.shade300
+                      : Colors.grey.shade200,
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          displayDate,
+                          style: textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Spacer(),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isOngoing
+                                ? Colors.amber.shade50
+                                : Colors.green.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isOngoing
+                                  ? Colors.amber.shade300
+                                  : Colors.green.shade300,
+                            ),
+                          ),
+                          child: Text(
+                            isOngoing ? 'Ongoing' : 'Ended',
+                            style: textTheme.labelSmall?.copyWith(
+                              color: isOngoing
+                                  ? Colors.amber.shade800
+                                  : Colors.green.shade800,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.local_shipping,
+                          size: 14,
+                          color: Colors.blueGrey,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            vehicle,
+                            style: textTheme.bodySmall?.copyWith(
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        if (runKm != null)
+                          Chip(
+                            label: Text(
+                              '${NumberFormat('#,###').format(runKm)} km',
+                            ),
+                            labelStyle: textTheme.labelSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: Colors.indigo.shade700,
+                            ),
+                            backgroundColor: Colors.indigo.shade50,
+                            visualDensity: VisualDensity.compact,
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                            side: BorderSide(color: Colors.indigo.shade200),
+                          ),
+                      ],
+                    ),
+                    if (customers.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.business,
+                            size: 14,
+                            color: Colors.blueGrey,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              customers,
+                              style: textTheme.bodySmall?.copyWith(
+                                color: Colors.grey.shade700,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          }),
+          if (_currentMonthTrips.length > 10)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Center(
+                child: TextButton(
+                  onPressed: () => _openScreen(TripScreen(user: widget.user)),
+                  child: Text(
+                    'View all ${_currentMonthTrips.length} trips →',
+                    style: textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ],
     );
   }
 }
@@ -1599,6 +2899,208 @@ class _InfoCard extends StatelessWidget {
                 ),
               ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DriverCollapsedHeaderTitle extends StatelessWidget {
+  const _DriverCollapsedHeaderTitle({
+    required this.user,
+    required this.onLogout,
+  });
+
+  final AppUser user;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context
+        .dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+    final minExtent = settings?.minExtent ?? kToolbarHeight;
+    final currentExtent = settings?.currentExtent ?? minExtent;
+    final isCollapsed = currentExtent <= minExtent + 1;
+
+    if (!isCollapsed) {
+      return const SizedBox.shrink();
+    }
+
+    return Row(
+      children: [
+        Builder(
+          builder: (ctx) => GestureDetector(
+            onTap: () => Scaffold.of(ctx).openDrawer(),
+            child: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                Icons.menu_rounded,
+                color: Colors.white70,
+                size: 20,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        ProfilePhotoWidget(user: user, radius: 18),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            user.displayName,
+            style: GoogleFonts.poppins(
+              fontSize: 16,
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: IconButton(
+            onPressed: onLogout,
+            icon: const Icon(
+              Icons.logout_rounded,
+              color: Colors.white70,
+              size: 18,
+            ),
+            constraints: const BoxConstraints.tightFor(width: 36, height: 36),
+            padding: EdgeInsets.zero,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DriverDocumentAlert {
+  const _DriverDocumentAlert({
+    required this.documentName,
+    required this.statusText,
+    required this.icon,
+    required this.backgroundColor,
+    required this.foregroundColor,
+    required this.borderColor,
+  });
+
+  final String documentName;
+  final String statusText;
+  final IconData icon;
+  final Color backgroundColor;
+  final Color foregroundColor;
+  final Color borderColor;
+}
+
+class _BiometricSecurityCard extends StatelessWidget {
+  const _BiometricSecurityCard({
+    required this.isEnabled,
+    required this.isSupported,
+    required this.onTap,
+  });
+
+  final bool isEnabled;
+  final bool isSupported;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final accentColor = isEnabled
+        ? const Color(0xFF00C853)
+        : const Color(0xFFFF8F00);
+    final bgGradient = isEnabled
+        ? const LinearGradient(
+            colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFF0D1B2A), Color(0xFF1B2838)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: bgGradient,
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: [
+            BoxShadow(
+              color: accentColor.withOpacity(0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        child: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: accentColor.withOpacity(0.18),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Icon(
+                Icons.fingerprint_rounded,
+                color: accentColor,
+                size: 28,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isEnabled ? 'Biometric Lock Active' : 'App Security',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.2,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    isEnabled
+                        ? 'Your app is protected'
+                        : (isSupported
+                              ? 'Tap to enable biometric lock'
+                              : 'Not supported on this device'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.white.withOpacity(0.65),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              decoration: BoxDecoration(
+                color: accentColor.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Text(
+                isEnabled ? 'ON' : 'OFF',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: accentColor,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
           ],
         ),
       ),

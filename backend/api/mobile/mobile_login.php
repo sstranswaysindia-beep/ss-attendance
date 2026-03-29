@@ -106,7 +106,7 @@ if ($username === '' || $password === '') {
     apiRespond(400, ['status' => 'error', 'error' => 'missing_credentials']);
 }
 
-$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, full_name, view_document, geofencing_enable, proxy_enabled, training_req, advance_entry FROM users WHERE username = ? LIMIT 1');
+$stmt = $conn->prepare('SELECT id, username, password, role, driver_id, referred_by, full_name, view_document, geofencing_enable, proxy_enabled, training_req, advance_entry FROM users WHERE username = ? LIMIT 1');
 $stmt->bind_param('s', $username);
 $stmt->execute();
 $userRow = $stmt->get_result()->fetch_assoc();
@@ -126,6 +126,21 @@ if (!$isValid) {
 }
 
 $role = strtolower(trim((string)($userRow['role'] ?? '')));
+$isReferredUser = !empty($userRow['referred_by']);
+
+if ($role === 'driver' && empty($userRow['driver_id']) && $isReferredUser) {
+    // Backward-compatibility: older referral accounts may have been stored with
+    // role=driver but no driver_id. Treat them as referral users.
+    $role = 'referral';
+    $userRow['role'] = 'referral';
+
+    $roleFixStmt = $conn->prepare('UPDATE users SET role = "referral" WHERE id = ? AND role <> "referral"');
+    if ($roleFixStmt) {
+        $roleFixStmt->bind_param('i', $userRow['id']);
+        $roleFixStmt->execute();
+        $roleFixStmt->close();
+    }
+}
 
 if (hash('sha256', $password) === $userRow['password']) {
     $newHash = password_hash($password, PASSWORD_DEFAULT);
@@ -160,15 +175,14 @@ if ($role === 'driver') {
         apiRespond(403, ['status' => 'error', 'error' => 'driver_not_found']);
     }
     $normalizedStatus = strtolower(trim((string) $driverStatus));
-    if ($normalizedStatus !== 'active') {
-        $attemptContext['normalized_status'] = $normalizedStatus;
-        mobileLoginLog('FAIL driver_inactive ' . json_encode($attemptContext, JSON_UNESCAPED_SLASHES));
-        apiRespond(403, [
-            'status' => 'error',
-            'error' => 'driver_inactive',
-            'message' => 'You are not authorised to login, Contact admin',
-        ]);
-    }
+    $attemptContext['normalized_status'] = $normalizedStatus;
+    mobileLoginLog('INFO driver_status_allowed ' . json_encode($attemptContext, JSON_UNESCAPED_SLASHES));
+}
+
+if ($role === 'referral') {
+    // Referral users are intentionally created without driver_id.
+    // They should be allowed to login and routed to referral-only app flow.
+    $driverStatus = null;
 }
 
 $driverInfo = null;
@@ -478,7 +492,9 @@ apiRespond(200, [
     'user' => [
         'id'       => (int)$userRow['id'],
         'username' => $userRow['username'],
-        'role'     => $userRow['role'],
+        'role'     => $role,
+        'referred_by' => $userRow['referred_by'] ?? null,
+        'is_referral_user' => !empty($userRow['referred_by']),
         'full_name' => $userRow['full_name'],
         'view_document' => $userRow['view_document'] ?? null,
         'geofencing_enable' => $userRow['geofencing_enable'] ?? null,

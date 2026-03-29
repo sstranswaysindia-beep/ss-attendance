@@ -20,6 +20,7 @@ class SalaryDistributionRow {
     required this.pfEmployer,
     required this.medical,
     required this.uniform,
+    required this.safetyShoes,
     required this.travel,
     required this.room,
     required this.incentive,
@@ -64,6 +65,7 @@ class SalaryDistributionRow {
       pfEmployer: asDouble(json['pf_employer']),
       medical: asDouble(json['medical']),
       uniform: asDouble(json['uniform']),
+      safetyShoes: asDouble(json['safety_shoes']),
       travel: asDouble(json['travel']),
       room: asDouble(json['room']),
       incentive: asDouble(json['incentive']),
@@ -100,6 +102,7 @@ class SalaryDistributionRow {
   final double pfEmployer;
   final double medical;
   final double uniform;
+  final double safetyShoes;
   final double travel;
   final double room;
   final double incentive;

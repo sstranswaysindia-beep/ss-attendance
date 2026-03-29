@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -15,6 +16,7 @@ import '../../core/models/attendance_record.dart';
 import '../../core/models/driver_vehicle.dart';
 import '../../core/services/attendance_repository.dart';
 import '../../core/services/assignment_repository.dart';
+import '../../core/services/biometric_unlock_service.dart';
 import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/app_toast.dart';
 
@@ -50,7 +52,6 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   bool _isAssigning = false;
   bool _isSyncPending = false;
   File? _capturedPhoto;
-  double? _capturedPhotoAspectRatio;
   String? _submissionSummary;
   bool _hasShownLocationWarning = false;
   bool? _locationServiceEnabled;
@@ -138,11 +139,12 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           if (vehicleId != null && vehicleId.isNotEmpty) {
             _selectedVehicleId = vehicleId;
             final attendanceVehicleNumber = currentAttendance.vehicleNumber;
-            _selectedVehicleNumber = (attendanceVehicleNumber != null &&
+            _selectedVehicleNumber =
+                (attendanceVehicleNumber != null &&
                     attendanceVehicleNumber.isNotEmpty)
                 ? attendanceVehicleNumber
                 : (_resolveVehicleNumberById(vehicleId) ??
-                    _selectedVehicleNumber);
+                      _selectedVehicleNumber);
           }
           _submissionSummary = _hasOpenShift
               ? 'Checked in at ${_formatDateTime(currentAttendance.inTime)}'
@@ -216,6 +218,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
   Future<void> _openLocationSettings() async {
     try {
+      BiometricUnlockService.suppressPromptsTemporarily();
       final didOpen = await Geolocator.openLocationSettings();
       if (!mounted) return;
       if (didOpen) {
@@ -233,6 +236,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
 
   Future<void> _openAppPermissionSettings() async {
     try {
+      BiometricUnlockService.suppressPromptsTemporarily();
       final didOpen = await Geolocator.openAppSettings();
       if (!mounted) return;
       if (didOpen) {
@@ -637,6 +641,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   }
 
   Future<void> _handleCheckInOut() async {
+    BiometricUnlockService.suppressPromptsTemporarily();
     if (_currentAction == CheckFlowAction.checkIn &&
         _hasCompletedAttendanceToday) {
       showAppToast(
@@ -650,23 +655,34 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       requireHighAccuracy: widget.user.geofencingEnabled,
     );
 
-    // First capture photo, then submit attendance
+    // Always open front camera for selfie — photo is mandatory.
     await _capturePhoto();
 
-    // If photo was captured successfully, proceed with submission
-    if (_capturedPhoto != null) {
-      final locationPayload = await locationFuture;
-      await _submitAttendance(locationPayload: locationPayload);
+    // Block submission if user cancelled/skipped the photo.
+    if (_capturedPhoto == null) {
+      showAppToast(
+        context,
+        'Photo is required for attendance. Please take a selfie.',
+        isError: true,
+      );
+      return;
     }
+
+    final locationPayload = await locationFuture;
+    await _submitAttendance(locationPayload: locationPayload);
   }
 
   Future<void> _capturePhoto() async {
     try {
+      BiometricUnlockService.suppressPromptsTemporarily();
       final picker = ImagePicker();
       final xFile = await picker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
         imageQuality: 70,
+        maxWidth: 1280,
+        maxHeight: 1280,
+        requestFullMetadata: false,
       );
 
       if (xFile == null) {
@@ -697,16 +713,11 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       final savedFile = await File(xFile.path).copy(savedPath);
 
       // Normalize orientation (some Android devices return sideways images relying on EXIF).
-      // Also compute aspect ratio for better preview sizing.
-      double? aspectRatio;
       try {
         final bytes = await savedFile.readAsBytes();
         final decoded = img.decodeImage(bytes);
         if (decoded != null) {
           final baked = img.bakeOrientation(decoded);
-          if (baked.width > 0 && baked.height > 0) {
-            aspectRatio = baked.width / baked.height;
-          }
           final normalizedBytes = img.encodeJpg(baked, quality: 80);
           await savedFile.writeAsBytes(normalizedBytes, flush: true);
         }
@@ -717,7 +728,6 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       if (!mounted) return;
       setState(() {
         _capturedPhoto = savedFile;
-        _capturedPhotoAspectRatio = aspectRatio;
       });
 
       // Optionally keep file size info for debugging without user toast
@@ -805,18 +815,45 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         );
         return;
       }
-      final result = await _attendanceRepository.submit(
-        driverId: driverId,
-        plantId: plantId,
-        vehicleId: vehicleId,
-        assignmentId: assignmentId,
-        action: performedAction == CheckFlowAction.checkIn
-            ? AttendanceAction.checkIn
-            : AttendanceAction.checkOut,
-        photoFile: _capturedPhoto,
-        notes: _buildSubmissionNotes(performedAction),
-        locationJson: locationPayload,
-      );
+      final notes = _buildSubmissionNotes(performedAction);
+      final action = performedAction == CheckFlowAction.checkIn
+          ? AttendanceAction.checkIn
+          : AttendanceAction.checkOut;
+
+      Future<AttendanceSubmissionResult> submitOnce(
+        Map<String, dynamic>? payload,
+      ) {
+        return _attendanceRepository.submit(
+          driverId: driverId,
+          plantId: plantId,
+          vehicleId: vehicleId,
+          assignmentId: assignmentId,
+          action: action,
+          photoFile: _capturedPhoto,
+          notes: notes,
+          locationJson: payload,
+        );
+      }
+
+      AttendanceSubmissionResult result;
+      try {
+        result = await submitOnce(locationPayload);
+      } on AttendanceFailure catch (error) {
+        final shouldRetryCheckout =
+            widget.user.geofencingEnabled &&
+            performedAction == CheckFlowAction.checkOut &&
+            _isGeofenceOutsideError(error.message);
+        if (!shouldRetryCheckout) {
+          rethrow;
+        }
+        final retryLocation = await _captureCurrentLocation(
+          requireHighAccuracy: true,
+        );
+        if (retryLocation == null) {
+          rethrow;
+        }
+        result = await submitOnce(retryLocation);
+      }
 
       if (!mounted) return;
 
@@ -865,15 +902,14 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       });
       _updateStatusAnimation();
 
-      // Force refresh the active shift after submission
-      await Future.delayed(
-        const Duration(milliseconds: 500),
-      ); // Small delay for server processing
-      await _loadActiveShift();
-      if (!mounted) return;
       showAppToast(context, '$actionLabel submitted successfully.');
+
+      // Show green/red success animation overlay
+      _showResultAnimation(performedAction);
+
+      unawaited(_loadActiveShift());
       if (performedAction == CheckFlowAction.checkOut) {
-        Future.delayed(const Duration(milliseconds: 600), () {
+        Future.delayed(const Duration(milliseconds: 2200), () {
           if (!mounted) return;
           final navigator = Navigator.of(context);
           if (navigator.canPop()) {
@@ -897,6 +933,12 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         _updateStatusAnimation();
       }
     }
+  }
+
+  bool _isGeofenceOutsideError(String message) {
+    final normalized = message.toLowerCase();
+    return normalized.contains('outside the allowed geofence') ||
+        (normalized.contains('outside') && normalized.contains('geofence'));
   }
 
   Future<Map<String, dynamic>?> _captureCurrentLocation({
@@ -952,8 +994,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         final lastKnown = await Geolocator.getLastKnownPosition();
         if (lastKnown != null) {
           final lastTimestamp = lastKnown.timestamp;
-          final ageMinutes =
-              DateTime.now().difference(lastTimestamp).inMinutes;
+          final ageMinutes = DateTime.now().difference(lastTimestamp).inMinutes;
           if (ageMinutes <= 5) {
             _hasShownLocationWarning = false;
             return _positionToPayload(
@@ -963,14 +1004,28 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
             );
           }
         }
+      } else {
+        final lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          final lastTimestamp = lastKnown.timestamp;
+          final ageMinutes = DateTime.now().difference(lastTimestamp).inMinutes;
+          if (ageMinutes <= 2 && lastKnown.accuracy <= 80) {
+            _hasShownLocationWarning = false;
+            return _positionToPayload(
+              lastKnown,
+              geofenceEnforced: requireHighAccuracy,
+              source: 'geolocator_last_known_fast',
+            );
+          }
+        }
       }
 
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: requireHighAccuracy
-            ? LocationAccuracy.bestForNavigation
+            ? LocationAccuracy.best
             : LocationAccuracy.high,
         timeLimit: requireHighAccuracy
-            ? const Duration(seconds: 15)
+            ? const Duration(seconds: 10)
             : const Duration(seconds: 8),
       );
       _hasShownLocationWarning = false;
@@ -1277,23 +1332,32 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     }
   }
 
+  void _showResultAnimation(CheckFlowAction action) {
+    final isCheckIn = action == CheckFlowAction.checkIn;
+    final color = isCheckIn ? const Color(0xFF00E676) : const Color(0xFFEF5350);
+    final icon = isCheckIn ? Icons.check_circle_rounded : Icons.logout_rounded;
+    final label = isCheckIn ? 'Checked In' : 'Checked Out';
+
+    late final OverlayEntry overlayEntry;
+    overlayEntry = OverlayEntry(
+      builder: (context) => _AttendanceResultOverlay(
+        color: color,
+        icon: icon,
+        label: label,
+        onDone: () {
+          overlayEntry.remove();
+        },
+      ),
+    );
+
+    Overlay.of(context).insert(overlayEntry);
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool attendanceCompleted = _hasCompletedAttendanceToday;
     final bool isButtonEnabled = !attendanceCompleted && !_isSubmitting;
     final bool isCheckIn = _currentAction == CheckFlowAction.checkIn;
-    final Color photoCardStart =
-        isCheckIn ? const Color(0xFF98FB98) : Colors.yellow.shade50;
-    final Color photoCardEnd =
-        isCheckIn ? const Color(0xFFB6F7B6) : Colors.amber.shade100;
-    final Color photoCardBorder =
-        isCheckIn ? const Color(0xFF7EEA7E) : Colors.amber.shade200;
-    final Color photoIconColor =
-        isCheckIn ? Colors.green.shade800 : Colors.amber.shade800;
-    final Color photoTitleColor =
-        isCheckIn ? Colors.green.shade900 : Colors.amber.shade900;
-    final Color photoBodyColor =
-        isCheckIn ? Colors.green.shade900 : Colors.brown.shade700;
 
     return Scaffold(
       appBar: AppBar(
@@ -1313,286 +1377,410 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
         ],
       ),
       backgroundColor: Colors.white,
-      body: ColoredBox(
-        color: Colors.white,
-        child: _isLoadingShift
-            ? const Center(child: AppLoader())
-            : RefreshIndicator(
-                onRefresh: _loadActiveShift,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    Row(
+      body: Stack(
+        children: [
+          ColoredBox(
+            color: Colors.white,
+            child: _isLoadingShift
+                ? const Center(child: AppLoader())
+                : RefreshIndicator(
+                    onRefresh: _loadActiveShift,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.all(16),
                       children: [
-                        Expanded(
-                          child: _SummaryInfoCard(
-                            icon: Icons.factory_outlined,
-                            label: 'Plant',
-                            value: _resolvePlantLabel(),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: _SummaryInfoCard(
-                            icon: Icons.fire_truck,
-                            label: 'Vehicle',
-                            value: _selectedVehicleNumber ?? 'Not assigned',
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    if (_requiresVehicleSelection())
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              TextButton.icon(
-                                onPressed: (!attendanceCompleted && !_isSubmitting)
-                                    ? _togglePlatformAttendance
-                                    : null,
-                                icon: Icon(
-                                  _platformAttendanceSelected
-                                      ? Icons.check_box
-                                      : Icons.check_box_outline_blank,
-                                  size: 28,
-                                ),
-                                label: const Text('Rest'),
-                              ),
-                              const Spacer(),
-                              OutlinedButton.icon(
-                                onPressed: _isAssigning ? null : _pickVehicle,
-                                icon: _isAssigning
-                                    ? const SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: AppLoader(size: 16),
-                                      )
-                                    : const Icon(Icons.swap_horiz),
-                                label: Text(
-                                  _isAssigning ? 'Updating...' : 'Change Vehicle',
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF96E072),
-                                  foregroundColor: Colors.white,
-                                  side: const BorderSide(
-                                    color: Color(0xFF96E072),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          if (widget.availableVehicles.isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.only(top: 8),
-                              child: Text(
-                                'No vehicles are mapped yet. Contact supervisor to assign one.',
-                                style: TextStyle(fontSize: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _SummaryInfoCard(
+                                icon: Icons.factory_outlined,
+                                label: 'Plant',
+                                value: _resolvePlantLabel(),
                               ),
                             ),
-                        ],
-                      ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(12),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            photoCardStart,
-                            photoCardEnd,
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _SummaryInfoCard(
+                                icon: Icons.fire_truck,
+                                label: 'Vehicle',
+                                value: _selectedVehicleNumber ?? 'Not assigned',
+                              ),
+                            ),
                           ],
                         ),
-                        border: Border.all(color: photoCardBorder),
-                      ),
-                      child: Column(
-                        children: [
-                          Row(
+                        const SizedBox(height: 8),
+                        if (_requiresVehicleSelection())
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(
-                                Icons.camera_alt,
-                                color: photoIconColor,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Photo Capture',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(
-                                      color: photoTitleColor,
-                                      fontWeight: FontWeight.w600,
+                              Row(
+                                children: [
+                                  TextButton.icon(
+                                    onPressed:
+                                        (!attendanceCompleted && !_isSubmitting)
+                                        ? _togglePlatformAttendance
+                                        : null,
+                                    icon: Icon(
+                                      _platformAttendanceSelected
+                                          ? Icons.check_box
+                                          : Icons.check_box_outline_blank,
+                                      size: 28,
                                     ),
+                                    label: const Text('Rest'),
+                                  ),
+                                  const Spacer(),
+                                  OutlinedButton.icon(
+                                    onPressed: _isAssigning
+                                        ? null
+                                        : _pickVehicle,
+                                    icon: _isAssigning
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: AppLoader(size: 16),
+                                          )
+                                        : const Icon(Icons.swap_horiz),
+                                    label: Text(
+                                      _isAssigning
+                                          ? 'Updating...'
+                                          : 'Change Vehicle',
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF96E072),
+                                      foregroundColor: Colors.white,
+                                      side: const BorderSide(
+                                        color: Color(0xFF96E072),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (widget.availableVehicles.isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Text(
+                                    'No vehicles are mapped yet. Contact supervisor to assign one.',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        const SizedBox(height: 20),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(16),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: isCheckIn
+                                  ? [
+                                      const Color(0xFF0D1B2A),
+                                      const Color(0xFF1B3A2A),
+                                    ]
+                                  : [
+                                      const Color(0xFF1B0D2A),
+                                      const Color(0xFF2A1B1B),
+                                    ],
+                            ),
+                            border: Border.all(
+                              color: isCheckIn
+                                  ? const Color(0xFF00E676).withOpacity(0.2)
+                                  : const Color(0xFFEF5350).withOpacity(0.2),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color:
+                                    (isCheckIn
+                                            ? const Color(0xFF00E676)
+                                            : const Color(0xFFEF5350))
+                                        .withOpacity(0.08),
+                                blurRadius: 16,
+                                offset: const Offset(0, 4),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Camera will open automatically when you click ${_currentActionLabel.toLowerCase()}.',
-                            style: Theme.of(context).textTheme.bodyMedium
-                                ?.copyWith(color: photoBodyColor),
-                          ),
-                          const SizedBox(height: 12),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: SizedBox(
-                              width: double.infinity,
-                              height: 160,
-                              child: _capturedPhoto == null
-                                  ? Container(
-                                      color: photoCardStart,
-                                      alignment: Alignment.center,
-                                      child: Lottie.asset(
-                                        'downloads/face_biometric.json',
-                                        fit: BoxFit.cover,
-                                        alignment: Alignment.center,
-                                        repeat: true,
-                                        animate: true,
-                                        options: LottieOptions(
-                                          enableMergePaths: true,
+                          child: Column(
+                            children: [
+                              Row(
+                                children: [
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color:
+                                          (isCheckIn
+                                                  ? const Color(0xFF00E676)
+                                                  : const Color(0xFFEF5350))
+                                              .withOpacity(0.15),
+                                    ),
+                                    padding: const EdgeInsets.all(10),
+                                    child: Icon(
+                                      Icons.face_retouching_natural_rounded,
+                                      color: isCheckIn
+                                          ? const Color(0xFF00E676)
+                                          : const Color(0xFFEF5350),
+                                      size: 22,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Facial Recognition',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w700,
+                                              ),
                                         ),
-                                        errorBuilder: (context, error, stackTrace) {
-                                          // If the biometric JSON fails to load/parse on a device,
-                                          // show a known-good bundled animation so the UI isn't blank
-                                          // and print the reason for debugging.
-                                          debugPrint(
-                                            'Biometric Lottie failed: $error',
-                                          );
-                                          return Lottie.asset(
-                                            'assets/animations/man_account_icon.json',
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          _capturedPhoto != null
+                                              ? 'Photo captured ✓'
+                                              : 'Front camera will open on ${isCheckIn ? 'check-in' : 'check-out'}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: _capturedPhoto != null
+                                                ? const Color(0xFF00E676)
+                                                : Colors.white.withOpacity(0.5),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (_capturedPhoto != null)
+                                    Icon(
+                                      Icons.check_circle_rounded,
+                                      color: const Color(0xFF00E676),
+                                      size: 22,
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: SizedBox(
+                                  width: double.infinity,
+                                  height: 180,
+                                  child: _capturedPhoto == null
+                                      ? Container(
+                                          decoration: BoxDecoration(
+                                            color:
+                                                (isCheckIn
+                                                        ? const Color(
+                                                            0xFF00E676,
+                                                          )
+                                                        : const Color(
+                                                            0xFFEF5350,
+                                                          ))
+                                                    .withOpacity(0.05),
+                                            borderRadius: BorderRadius.circular(
+                                              12,
+                                            ),
+                                            border: Border.all(
+                                              color: Colors.white.withOpacity(
+                                                0.06,
+                                              ),
+                                            ),
+                                          ),
+                                          alignment: Alignment.center,
+                                          child: Lottie.asset(
+                                            'downloads/face_biometric.json',
                                             fit: BoxFit.cover,
                                             alignment: Alignment.center,
                                             repeat: true,
                                             animate: true,
-                                            errorBuilder:
-                                                (context, error2, stackTrace2) {
-                                                  debugPrint(
-                                                    'Fallback Lottie failed: $error2',
-                                                  );
-                                                  return Container(
-                                                    color:
-                                                        Colors.blueGrey.shade50,
-                                                    alignment: Alignment.center,
-                                                    child: Icon(
-                                                      Icons.face,
-                                                      size: 64,
-                                                      color: Colors
-                                                          .blueGrey
-                                                          .shade400,
-                                                    ),
-                                                  );
-                                                },
-                                          );
-                                        },
-                                      ),
-                                    )
-                                  : Image.file(
-                                      _capturedPhoto!,
-                                      fit: BoxFit.contain,
-                                      alignment: Alignment.center,
-                                    ),
-                            ),
-                          ),
-                          if (_capturedPhoto != null) ...[
-                            const SizedBox(height: 12),
-                            Text(
-                              'Photo captured successfully!',
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Colors.green.shade600,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 0),
-                    Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: isButtonEnabled ? _handleCheckInOut : null,
-                        child: SizedBox(
-                          height: 90,
-                          width: double.infinity,
-                          child: Center(
-                            child: _isSubmitting
-                                ? const SizedBox(
-                                    width: 20,
-                                    height: 20,
-                                    child: AppLoader(size: 20),
-                                  )
-                                : Opacity(
-                                    opacity: isButtonEnabled ? 1.0 : 0.6,
-                                    // Remove the big background container; show only the animated Lottie "button".
-                                    child: ClipRect(
-                                      child: Center(
-                                        child: Transform.scale(
-                                          scale: 3.2,
-                                          child: Lottie.asset(
-                                            // Show animation based on open-shift state:
-                                            // Open shift => user needs to check-out => Checkout.json
-                                            // No open shift => user needs to check-in => Checkin.json
-                                            _hasOpenShift
-                                                ? 'downloads/Checkout.json'
-                                                : 'downloads/Checkin.json',
-                                            fit: BoxFit.contain,
-                                            alignment: Alignment.center,
-                                            repeat: true,
-                                            animate: true,
-                                            frameRate: FrameRate.max,
                                             options: LottieOptions(
                                               enableMergePaths: true,
                                             ),
-                                            errorBuilder:
-                                                (context, error, stackTrace) {
-                                                  debugPrint(
-                                                    'Button Lottie failed: $error',
-                                                  );
-                                                  return const SizedBox();
-                                                },
+                                            errorBuilder: (context, error, stackTrace) {
+                                              debugPrint(
+                                                'Biometric Lottie failed: $error',
+                                              );
+                                              return Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    Icons
+                                                        .face_retouching_natural_rounded,
+                                                    size: 56,
+                                                    color:
+                                                        (isCheckIn
+                                                                ? const Color(
+                                                                    0xFF00E676,
+                                                                  )
+                                                                : const Color(
+                                                                    0xFFEF5350,
+                                                                  ))
+                                                            .withOpacity(0.4),
+                                                  ),
+                                                  const SizedBox(height: 8),
+                                                  Text(
+                                                    'Camera opens on ${isCheckIn ? 'check-in' : 'check-out'}',
+                                                    style: TextStyle(
+                                                      fontSize: 12,
+                                                      color: Colors.white
+                                                          .withOpacity(0.35),
+                                                    ),
+                                                  ),
+                                                ],
+                                              );
+                                            },
                                           ),
+                                        )
+                                      : Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            Image.file(
+                                              _capturedPhoto!,
+                                              fit: BoxFit.cover,
+                                              alignment: Alignment.center,
+                                            ),
+                                            // Green/Red gradient overlay
+                                            Positioned(
+                                              bottom: 0,
+                                              left: 0,
+                                              right: 0,
+                                              child: Container(
+                                                height: 50,
+                                                decoration: BoxDecoration(
+                                                  gradient: LinearGradient(
+                                                    begin: Alignment.topCenter,
+                                                    end: Alignment.bottomCenter,
+                                                    colors: [
+                                                      Colors.transparent,
+                                                      (isCheckIn
+                                                              ? const Color(
+                                                                  0xFF00E676,
+                                                                )
+                                                              : const Color(
+                                                                  0xFFEF5350,
+                                                                ))
+                                                          .withOpacity(0.6),
+                                                    ],
+                                                  ),
+                                                ),
+                                                alignment:
+                                                    Alignment.bottomCenter,
+                                                padding: const EdgeInsets.only(
+                                                  bottom: 8,
+                                                ),
+                                                child: Row(
+                                                  mainAxisAlignment:
+                                                      MainAxisAlignment.center,
+                                                  children: [
+                                                    const Icon(
+                                                      Icons
+                                                          .verified_user_rounded,
+                                                      color: Colors.white,
+                                                      size: 16,
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      isCheckIn
+                                                          ? 'Check-in Photo'
+                                                          : 'Check-out Photo',
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 0),
+                        Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: isButtonEnabled ? _handleCheckInOut : null,
+                            child: SizedBox(
+                              height: 90,
+                              width: double.infinity,
+                              child: Center(
+                                child: Opacity(
+                                  opacity: isButtonEnabled ? 1.0 : 0.6,
+                                  child: ClipRect(
+                                    child: Center(
+                                      child: Transform.scale(
+                                        scale: 3.2,
+                                        child: Lottie.asset(
+                                          _hasOpenShift
+                                              ? 'downloads/Checkout.json'
+                                              : 'downloads/Checkin.json',
+                                          fit: BoxFit.contain,
+                                          alignment: Alignment.center,
+                                          repeat: true,
+                                          animate: true,
+                                          frameRate: FrameRate.max,
+                                          options: LottieOptions(
+                                            enableMergePaths: true,
+                                          ),
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                debugPrint(
+                                                  'Button Lottie failed: $error',
+                                                );
+                                                return const SizedBox();
+                                              },
                                         ),
                                       ),
                                     ),
                                   ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    if (attendanceCompleted) ...[
-                      const SizedBox(height: 12),
-                      Text(
-                        'You have already completed today\'s attendance.',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.blueGrey.shade700,
-                          fontWeight: FontWeight.w600,
+                        if (attendanceCompleted) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            'You have already completed today\'s attendance.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Colors.blueGrey.shade700,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                        ],
+                        const SizedBox(height: 0),
+                        _ShiftStatusCard(
+                          actionLabel: _currentActionLabel,
+                          hasOpenShift: _hasOpenShift,
+                          hasCompletedToday: attendanceCompleted,
+                          summary: _submissionSummary,
+                          activeShift: _activeShift,
+                          isSyncPending: _isSyncPending,
+                          selectedVehicleNumber: _selectedVehicleNumber,
+                          statusAnimation: (_hasOpenShift || _isSyncPending)
+                              ? _statusAnimation
+                              : null,
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 0),
-                    _ShiftStatusCard(
-                      actionLabel: _currentActionLabel,
-                      hasOpenShift: _hasOpenShift,
-                      hasCompletedToday: attendanceCompleted,
-                      summary: _submissionSummary,
-                      activeShift: _activeShift,
-                      isSyncPending: _isSyncPending,
-                      selectedVehicleNumber: _selectedVehicleNumber,
-                      statusAnimation: (_hasOpenShift || _isSyncPending)
-                          ? _statusAnimation
-                          : null,
+                        if (widget.user.geofencingEnabled) ...[
+                          const SizedBox(height: 16),
+                          _buildGeofenceBanner(context),
+                        ],
+                      ],
                     ),
-                    if (widget.user.geofencingEnabled) ...[
-                      const SizedBox(height: 16),
-                      _buildGeofenceBanner(context),
-                    ],
-                  ],
-                ),
-              ),
+                  ),
+          ),
+        ],
       ),
     );
   }
@@ -1811,6 +1999,169 @@ class _ShiftDetailRow extends StatelessWidget {
           Text(value, style: Theme.of(context).textTheme.bodyMedium),
         ],
       ),
+    );
+  }
+}
+
+// ── Green / Red Success Animation Overlay ─────────────────────────────────
+
+class _AttendanceResultOverlay extends StatefulWidget {
+  const _AttendanceResultOverlay({
+    required this.color,
+    required this.icon,
+    required this.label,
+    required this.onDone,
+  });
+
+  final Color color;
+  final IconData icon;
+  final String label;
+  final VoidCallback onDone;
+
+  @override
+  State<_AttendanceResultOverlay> createState() =>
+      _AttendanceResultOverlayState();
+}
+
+class _AttendanceResultOverlayState extends State<_AttendanceResultOverlay>
+    with TickerProviderStateMixin {
+  late final AnimationController _fadeController;
+  late final AnimationController _pulseController;
+  late final Animation<double> _fadeIn;
+  late final Animation<double> _fadeOut;
+  late final Animation<double> _scale;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _fadeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    );
+
+    _fadeIn = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _fadeController,
+        curve: const Interval(0.0, 0.2, curve: Curves.easeOut),
+      ),
+    );
+
+    _fadeOut = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(
+        parent: _fadeController,
+        curve: const Interval(0.75, 1.0, curve: Curves.easeIn),
+      ),
+    );
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+
+    _scale = Tween<double>(begin: 0.9, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _fadeController.forward().then((_) {
+      if (mounted) widget.onDone();
+    });
+  }
+
+  @override
+  void dispose() {
+    _fadeController.dispose();
+    _pulseController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _fadeController,
+      builder: (context, child) {
+        final opacity = _fadeIn.value * _fadeOut.value;
+        if (opacity <= 0) return const SizedBox.shrink();
+
+        return IgnorePointer(
+          child: Opacity(
+            opacity: opacity,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 0.8,
+                    colors: [
+                      widget.color.withOpacity(0.25),
+                      widget.color.withOpacity(0.08),
+                      Colors.black.withOpacity(0.6),
+                    ],
+                    stops: const [0.0, 0.5, 1.0],
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ScaleTransition(
+                        scale: _scale,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: widget.color.withOpacity(0.15),
+                            boxShadow: [
+                              BoxShadow(
+                                color: widget.color.withOpacity(0.3),
+                                blurRadius: 36,
+                                spreadRadius: 8,
+                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(28),
+                          child: Icon(
+                            widget.icon,
+                            size: 64,
+                            color: widget.color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        widget.label,
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: widget.color,
+                          letterSpacing: 1.2,
+                          shadows: [
+                            Shadow(
+                              color: widget.color.withOpacity(0.5),
+                              blurRadius: 20,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Attendance recorded successfully',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.white.withOpacity(0.7),
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

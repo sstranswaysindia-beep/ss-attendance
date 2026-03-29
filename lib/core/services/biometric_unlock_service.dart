@@ -1,11 +1,22 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class BiometricUnlockService {
   static const _prefPrefix = 'biometric_unlock_';
+  static DateTime? _promptSuppressedUntil;
   final LocalAuthentication _auth = LocalAuthentication();
+
+  static bool get isPromptTemporarilySuppressed {
+    final until = _promptSuppressedUntil;
+    return until != null && DateTime.now().isBefore(until);
+  }
+
+  static void suppressPromptsTemporarily({
+    Duration duration = const Duration(minutes: 10),
+  }) {
+    _promptSuppressedUntil = DateTime.now().add(duration);
+  }
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;

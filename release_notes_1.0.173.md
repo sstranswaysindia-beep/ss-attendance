@@ -1,3 +1,0 @@
-- Added Salary Detail API + UI block next to the attendance calendar.
-- Strengthened date filter for salary month and aligned Remaining Salary styling.
-- Improved attendance adjust flow (advance entry limited to two months + refined calendar/summary display).

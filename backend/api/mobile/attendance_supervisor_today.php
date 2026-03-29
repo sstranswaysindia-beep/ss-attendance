@@ -39,10 +39,45 @@ $today = new DateTimeImmutable('now', $tz);
 $todayDate = $today->format('Y-m-d');
 
 try {
+    $columnExists = static function (mysqli $db, string $table, string $column): bool {
+        $tableEsc = $db->real_escape_string($table);
+        $columnEsc = $db->real_escape_string($column);
+        $sql = "
+            SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND TABLE_NAME = '{$tableEsc}'
+              AND COLUMN_NAME = '{$columnEsc}'
+            LIMIT 1
+        ";
+        $res = $db->query($sql);
+        $exists = $res && $res->num_rows > 0;
+        if ($res instanceof mysqli_result) {
+            $res->free();
+        }
+        return $exists;
+    };
+
+    $hasUserFullName = $columnExists($conn, 'users', 'full_name');
+    $hasUserName = $columnExists($conn, 'users', 'name');
+    if ($hasUserFullName && $hasUserName) {
+        $userNameExpr = "COALESCE(NULLIF(u.full_name, ''), NULLIF(u.name, ''), NULLIF(u.username, ''), NULLIF(d.name, ''), '')";
+    } elseif ($hasUserFullName) {
+        $userNameExpr = "COALESCE(NULLIF(u.full_name, ''), NULLIF(u.username, ''), NULLIF(d.name, ''), '')";
+    } elseif ($hasUserName) {
+        $userNameExpr = "COALESCE(NULLIF(u.name, ''), NULLIF(u.username, ''), NULLIF(d.name, ''), '')";
+    } else {
+        $userNameExpr = "COALESCE(NULLIF(u.username, ''), NULLIF(d.name, ''), '')";
+    }
+
     $plantIds = [];
     $plantNames = [];
 
-    $directStmt = $conn->prepare('SELECT id, plant_name FROM plants WHERE supervisor_user_id = ?');
+    $directStmt = $conn->prepare(
+        'SELECT id, plant_name
+           FROM plants
+          WHERE supervisor_user_id = ?
+            AND LOWER(COALESCE(plant_name, \'\')) NOT LIKE \'%office%\''
+    );
     if ($directStmt) {
         $directStmt->bind_param('i', $supervisorUserId);
         $directStmt->execute();
@@ -60,6 +95,7 @@ try {
            FROM supervisor_plants sp
            JOIN plants p ON p.id = sp.plant_id
           WHERE sp.user_id = ?
+            AND LOWER(COALESCE(p.plant_name, \'\')) NOT LIKE \'%office%\'
           ORDER BY p.plant_name ASC'
     );
     if ($linkedStmt) {
@@ -95,9 +131,9 @@ try {
     $placeholders = implode(',', array_fill(0, count($plantIdList), '?'));
     $query = "
         SELECT d.id AS driver_id,
-               d.name AS driver_name,
+               {$userNameExpr} AS driver_name,
                d.profile_photo_url,
-               d.role AS driver_role,
+               COALESCE(NULLIF(u.role, ''), NULLIF(d.role, ''), 'driver') AS driver_role,
                d.plant_id,
                COALESCE(p.plant_name, '') AS plant_name,
                in_data.first_check_in,
@@ -109,6 +145,7 @@ try {
                am.supervisor_user_id AS absence_marked_by
           FROM drivers d
      LEFT JOIN plants p ON p.id = d.plant_id
+     LEFT JOIN users u ON u.driver_id = d.id
      LEFT JOIN (
             SELECT driver_id,
                    MIN(in_time) AS first_check_in,
@@ -135,6 +172,8 @@ try {
            AND am.absence_date = ?
          WHERE d.status = 'Active'
            AND d.plant_id IN ($placeholders)
+           AND LOWER(COALESCE(p.plant_name, '')) NOT LIKE '%office%'
+           AND (u.id IS NULL OR u.id <> ?)
       ORDER BY p.plant_name ASC, d.name ASC
     ";
 
@@ -143,8 +182,8 @@ try {
         throw new RuntimeException('Failed to prepare attendance query: ' . $conn->error);
     }
 
-    $types = 'sss' . str_repeat('i', count($plantIdList));
-    $params = [$todayDate, $todayDate, $todayDate, ...$plantIdList];
+    $types = 'sss' . str_repeat('i', count($plantIdList)) . 'i';
+    $params = [$todayDate, $todayDate, $todayDate, ...$plantIdList, $supervisorUserId];
     apiBindParams($stmt, $types, $params);
 
     $stmt->execute();

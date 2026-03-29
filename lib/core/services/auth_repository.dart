@@ -114,6 +114,11 @@ class AuthRepository {
       }
 
       final role = _parseRole(userJson['role']?.toString());
+      final roleRaw = userJson['role']?.toString() ?? '';
+      final referralLikeUser =
+          _parseFlag(userJson['is_referral_user']) ||
+          userJson['referred_by'] != null ||
+          roleRaw.trim().toLowerCase().contains('refer');
       final bool canViewDocuments = _parseFlag(
         userJson['view_document'] ?? userJson['viewDocument'],
       );
@@ -151,6 +156,44 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
+          canViewDocuments: canViewDocuments,
+          geofencingEnabled: geofencingEnabled,
+          proxyEnabled: proxyEnabled,
+          trainingRequired: trainingRequired,
+          advanceEntryAllowed: advanceEntryAllowed,
+        );
+      }
+
+      // Handle referral users (no driver mapping expected)
+      if (role == UserRole.referral && driverJson == null) {
+        final displayName =
+            userJson['full_name']?.toString() ??
+            userJson['username']?.toString() ??
+            username;
+
+        return AppUser(
+          id: userJson['id']?.toString() ?? username,
+          displayName: displayName,
+          role: role,
+          canViewDocuments: canViewDocuments,
+          geofencingEnabled: geofencingEnabled,
+          proxyEnabled: proxyEnabled,
+          trainingRequired: trainingRequired,
+          advanceEntryAllowed: advanceEntryAllowed,
+        );
+      }
+
+      // Safety fallback for referral-like users when role text is inconsistent.
+      if (driverJson == null && referralLikeUser) {
+        final displayName =
+            userJson['full_name']?.toString() ??
+            userJson['username']?.toString() ??
+            username;
+
+        return AppUser(
+          id: userJson['id']?.toString() ?? username,
+          displayName: displayName,
+          role: UserRole.referral,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
@@ -306,31 +349,33 @@ class AuthRepository {
         return null;
       }
 
-      final contactNumber = pickString(
-        driverJson,
-        const ['contact', 'contact_number', 'phone'],
-      );
+      final contactNumber = pickString(driverJson, const [
+        'contact',
+        'contact_number',
+        'phone',
+      ]);
       final dlNumber = pickString(driverJson, const ['dlNumber', 'dl_number']);
-      final dlValidity = pickString(
-        driverJson,
-        const ['dlValidity', 'dl_validity', 'license_expiry_date'],
-      );
-      final dlIssueDate = pickString(
-        driverJson,
-        const ['dlIssueDate', 'dl_issue_date'],
-      );
-      final nomineeName = pickString(
-        driverJson,
-        const ['nomineeName', 'nominee_name'],
-      );
-      final nomineeRelation = pickString(
-        driverJson,
-        const ['nomineeRelation', 'relation_nominee'],
-      );
-      final nomineeContact = pickString(
-        driverJson,
-        const ['nomineeContact', 'nominee_contact'],
-      );
+      final dlValidity = pickString(driverJson, const [
+        'dlValidity',
+        'dl_validity',
+        'license_expiry_date',
+      ]);
+      final dlIssueDate = pickString(driverJson, const [
+        'dlIssueDate',
+        'dl_issue_date',
+      ]);
+      final nomineeName = pickString(driverJson, const [
+        'nomineeName',
+        'nominee_name',
+      ]);
+      final nomineeRelation = pickString(driverJson, const [
+        'nomineeRelation',
+        'relation_nominee',
+      ]);
+      final nomineeContact = pickString(driverJson, const [
+        'nomineeContact',
+        'nominee_contact',
+      ]);
 
       return AppUser(
         id: userJson['id']?.toString() ?? username,
@@ -389,13 +434,20 @@ class AuthRepository {
   }
 
   UserRole _parseRole(String? raw) {
-    switch (raw) {
+    final normalized = raw?.trim().toLowerCase() ?? '';
+    if (normalized.contains('refer')) {
+      return UserRole.referral;
+    }
+    switch (normalized) {
       case 'admin':
         return UserRole.admin;
       case 'supervisor':
         return UserRole.supervisor;
       case 'driver':
         return UserRole.driver;
+      case 'referral':
+      case 'referred':
+        return UserRole.referral;
       default:
         return UserRole.driver;
     }

@@ -15,6 +15,10 @@ import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/app_loader.dart';
 
 const Color _financePrimaryColor = Color(0xFF12355B);
+const Color _financeAccent = Color(0xFF00BFA6);
+const Color _gradientStart = Color(0xFF0A1628);
+const Color _gradientEnd = Color(0xFF1B3A5C);
+const Color _surfaceCard = Color(0xFFF8FAFF);
 
 class SalaryAdvanceScreen extends StatefulWidget {
   const SalaryAdvanceScreen({required this.user, super.key});
@@ -25,7 +29,9 @@ class SalaryAdvanceScreen extends StatefulWidget {
   State<SalaryAdvanceScreen> createState() => _SalaryAdvanceScreenState();
 }
 
-class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
+class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
   final FinanceRepository _financeRepository = FinanceRepository();
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
 
@@ -55,6 +61,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     'TRAINING',
     'MEDICAL',
     'UNIFORM',
+    'SAFETY SHOES',
     'TRAVEL',
     'INCENTIVE',
     'ROOM',
@@ -109,6 +116,11 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   String? _resolveIncomeCategory(AdvanceTransaction t) {
     final fromCategory = t.category?.trim().toUpperCase();
     if (fromCategory != null && fromCategory.isNotEmpty) {
+      if (fromCategory == 'SHOES' ||
+          fromCategory == 'SAFETY' ||
+          fromCategory == 'SAFETY SHOES') {
+        return 'SAFETY SHOES';
+      }
       return fromCategory;
     }
 
@@ -117,9 +129,15 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     final desc = t.description.trim().toUpperCase();
     if (desc.isEmpty) return null;
     final match = RegExp(
-      r'^(DA|TRAINING|MEDICAL|UNIFORM|TRAVEL|INCENTIVE|ROOM|EXTRA|PAPER|EMP PAPER)\b',
+      r'^(DA|TRAINING|MEDICAL|UNIFORM|TRAVEL|INCENTIVE|ROOM|EXTRA|PAPER|EMP PAPER|SHOES|SAFETY|SAFETY SHOES)\b',
     ).firstMatch(desc);
-    return match?.group(1);
+    final resolved = match?.group(1);
+    if (resolved == 'SHOES' ||
+        resolved == 'SAFETY' ||
+        resolved == 'SAFETY SHOES') {
+      return 'SAFETY SHOES';
+    }
+    return resolved;
   }
 
   bool _isAdditionalIncomeTxn(AdvanceTransaction t) {
@@ -163,21 +181,23 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     return DateFormat('MMM yy').format(dt);
   }
 
-  Widget _whiteCard({
+  Widget _glassCard({
     required Widget child,
     EdgeInsetsGeometry padding = const EdgeInsets.all(16),
     EdgeInsetsGeometry? margin,
+    Color? color,
   }) {
     return Container(
       margin: margin ?? const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        color: color ?? _surfaceCard,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.25)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
+            color: _financePrimaryColor.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
           ),
         ],
       ),
@@ -185,8 +205,61 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     );
   }
 
+  Widget _sectionTitle(String text, {IconData? icon}) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10, top: 4),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_financePrimaryColor, _financeAccent],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: Colors.white, size: 16),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Text(
+            text,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1A1A2E),
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
+    _tabController.dispose();
     _amountController.dispose();
     _purposeController.dispose();
     _notesController.dispose();
@@ -196,6 +269,7 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     final now = DateTime.now();
     final effectiveDate = now.day < 15
         ? DateTime(now.year, now.month - 1, 1)
@@ -217,14 +291,15 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     final monthKey = _monthKey(DateTime(_selectedYear, selectedMonthIndex, 1));
 
     try {
-      final uri = Uri.parse(
-        'https://sstranswaysindia.com/billing/api/salary_distribution.php',
-      ).replace(
-        queryParameters: <String, String>{
-          'month': monthKey,
-          'employees_all_months': '0',
-        },
-      );
+      final uri =
+          Uri.parse(
+            'https://sstranswaysindia.com/billing/api/salary_distribution.php',
+          ).replace(
+            queryParameters: <String, String>{
+              'month': monthKey,
+              'employees_all_months': '0',
+            },
+          );
 
       final response = await http.get(uri);
       if (response.statusCode != 200) return;
@@ -380,92 +455,150 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     showModalBottomSheet<void>(
       context: context,
       useSafeArea: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (context) {
         var tempYear = _selectedYear;
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            return Padding(
-              padding: const EdgeInsets.all(16),
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Select Month',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    value: tempYear,
-                    decoration: const InputDecoration(labelText: 'Year'),
-                    items: _availableYears
-                        .map(
-                          (y) => DropdownMenuItem(
-                            value: y,
-                            child: Text(y.toString()),
-                          ),
-                        )
-                        .toList(growable: false),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setSheetState(() => tempYear = v);
-                    },
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Select Month',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: _financePrimaryColor,
+                    ),
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
+                  // Year chips
                   SizedBox(
-                    height: 360,
+                    height: 40,
                     child: ListView.separated(
-                      itemCount: _monthNames.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final month = _monthNames[index];
-                        final selected =
-                            tempYear == _selectedYear &&
-                            month == _selectedMonth;
-                        return ListTile(
-                          title: Text(month),
-                          trailing: selected
-                              ? const Icon(Icons.check, color: Colors.green)
-                              : null,
-                          onTap: () {
-                            setState(() {
-                              _selectedYear = tempYear;
-                              _selectedMonth = month;
-                            });
-                            Navigator.of(context).pop();
-                            final driverId = widget.user.driverId;
-                            if (driverId != null && driverId.isNotEmpty) {
-                              _fetchDaysWorkedForSelectedMonth(driverId).then((
-                                value,
-                              ) {
-                                if (!mounted) return;
-                                setState(
-                                  () => _daysWorkedForSelectedMonth = value,
-                                );
-                              });
-                              _loadSalaryDistribution(driverId);
-                            }
-                          },
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _availableYears.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, i) {
+                        final y = _availableYears[i];
+                        final sel = y == tempYear;
+                        return GestureDetector(
+                          onTap: () => setSheetState(() => tempYear = y),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 22,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: sel
+                                  ? const LinearGradient(
+                                      colors: [
+                                        _financePrimaryColor,
+                                        _financeAccent,
+                                      ],
+                                    )
+                                  : null,
+                              color: sel ? null : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              y.toString(),
+                              style: TextStyle(
+                                color: sel ? Colors.white : Colors.black87,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
                         );
                       },
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Month grid
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 2.5,
+                        ),
+                    itemCount: _monthNames.length,
+                    itemBuilder: (context, index) {
+                      final month = _monthNames[index];
+                      final selected =
+                          tempYear == _selectedYear && month == _selectedMonth;
+                      return GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _selectedYear = tempYear;
+                            _selectedMonth = month;
+                          });
+                          Navigator.of(context).pop();
+                          final driverId = widget.user.driverId;
+                          if (driverId != null && driverId.isNotEmpty) {
+                            _fetchDaysWorkedForSelectedMonth(driverId).then((
+                              value,
+                            ) {
+                              if (!mounted) return;
+                              setState(
+                                () => _daysWorkedForSelectedMonth = value,
+                              );
+                            });
+                            _loadSalaryDistribution(driverId);
+                          }
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          decoration: BoxDecoration(
+                            gradient: selected
+                                ? const LinearGradient(
+                                    colors: [
+                                      _financePrimaryColor,
+                                      _financeAccent,
+                                    ],
+                                  )
+                                : null,
+                            color: selected ? null : Colors.grey.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: selected
+                                  ? Colors.transparent
+                                  : Colors.grey.shade200,
+                            ),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            month.substring(0, 3),
+                            style: TextStyle(
+                              color: selected ? Colors.white : Colors.black87,
+                              fontWeight: selected
+                                  ? FontWeight.w800
+                                  : FontWeight.w500,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),
@@ -577,27 +710,24 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
     // so DA/Medical/Uniform/etc don't reduce salary.
     final additionalIncomeByCategory = <String, double>{};
     double additionalIncomeTotal = 0.0;
-    final computedAdvanceBalanceForSelectedMonth =
-        _advanceTransactions.fold<double>(
-      0.0,
-      (sum, t) {
-        final dt = _tryParseDate(t.createdAt);
-        if (dt == null) return sum;
-        if (_monthKey(dt) != selectedKey) return sum;
+    final computedAdvanceBalanceForSelectedMonth = _advanceTransactions
+        .fold<double>(0.0, (sum, t) {
+          final dt = _tryParseDate(t.createdAt);
+          if (dt == null) return sum;
+          if (_monthKey(dt) != selectedKey) return sum;
 
-        if (_isAdditionalIncomeTxn(t)) {
-          final key = _resolveIncomeCategory(t)!;
-          additionalIncomeByCategory[key] =
-              (additionalIncomeByCategory[key] ?? 0) + t.amount;
-          additionalIncomeTotal += t.amount;
+          if (_isAdditionalIncomeTxn(t)) {
+            final key = _resolveIncomeCategory(t)!;
+            additionalIncomeByCategory[key] =
+                (additionalIncomeByCategory[key] ?? 0) + t.amount;
+            additionalIncomeTotal += t.amount;
+            return sum;
+          }
+
+          if (t.type == 'advance_received') return sum + t.amount;
+          if (t.type == 'expense') return sum - t.amount;
           return sum;
-        }
-
-        if (t.type == 'advance_received') return sum + t.amount;
-        if (t.type == 'expense') return sum - t.amount;
-        return sum;
-      },
-    );
+        });
 
     final advanceBalanceForSelectedMonth =
         salaryDist?.advance ?? computedAdvanceBalanceForSelectedMonth;
@@ -620,26 +750,73 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
         })
         .toList(growable: false);
 
+    // Compute totalPayable for hero card
+    final heroMonthlySalary =
+        salaryDist?.baseSalary ?? (double.tryParse(baseSalary ?? '') ?? 0.0);
+    final heroMonthIndex = selectedMonthIndex;
+    final heroDaysInMonth = DateTime(_selectedYear, heroMonthIndex + 1, 0).day;
+    final heroDaysWorked = _daysWorkedForSelectedMonth;
+    final heroPerDay = heroDaysInMonth > 0
+        ? (heroMonthlySalary / heroDaysInMonth)
+        : 0.0;
+    final heroMonthlyEarned = heroPerDay * heroDaysWorked;
+    final heroGrossEarned = heroMonthlyEarned + additionalIncomeTotal;
+    final heroHasPf = _hasNonEmptyValue(_resolvedUanNumber);
+    final heroHasEsi = _hasNonEmptyValue(_resolvedEsiNumber);
+    final heroEmployeePf =
+        salaryDist?.pfEmployee ??
+        (heroHasPf ? (heroGrossEarned * _employeePfRate) : 0.0);
+    final heroEmployeeEsi =
+        salaryDist?.esiEmployee ??
+        (heroHasEsi
+            ? ((heroGrossEarned <= _esiWageCeiling)
+                  ? (heroGrossEarned * _employeeEsiRate)
+                  : 0.0)
+            : 0.0);
+    final heroTotalPayable =
+        salaryDist?.total ??
+        (heroGrossEarned -
+            advanceBalanceForSelectedMonth -
+            heroEmployeePf -
+            heroEmployeeEsi);
+
     return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'Salary & Advances',
-          style: TextStyle(color: Colors.white),
-        ),
-        backgroundColor: _financePrimaryColor,
-        foregroundColor: Colors.white,
-        iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            onPressed: _isLoading ? null : _loadFinanceData,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Reload',
-          ),
-        ],
-      ),
-      backgroundColor: Colors.grey[200],
+      backgroundColor: const Color(0xFFF0F4F8),
+      floatingActionButton: isSupervisor
+          ? Container(
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_financePrimaryColor, _financeAccent],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: _financeAccent.withOpacity(0.4),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: FloatingActionButton.extended(
+                onPressed: _openAdvanceRequestSheet,
+                backgroundColor: Colors.transparent,
+                elevation: 0,
+                icon: const Icon(Icons.add_rounded, color: Colors.white),
+                label: const Text(
+                  'Request Advance',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            )
+          : null,
       body: _isLoading
-          ? const Center(child: AppLoader())
+          ? Container(
+              color: const Color(0xFFF0F4F8),
+              child: const Center(child: AppLoader()),
+            )
           : _errorMessage != null
           ? Center(
               child: Text(
@@ -648,630 +825,1055 @@ class _SalaryAdvanceScreenState extends State<SalaryAdvanceScreen> {
                 textAlign: TextAlign.center,
               ),
             )
-          : SingleChildScrollView(
+          : NestedScrollView(
+              headerSliverBuilder: (context, innerBoxIsScrolled) {
+                return [
+                  SliverAppBar(
+                    expandedHeight: 220,
+                    floating: false,
+                    pinned: true,
+                    centerTitle: true,
+                    backgroundColor: _gradientStart,
+                    foregroundColor: Colors.white,
+                    iconTheme: const IconThemeData(color: Colors.white),
+                    actions: [
+                      IconButton(
+                        onPressed: _isLoading ? null : _loadFinanceData,
+                        icon: const Icon(Icons.refresh_rounded),
+                        tooltip: 'Reload',
+                      ),
+                    ],
+                    title: const Text(
+                      'Salary & Advances',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 20,
+                      ),
+                    ),
+                    flexibleSpace: FlexibleSpaceBar(
+                      background: Container(
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              _gradientStart,
+                              _gradientEnd,
+                              Color(0xFF0D4F6B),
+                            ],
+                          ),
+                        ),
+                        child: SafeArea(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 60, 20, 16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                // Hero summary card
+                                Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.all(18),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.12),
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: Colors.white.withOpacity(0.2),
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              const Text(
+                                                'Net Payable',
+                                                style: TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                _formatInr(
+                                                  heroTotalPayable.abs(),
+                                                ),
+                                                style: TextStyle(
+                                                  color: heroTotalPayable >= 0
+                                                      ? const Color(0xFF7CFFB2)
+                                                      : const Color(0xFFFF7C7C),
+                                                  fontSize: 28,
+                                                  fontWeight: FontWeight.w900,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          GestureDetector(
+                                            onTap: _showMonthSelector,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 14,
+                                                    vertical: 8,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white.withOpacity(
+                                                  0.15,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(24),
+                                                border: Border.all(
+                                                  color: Colors.white
+                                                      .withOpacity(0.25),
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons
+                                                        .calendar_month_rounded,
+                                                    color: Colors.white,
+                                                    size: 16,
+                                                  ),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    _selectedMonthLabel(),
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                      fontSize: 13,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        children: [
+                                          _buildHeroBadge(
+                                            heroHasPf ? 'PF' : 'PF (NA)',
+                                            heroHasPf,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          _buildHeroBadge(
+                                            heroHasEsi ? 'ESI' : 'ESI (NA)',
+                                            heroHasEsi,
+                                          ),
+                                          const Spacer(),
+                                          Text(
+                                            '$heroDaysWorked days worked',
+                                            style: const TextStyle(
+                                              color: Colors.white60,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    bottom: PreferredSize(
+                      preferredSize: const Size.fromHeight(52),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0F4F8),
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(24),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, -2),
+                            ),
+                          ],
+                        ),
+                        child: TabBar(
+                          controller: _tabController,
+                          labelColor: _financePrimaryColor,
+                          unselectedLabelColor: Colors.grey.shade500,
+                          labelStyle: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 14,
+                          ),
+                          unselectedLabelStyle: const TextStyle(
+                            fontWeight: FontWeight.w500,
+                            fontSize: 14,
+                          ),
+                          indicatorColor: _financeAccent,
+                          indicatorWeight: 3,
+                          tabs: const [
+                            Tab(
+                              icon: Icon(
+                                Icons.account_balance_wallet_rounded,
+                                size: 20,
+                              ),
+                              text: 'Salary',
+                            ),
+                            Tab(
+                              icon: Icon(Icons.request_page_rounded, size: 20),
+                              text: 'Advances',
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ];
+              },
+              body: TabBarView(
+                controller: _tabController,
+                children: [
+                  // ─── Salary Tab ───
+                  _buildSalaryTab(
+                    theme: theme,
+                    baseSalary: baseSalary,
+                    salaryDist: salaryDist,
+                    selectedMonthIndex: selectedMonthIndex,
+                    advanceBalanceForSelectedMonth:
+                        advanceBalanceForSelectedMonth,
+                    additionalIncomeByCategory: additionalIncomeByCategory,
+                    additionalIncomeTotal: additionalIncomeTotal,
+                    salaryCreditsForSelectedMonth:
+                        salaryCreditsForSelectedMonth,
+                    isSupervisor: isSupervisor,
+                  ),
+                  // ─── Advance Tab ───
+                  _buildAdvanceTab(
+                    theme: theme,
+                    isSupervisor: isSupervisor,
+                    advanceRequestsForSelectedMonth:
+                        advanceRequestsForSelectedMonth,
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+
+  Widget _buildHeroBadge(String label, bool active) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: active
+            ? const Color(0xFF7CFFB2).withOpacity(0.2)
+            : const Color(0xFFFF7C7C).withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: active
+              ? const Color(0xFF7CFFB2).withOpacity(0.5)
+              : const Color(0xFFFF7C7C).withOpacity(0.5),
+        ),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: active ? const Color(0xFF7CFFB2) : const Color(0xFFFF7C7C),
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSalaryTab({
+    required ThemeData theme,
+    required String? baseSalary,
+    required SalaryDistributionRow? salaryDist,
+    required int selectedMonthIndex,
+    required double advanceBalanceForSelectedMonth,
+    required Map<String, double> additionalIncomeByCategory,
+    required double additionalIncomeTotal,
+    required List<SalaryCredit> salaryCreditsForSelectedMonth,
+    required bool isSupervisor,
+  }) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        // PF / ESI indicators
+        Builder(
+          builder: (context) {
+            final hasPf = _hasNonEmptyValue(_resolvedUanNumber);
+            final hasEsi = _hasNonEmptyValue(_resolvedEsiNumber);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.04),
+                      blurRadius: 12,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  border: Border.all(color: Colors.grey.shade100),
+                ),
+                child: Row(
+                  children: [
+                    // PF Status
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: hasPf
+                                  ? const Color(0xFFE8F5E9)
+                                  : const Color(0xFFFFF3E0),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.shield_rounded,
+                              size: 16,
+                              color: hasPf
+                                  ? Colors.green.shade600
+                                  : Colors.orange.shade600,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Provident Fund',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey.shade500,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                hasPf ? 'Active' : 'Not Applied',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w800,
+                                  color: hasPf
+                                      ? Colors.green.shade700
+                                      : Colors.orange.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Divider
+                    Container(
+                      width: 1,
+                      height: 32,
+                      color: Colors.grey.shade200,
+                    ),
+                    const SizedBox(width: 8),
+                    // ESI Status
+                    Expanded(
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: hasEsi
+                                  ? const Color(0xFFE8F5E9)
+                                  : const Color(0xFFFFF3E0),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              Icons.health_and_safety_rounded,
+                              size: 16,
+                              color: hasEsi
+                                  ? Colors.green.shade600
+                                  : Colors.orange.shade600,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'ESI Insurance',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey.shade500,
+                                  fontWeight: FontWeight.w500,
+                                  letterSpacing: 0.3,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                hasEsi ? 'Active' : 'Not Applied',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: hasEsi
+                                      ? Colors.green.shade700
+                                      : Colors.orange.shade700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        // Salary Breakdown
+        _sectionTitle('Salary Breakdown', icon: Icons.analytics_rounded),
+        _buildSalaryBreakdown(
+          theme: theme,
+          baseSalary: baseSalary,
+          salaryDist: salaryDist,
+          selectedMonthIndex: selectedMonthIndex,
+          advanceBalanceForSelectedMonth: advanceBalanceForSelectedMonth,
+          additionalIncomeByCategory: additionalIncomeByCategory,
+          additionalIncomeTotal: additionalIncomeTotal,
+        ),
+        const SizedBox(height: 20),
+        // Salary Credits
+        _sectionTitle(
+          'Salary Credits',
+          icon: Icons.account_balance_wallet_rounded,
+        ),
+        if (salaryCreditsForSelectedMonth.isEmpty)
+          _glassCard(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.schedule_rounded,
+                    color: Colors.amber.shade700,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Builder(
+                    builder: (context) {
+                      final nextMonth = DateTime(
+                        _selectedYear,
+                        selectedMonthIndex + 1,
+                        15,
+                      );
+                      final nextLabel = DateFormat('MMM yy').format(nextMonth);
+                      return Text(
+                        '${_selectedMonthLabel()} salary will be credited on 15th of $nextLabel',
+                        style: TextStyle(
+                          color: Colors.grey.shade700,
+                          fontSize: 13,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...salaryCreditsForSelectedMonth.map((credit) {
+            final isDeleting = _salaryDeleting.contains(credit.salaryCreditId);
+            final card = _glassCard(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF4CAF50), Color(0xFF81C784)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.account_balance_wallet_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formatInr(credit.amount),
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF1A1A2E),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Credited on ${_formatDate(credit.creditedOn)}',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isDeleting)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: AppLoader(size: 16),
+                    ),
+                ],
+              ),
+            );
+
+            return isSupervisor
+                ? Dismissible(
+                    key: ValueKey('salary-${credit.salaryCreditId}'),
+                    direction: DismissDirection.endToStart,
+                    confirmDismiss: (_) async {
+                      await _confirmDeleteSalary(credit);
+                      return false;
+                    },
+                    background: Container(
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      margin: const EdgeInsets.symmetric(vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: const Icon(
+                        Icons.delete_rounded,
+                        color: Colors.red,
+                      ),
+                    ),
+                    child: card,
+                  )
+                : card;
+          }),
+      ],
+    );
+  }
+
+  Widget _buildSalaryBreakdown({
+    required ThemeData theme,
+    required String? baseSalary,
+    required SalaryDistributionRow? salaryDist,
+    required int selectedMonthIndex,
+    required double advanceBalanceForSelectedMonth,
+    required Map<String, double> additionalIncomeByCategory,
+    required double additionalIncomeTotal,
+  }) {
+    final daysInMonth = DateTime(_selectedYear, selectedMonthIndex + 1, 0).day;
+    final monthlySalary =
+        salaryDist?.baseSalary ?? (double.tryParse(baseSalary ?? '') ?? 0.0);
+    final daysWorked = _daysWorkedForSelectedMonth;
+    final perDay = daysInMonth > 0 ? (monthlySalary / daysInMonth) : 0.0;
+    final monthlyEarned = perDay * daysWorked;
+    final grossEarned = monthlyEarned + additionalIncomeTotal;
+    final hasPf = _hasNonEmptyValue(_resolvedUanNumber);
+    final hasEsi = _hasNonEmptyValue(_resolvedEsiNumber);
+    final employeePf =
+        salaryDist?.pfEmployee ??
+        (hasPf ? (grossEarned * _employeePfRate) : 0.0);
+    final employeeEsi =
+        salaryDist?.esiEmployee ??
+        (hasEsi
+            ? ((grossEarned <= _esiWageCeiling)
+                  ? (grossEarned * _employeeEsiRate)
+                  : 0.0)
+            : 0.0);
+    final totalPayable =
+        salaryDist?.total ??
+        (grossEarned -
+            advanceBalanceForSelectedMonth -
+            employeePf -
+            employeeEsi);
+
+    final additionalIncomeItems = salaryDist == null
+        ? additionalIncomeByCategory.entries
+              .where((e) => e.value.abs() > 0.0001)
+              .toList(growable: false)
+        : <MapEntry<String, double>>[
+            MapEntry('DA', salaryDist.da),
+            MapEntry('Training', salaryDist.training),
+            MapEntry('ESI (Employer)', salaryDist.esiEmployer),
+            MapEntry('PF (Employer)', salaryDist.pfEmployer),
+            MapEntry('Medical', salaryDist.medical),
+            MapEntry('Uniform', salaryDist.uniform),
+            MapEntry('Safety Shoes', salaryDist.safetyShoes),
+            MapEntry('Travel', salaryDist.travel),
+            MapEntry('Room', salaryDist.room),
+            MapEntry('Incentive', salaryDist.incentive),
+            MapEntry('Extra', salaryDist.extra),
+            MapEntry('Paper', salaryDist.paper),
+            MapEntry('EMP Paper', salaryDist.empPaper),
+          ].where((e) => e.value.abs() > 0.0001).toList(growable: false);
+
+    Widget bRow(
+      String label,
+      String value, {
+      Color? valueColor,
+      FontWeight fw = FontWeight.w600,
+      bool isTotal = false,
+    }) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          vertical: isTotal ? 10 : 7,
+          horizontal: 2,
+        ),
+        decoration: isTotal
+            ? BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: Colors.grey.shade200, width: 1.5),
+                ),
+              )
+            : null,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: isTotal ? 14 : 13,
+                  color: isTotal
+                      ? const Color(0xFF1A1A2E)
+                      : Colors.grey.shade700,
+                  fontWeight: isTotal ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: isTotal ? 15 : 13,
+                color:
+                    valueColor ??
+                    (isTotal ? const Color(0xFF1A1A2E) : Colors.black87),
+                fontWeight: fw,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _glassCard(
+      padding: const EdgeInsets.all(18),
+      child: Column(
+        children: [
+          bRow('Monthly salary (total)', _formatInr(monthlySalary)),
+          bRow(
+            salaryDist != null
+                ? 'Days worked (paid/total)'
+                : 'Days worked (${_selectedMonthLabel()})',
+            salaryDist != null
+                ? '${salaryDist.totalPaidDays}/${salaryDist.totalDays}'
+                : '$daysWorked',
+          ),
+          if (salaryDist != null) ...[
+            bRow('Total days', '${salaryDist.totalDays}'),
+            bRow('Holiday taken', '${salaryDist.holidayTaken}'),
+          ],
+          bRow(
+            'Monthly earned (${_selectedMonthLabel()})',
+            _formatInr(monthlyEarned),
+          ),
+          if (salaryDist != null) ...[
+            if (salaryDist.holidayDeduction.abs() > 0.0001)
+              bRow(
+                'Holiday deduction',
+                _formatInrSigned(-salaryDist.holidayDeduction),
+                valueColor: Colors.red.shade600,
+              ),
+            if (salaryDist.pfEmployee.abs() > 0.0001)
+              bRow(
+                'Employee PF deduction',
+                _formatInrSigned(-salaryDist.pfEmployee),
+                valueColor: Colors.red.shade600,
+              ),
+            if (salaryDist.esiEmployee.abs() > 0.0001)
+              bRow(
+                'Employee ESI deduction',
+                _formatInrSigned(-salaryDist.esiEmployee),
+                valueColor: Colors.red.shade600,
+              ),
+            if (salaryDist.remainingSalary.abs() > 0.0001)
+              bRow(
+                'Remaining salary',
+                _formatInrSigned(salaryDist.remainingSalary),
+                valueColor: salaryDist.remainingSalary >= 0
+                    ? Colors.green.shade700
+                    : Colors.red.shade700,
+                fw: FontWeight.w800,
+              ),
+            if (salaryDist.loanEmi.abs() > 0.0001)
+              bRow(
+                'Loan EMI',
+                _formatInrSigned(-salaryDist.loanEmi),
+                valueColor: Colors.red.shade600,
+              ),
+            if (salaryDist.loanAdj.abs() > 0.0001)
+              bRow(
+                'Loan Adj',
+                _formatInrSigned(-salaryDist.loanAdj),
+                valueColor: Colors.red.shade600,
+              ),
+          ],
+          if (additionalIncomeItems.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Additional Income',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w900,
+                  color: _financePrimaryColor,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            ...additionalIncomeItems.map(
+              (entry) => bRow(
+                entry.key,
+                _formatInrSigned(entry.value),
+                valueColor: entry.value >= 0
+                    ? Colors.green.shade700
+                    : Colors.red.shade700,
+              ),
+            ),
+            if (salaryDist == null) ...[
+              if (additionalIncomeTotal.abs() > 0.0001)
+                bRow(
+                  'Total additional income',
+                  _formatInrSigned(additionalIncomeTotal),
+                  valueColor: additionalIncomeTotal >= 0
+                      ? Colors.green.shade800
+                      : Colors.red.shade800,
+                  fw: FontWeight.w800,
+                ),
+              if (grossEarned.abs() > 0.0001)
+                bRow(
+                  'Gross earned',
+                  _formatInrSigned(grossEarned),
+                  valueColor: grossEarned >= 0
+                      ? Colors.green.shade800
+                      : Colors.red.shade800,
+                  fw: FontWeight.w800,
+                ),
+            ],
+          ],
+          if (advanceBalanceForSelectedMonth.abs() > 0.0001)
+            bRow(
+              'Advance balance (${_selectedMonthLabel()})',
+              _formatInrSigned(advanceBalanceForSelectedMonth),
+              valueColor: advanceBalanceForSelectedMonth >= 0
+                  ? Colors.green.shade700
+                  : Colors.red.shade700,
+            ),
+          if (salaryDist == null && hasPf && employeePf.abs() > 0.0001)
+            bRow(
+              'Employee PF deduction',
+              _formatInrSigned(-employeePf),
+              valueColor: Colors.red.shade600,
+            ),
+          if (salaryDist == null && hasEsi && employeeEsi.abs() > 0.0001)
+            bRow(
+              'Employee ESI deduction',
+              _formatInrSigned(-employeeEsi),
+              valueColor: Colors.red.shade600,
+            ),
+          if (totalPayable.abs() > 0.0001)
+            bRow(
+              salaryDist != null
+                  ? 'Total payable (billing)'
+                  : 'Salary credited (net)',
+              _formatInrSigned(totalPayable),
+              valueColor: totalPayable >= 0
+                  ? Colors.green.shade700
+                  : Colors.red.shade700,
+              fw: FontWeight.w800,
+              isTotal: true,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdvanceTab({
+    required ThemeData theme,
+    required bool isSupervisor,
+    required List<AdvanceRequest> advanceRequestsForSelectedMonth,
+  }) {
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+      children: [
+        // Filter chips for supervisor
+        if (isSupervisor) ...[
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: ['All', 'Pending', 'Approved', 'Rejected', 'Disbursed']
+                  .map((status) {
+                    final selected = _advanceStatusFilter == status;
+                    final chipColor = switch (status) {
+                      'Approved' => Colors.green,
+                      'Disbursed' => Colors.blue,
+                      'Rejected' => Colors.red,
+                      'Pending' => Colors.orange,
+                      _ => _financePrimaryColor,
+                    };
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: GestureDetector(
+                        onTap: () => _onAdvanceStatusChanged(status),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 18,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: selected
+                                ? chipColor.withOpacity(0.15)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: selected
+                                  ? chipColor
+                                  : Colors.grey.shade300,
+                            ),
+                          ),
+                          child: Text(
+                            status,
+                            style: TextStyle(
+                              color: selected
+                                  ? chipColor
+                                  : Colors.grey.shade600,
+                              fontWeight: selected
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  })
+                  .toList(growable: false),
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
+        _sectionTitle('Advance Requests', icon: Icons.request_page_rounded),
+        if (advanceRequestsForSelectedMonth.isEmpty)
+          _glassCard(
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.inbox_rounded,
+                    color: Colors.blue.shade400,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'No advance requests for ${_selectedMonthLabel()}.',
+                    style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...advanceRequestsForSelectedMonth.map((request) {
+            final statusColor = switch (request.status) {
+              'Approved' => Colors.green,
+              'Disbursed' => Colors.blue,
+              'Rejected' => Colors.red,
+              'Pending' => Colors.orange,
+              _ => Colors.grey,
+            };
+            final statusIcon = switch (request.status) {
+              'Approved' => Icons.check_circle_rounded,
+              'Disbursed' => Icons.payments_rounded,
+              'Rejected' => Icons.cancel_rounded,
+              'Pending' => Icons.hourglass_top_rounded,
+              _ => Icons.help_rounded,
+            };
+            final isDeleting = _advanceDeleting.contains(
+              request.advanceRequestId,
+            );
+
+            final card = _glassCard(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Salary + Credits widget (white)
-                  _whiteCard(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: statusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(statusIcon, color: statusColor, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Expanded(
-                              child: Text(
-                                'Salary & Credits',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w700,
-                                ),
+                            Text(
+                              _formatInr(request.amount),
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF1A1A2E),
                               ),
                             ),
-                            ElevatedButton.icon(
-                              onPressed: _showMonthSelector,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.grey.shade100,
-                                foregroundColor: Colors.black87,
-                                elevation: 0,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 10,
-                                ),
+                            const SizedBox(height: 2),
+                            Text(
+                              request.purpose,
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 13,
                               ),
-                              icon: const Icon(Icons.calendar_today, size: 16),
-                              label: Text(_selectedMonthLabel()),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
-                        Builder(
-                          builder: (context) {
-                            final hasPf = _hasNonEmptyValue(_resolvedUanNumber);
-                            final hasEsi = _hasNonEmptyValue(
-                              _resolvedEsiNumber,
-                            );
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  Chip(
-                                    label: Text(hasPf ? 'PF' : 'PF (NA)'),
-                                    backgroundColor: hasPf
-                                        ? Colors.green.shade100
-                                        : Colors.red.shade100,
-                                    labelStyle: TextStyle(
-                                      color: hasPf
-                                          ? Colors.green.shade800
-                                          : Colors.red.shade800,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                  Chip(
-                                    label: Text(hasEsi ? 'ESI' : 'ESI (NA)'),
-                                    backgroundColor: hasEsi
-                                        ? Colors.green.shade100
-                                        : Colors.red.shade100,
-                                    labelStyle: TextStyle(
-                                      color: hasEsi
-                                          ? Colors.green.shade800
-                                          : Colors.red.shade800,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                    visualDensity: VisualDensity.compact,
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const SizedBox(height: 10),
-                        Builder(
-                          builder: (context) {
-                            final monthIndex = selectedMonthIndex;
-                            final daysInMonth = DateTime(
-                              _selectedYear,
-                              monthIndex + 1,
-                              0,
-                            ).day;
-                            final monthlySalary = salaryDist?.baseSalary ??
-                                (double.tryParse(baseSalary ?? '') ?? 0.0);
-                            final daysWorked = _daysWorkedForSelectedMonth;
-                            final perDay = daysInMonth > 0
-                                ? (monthlySalary / daysInMonth)
-                                : 0.0;
-                            final monthlyEarned = perDay * daysWorked;
-                            final grossEarned =
-                                monthlyEarned + additionalIncomeTotal;
-
-                            final hasPf = _hasNonEmptyValue(_resolvedUanNumber);
-                            final hasEsi = _hasNonEmptyValue(
-                              _resolvedEsiNumber,
-                            );
-                            final employeePf = salaryDist?.pfEmployee ??
-                                (hasPf ? (grossEarned * _employeePfRate) : 0.0);
-                            final employeeEsi = salaryDist?.esiEmployee ??
-                                (hasEsi
-                                    ? ((grossEarned <= _esiWageCeiling)
-                                          ? (grossEarned * _employeeEsiRate)
-                                          : 0.0)
-                                    : 0.0);
-
-                            final totalPayable =
-                                salaryDist?.total ??
-                                (grossEarned -
-                                    advanceBalanceForSelectedMonth -
-                                    employeePf -
-                                    employeeEsi);
-
-                            final additionalIncomeItems = salaryDist == null
-                                ? additionalIncomeByCategory.entries
-                                    .where((e) => e.value.abs() > 0.0001)
-                                    .toList(growable: false)
-                                : <MapEntry<String, double>>[
-                                    MapEntry('DA', salaryDist.da),
-                                    MapEntry('Training', salaryDist.training),
-                                    MapEntry(
-                                      'ESI (Employer)',
-                                      salaryDist.esiEmployer,
-                                    ),
-                                    MapEntry(
-                                      'PF (Employer)',
-                                      salaryDist.pfEmployer,
-                                    ),
-                                    MapEntry('Medical', salaryDist.medical),
-                                    MapEntry('Uniform', salaryDist.uniform),
-                                    MapEntry('Travel', salaryDist.travel),
-                                    MapEntry('Room', salaryDist.room),
-                                    MapEntry('Incentive', salaryDist.incentive),
-                                    MapEntry('Extra', salaryDist.extra),
-                                    MapEntry('Paper', salaryDist.paper),
-                                    MapEntry('EMP Paper', salaryDist.empPaper),
-                                  ].where((e) => e.value.abs() > 0.0001).toList(
-                                    growable: false,
-                                  );
-
-                            Widget row(
-                              String label,
-                              String value, {
-                              Color? valueColor,
-                              FontWeight valueWeight = FontWeight.w700,
-                            }) {
-                              return Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      label,
-                                      style: theme.textTheme.bodyMedium,
-                                    ),
-                                  ),
-                                  Text(
-                                    value,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: valueColor,
-                                      fontWeight: valueWeight,
-                                    ),
-                                  ),
-                                ],
-                              );
-                            }
-
-                            List<Widget> rowIfNonZero(
-                              String label,
-                              double value, {
-                              required String formattedValue,
-                              Color? valueColor,
-                              FontWeight valueWeight = FontWeight.w700,
-                            }) {
-                              if (value.abs() <= 0.0001) {
-                                return const [];
-                              }
-                              return [
-                                const SizedBox(height: 6),
-                                row(
-                                  label,
-                                  formattedValue,
-                                  valueColor: valueColor,
-                                  valueWeight: valueWeight,
-                                ),
-                              ];
-                            }
-
-                            return Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.grey.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: Colors.black.withOpacity(0.06),
-                                ),
-                              ),
-                              child: Column(
-                                children: [
-                                  row(
-                                    'Monthly salary (total)',
-                                    _formatInr(monthlySalary),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  row(
-                                    salaryDist != null
-                                        ? 'Days worked (paid/total)'
-                                        : 'Days worked (${_selectedMonthLabel()})',
-                                    salaryDist != null
-                                        ? '${salaryDist.totalPaidDays}/${salaryDist.totalDays}'
-                                        : '$daysWorked',
-                                  ),
-                                  if (salaryDist != null) ...[
-                                    const SizedBox(height: 6),
-                                    row(
-                                      'Total days',
-                                      '${salaryDist.totalDays}',
-                                    ),
-                                    const SizedBox(height: 6),
-                                    row(
-                                      'Holiday taken',
-                                      '${salaryDist.holidayTaken}',
-                                    ),
-                                  ],
-                                  const SizedBox(height: 6),
-                                  row(
-                                    'Monthly earned (${_selectedMonthLabel()})',
-                                    _formatInr(monthlyEarned),
-                                  ),
-                                  if (salaryDist != null) ...[
-                                    if (salaryDist.pfEmployee.abs() > 0.0001) ...[
-                                      const SizedBox(height: 6),
-                                      row(
-                                        'Employee PF deduction',
-                                        _formatInrSigned(-salaryDist.pfEmployee),
-                                        valueColor: Colors.red.shade700,
-                                        valueWeight: FontWeight.w700,
-                                      ),
-                                    ],
-                                    if (salaryDist.esiEmployee.abs() > 0.0001) ...[
-                                      const SizedBox(height: 6),
-                                      row(
-                                        'Employee ESI deduction',
-                                        _formatInrSigned(-salaryDist.esiEmployee),
-                                        valueColor: Colors.red.shade700,
-                                        valueWeight: FontWeight.w700,
-                                      ),
-                                    ],
-                                    ...rowIfNonZero(
-                                      'Remaining salary',
-                                      salaryDist.remainingSalary,
-                                      formattedValue: _formatInrSigned(
-                                        salaryDist.remainingSalary,
-                                      ),
-                                      valueColor:
-                                          salaryDist.remainingSalary >= 0
-                                          ? Colors.green.shade700
-                                          : Colors.red.shade700,
-                                      valueWeight: FontWeight.w800,
-                                    ),
-                                    ...rowIfNonZero(
-                                      'Loan EMI',
-                                      salaryDist.loanEmi,
-                                      formattedValue: _formatInrSigned(
-                                        -salaryDist.loanEmi,
-                                      ),
-                                      valueColor: salaryDist.loanEmi > 0
-                                          ? Colors.red.shade700
-                                          : Colors.black87,
-                                      valueWeight: FontWeight.w700,
-                                    ),
-                                    ...rowIfNonZero(
-                                      'Loan Adj',
-                                      salaryDist.loanAdj,
-                                      formattedValue: _formatInrSigned(
-                                        -salaryDist.loanAdj,
-                                      ),
-                                      valueColor: salaryDist.loanAdj > 0
-                                          ? Colors.red.shade700
-                                          : Colors.black87,
-                                      valueWeight: FontWeight.w700,
-                                    ),
-                                  ],
-                                  if (additionalIncomeItems.isNotEmpty) ...[
-                                    const SizedBox(height: 10),
-                                    Align(
-                                      alignment: Alignment.centerLeft,
-                                      child: Text(
-                                        'Additional income',
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    ...additionalIncomeItems.map((entry) {
-                                          return Padding(
-                                            padding: const EdgeInsets.only(
-                                              bottom: 6,
-                                            ),
-                                            child: row(
-                                              entry.key,
-                                              _formatInrSigned(entry.value),
-                                              valueColor: entry.value >= 0
-                                                  ? Colors.green.shade700
-                                                  : Colors.red.shade700,
-                                              valueWeight: FontWeight.w700,
-                                            ),
-                                          );
-                                        }),
-                                    if (salaryDist == null) ...[
-                                      ...rowIfNonZero(
-                                        'Total additional income',
-                                        additionalIncomeTotal,
-                                        formattedValue: _formatInrSigned(
-                                          additionalIncomeTotal,
-                                        ),
-                                        valueColor: additionalIncomeTotal >= 0
-                                            ? Colors.green.shade800
-                                            : Colors.red.shade800,
-                                        valueWeight: FontWeight.w800,
-                                      ),
-                                      ...rowIfNonZero(
-                                        'Gross earned (earned + income)',
-                                        grossEarned,
-                                        formattedValue: _formatInrSigned(
-                                          grossEarned,
-                                        ),
-                                        valueColor: grossEarned >= 0
-                                            ? Colors.green.shade800
-                                            : Colors.red.shade800,
-                                        valueWeight: FontWeight.w800,
-                                      ),
-                                    ],
-                                  ],
-                                  ...rowIfNonZero(
-                                    'Advance balance (${_selectedMonthLabel()})',
-                                    advanceBalanceForSelectedMonth,
-                                    formattedValue: _formatInrSigned(
-                                      advanceBalanceForSelectedMonth,
-                                    ),
-                                    valueColor:
-                                        advanceBalanceForSelectedMonth >= 0
-                                        ? Colors.green.shade700
-                                        : Colors.red.shade700,
-                                  ),
-                                  if (salaryDist == null && hasPf)
-                                    ...rowIfNonZero(
-                                      'Employee PF deduction',
-                                      employeePf,
-                                      formattedValue: _formatInrSigned(
-                                        -employeePf,
-                                      ),
-                                      valueColor: Colors.red.shade700,
-                                      valueWeight: FontWeight.w700,
-                                    ),
-                                  if (salaryDist == null && hasEsi)
-                                    ...rowIfNonZero(
-                                      'Employee ESI deduction',
-                                      employeeEsi,
-                                      formattedValue: _formatInrSigned(
-                                        -employeeEsi,
-                                      ),
-                                      valueColor: Colors.red.shade700,
-                                      valueWeight: FontWeight.w700,
-                                    ),
-                                  ...rowIfNonZero(
-                                    salaryDist != null
-                                        ? 'Total payable (billing)'
-                                        : 'Salary credited (net)',
-                                    totalPayable,
-                                    formattedValue: _formatInrSigned(
-                                      totalPayable,
-                                    ),
-                                    valueColor: totalPayable >= 0
-                                        ? Colors.green.shade700
-                                        : Colors.red.shade700,
-                                    valueWeight: FontWeight.w800,
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                        const Divider(height: 24),
-                        Text(
-                          'Salary Credits',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 8),
-                        if (salaryCreditsForSelectedMonth.isEmpty)
-                          Builder(
-                            builder: (context) {
-                              final nextMonth = DateTime(
-                                _selectedYear,
-                                selectedMonthIndex + 1,
-                                15,
-                              );
-                              final nextLabel = DateFormat(
-                                'MMM yy',
-                              ).format(nextMonth);
-                              return Text(
-                                '${_selectedMonthLabel()} salary will be credited on 15th of $nextLabel',
-                                style: theme.textTheme.bodyMedium,
-                              );
-                            },
-                          )
-                        else
-                          ...salaryCreditsForSelectedMonth.map((credit) {
-                            final isDeleting = _salaryDeleting.contains(
-                              credit.salaryCreditId,
-                            );
-                            final tile = ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: const Icon(Icons.account_balance_wallet),
-                              title: Text(_formatInr(credit.amount)),
-                              subtitle: Text(
-                                'Credited on ${_formatDate(credit.creditedOn)}',
-                              ),
-                              trailing: isDeleting
-                                  ? const SizedBox(
-                                      width: 16,
-                                      height: 16,
-                                      child: AppLoader(size: 16),
-                                    )
-                                  : null,
-                            );
-
-                            // keep existing delete behavior (supervisors)
-                            return isSupervisor
-                                ? Dismissible(
-                                    key: ValueKey(
-                                      'salary-${credit.salaryCreditId}',
-                                    ),
-                                    direction: DismissDirection.endToStart,
-                                    confirmDismiss: (_) async {
-                                      await _confirmDeleteSalary(credit);
-                                      return false;
-                                    },
-                                    background: Container(
-                                      alignment: Alignment.centerRight,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 20,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red.shade100,
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                      child: const Icon(
-                                        Icons.delete,
-                                        color: Colors.red,
-                                      ),
-                                    ),
-                                    child: tile,
-                                  )
-                                : tile;
-                          }),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 8),
+                      _statusPill(request.status, statusColor),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-
-                  // Advance Requests widget (white)
-                  _whiteCard(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Advance Requests',
-                                style: theme.textTheme.titleMedium,
-                              ),
-                            ),
-                            if (isSupervisor)
-                              SizedBox(
-                                width: 170,
-                                child: DropdownButtonFormField<String>(
-                                  value: _advanceStatusFilter,
-                                  items: const [
-                                    DropdownMenuItem(
-                                      value: 'All',
-                                      child: Text('All'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Pending',
-                                      child: Text('Pending'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Approved',
-                                      child: Text('Approved'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Rejected',
-                                      child: Text('Rejected'),
-                                    ),
-                                    DropdownMenuItem(
-                                      value: 'Disbursed',
-                                      child: Text('Disbursed'),
-                                    ),
-                                  ],
-                                  onChanged: _onAdvanceStatusChanged,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Status',
-                                  ),
-                                ),
-                              ),
-                          ],
+                        Icon(
+                          Icons.calendar_today_rounded,
+                          size: 14,
+                          color: Colors.grey.shade500,
                         ),
-                        const SizedBox(height: 8),
-                        if (advanceRequestsForSelectedMonth.isEmpty)
+                        const SizedBox(width: 6),
+                        Text(
+                          'Requested: ${_formatDate(request.requestedAt)}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                        if (request.disbursedAt != null) ...[
+                          const SizedBox(width: 12),
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 14,
+                            color: Colors.green.shade400,
+                          ),
+                          const SizedBox(width: 4),
                           Text(
-                            'No advance requests for ${_selectedMonthLabel()}.',
-                            style: theme.textTheme.bodyMedium,
-                          )
-                        else
-                          ...advanceRequestsForSelectedMonth.map((request) {
-                            final statusColor = switch (request.status) {
-                              'Approved' => Colors.green,
-                              'Disbursed' => Colors.blue,
-                              'Rejected' => Colors.red,
-                              'Pending' => Colors.orange,
-                              _ => Colors.grey,
-                            };
-                            final isDeleting = _advanceDeleting.contains(
-                              request.advanceRequestId,
-                            );
-
-                            final tile = ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: const Icon(Icons.request_page),
-                              title: Text(_formatInr(request.amount)),
-                              subtitle: Text(
-                                '${request.purpose}\nRequested: ${_formatDate(request.requestedAt)}',
-                              ),
-                              isThreeLine: true,
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Chip(
-                                    label: Text(request.status),
-                                    backgroundColor: statusColor.withOpacity(
-                                      0.15,
-                                    ),
-                                    labelStyle: TextStyle(color: statusColor),
-                                  ),
-                                  if (request.disbursedAt != null)
-                                    Text(
-                                      'Disbursed: ${_formatDate(request.disbursedAt)}',
-                                      style: theme.textTheme.bodySmall,
-                                    ),
-                                  if (isDeleting)
-                                    const Padding(
-                                      padding: EdgeInsets.only(top: 4),
-                                      child: SizedBox(
-                                        width: 16,
-                                        height: 16,
-                                        child: AppLoader(size: 16),
-                                      ),
-                                    ),
-                                ],
-                              ),
-                            );
-
-                            if (!isSupervisor) return tile;
-
-                            return Dismissible(
-                              key: ValueKey(
-                                'advance-${request.advanceRequestId}',
-                              ),
-                              direction: request.status == 'Pending'
-                                  ? DismissDirection.endToStart
-                                  : DismissDirection.none,
-                              confirmDismiss: (_) async {
-                                await _confirmDeleteAdvance(request);
-                                return false;
-                              },
-                              background: Container(
-                                alignment: Alignment.centerRight,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 20,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.shade100,
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                child: const Icon(
-                                  Icons.delete,
-                                  color: Colors.red,
-                                ),
-                              ),
-                              child: tile,
-                            );
-                          }),
-                        if (isSupervisor) ...[
-                          const SizedBox(height: 12),
-                          FilledButton.icon(
-                            onPressed: _openAdvanceRequestSheet,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: Colors.green,
-                              foregroundColor: Colors.white,
+                            'Disbursed: ${_formatDate(request.disbursedAt)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
                             ),
-                            icon: const Icon(Icons.add_circle_outline),
-                            label: const Text('Request Advance'),
                           ),
                         ],
                       ],
                     ),
                   ),
+                  if (isDeleting)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Center(
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: AppLoader(size: 16),
+                        ),
+                      ),
+                    ),
                 ],
               ),
-            ),
+            );
+
+            if (!isSupervisor) return card;
+
+            return Dismissible(
+              key: ValueKey('advance-${request.advanceRequestId}'),
+              direction: request.status == 'Pending'
+                  ? DismissDirection.endToStart
+                  : DismissDirection.none,
+              confirmDismiss: (_) async {
+                await _confirmDeleteAdvance(request);
+                return false;
+              },
+              background: Container(
+                alignment: Alignment.centerRight,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                margin: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Icon(Icons.delete_rounded, color: Colors.red),
+              ),
+              child: card,
+            );
+          }),
+      ],
     );
   }
 

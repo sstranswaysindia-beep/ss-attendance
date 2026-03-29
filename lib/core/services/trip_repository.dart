@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/app_user.dart';
+import '../models/trip_customer.dart';
 import '../models/trip_driver.dart';
 import '../models/trip_helper.dart';
 import '../models/trip_meta.dart';
@@ -52,6 +53,176 @@ class TripRepository {
 
   final http.Client _client;
   final Uri _endpoint;
+
+  Future<List<TripCustomer>> fetchCustomersForUser(AppUser user) async {
+    final uri = Uri.parse('${_mobileBase}customers_manage.php');
+
+    try {
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(<String, dynamic>{
+          'action': 'list',
+          'role': _roleToString(user.role),
+          if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+          if (_tryParseInt(user.driverId) != null)
+            'driverId': _tryParseInt(user.driverId),
+        }),
+      );
+
+      if (response.statusCode >= 300) {
+        throw TripFailure(
+          'Unable to load customers (status: ${response.statusCode}).',
+        );
+      }
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (payload['status'] != 'ok') {
+        throw TripFailure(
+          payload['error']?.toString() ?? 'Unable to load customers.',
+        );
+      }
+
+      final customersJson = payload['customers'] as List<dynamic>? ?? const [];
+      return customersJson
+          .map((item) => TripCustomer.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false);
+    } on TripFailure {
+      rethrow;
+    } catch (_) {
+      throw TripFailure('Unable to load customers.');
+    }
+  }
+
+  Future<String> addCustomers({
+    required AppUser user,
+    required String customerNames,
+  }) async {
+    final uri = Uri.parse('${_mobileBase}customers_manage.php');
+
+    try {
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(<String, dynamic>{
+          'action': 'add',
+          'role': _roleToString(user.role),
+          if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+          if (_tryParseInt(user.driverId) != null)
+            'driverId': _tryParseInt(user.driverId),
+          'customer_name': customerNames,
+        }),
+      );
+
+      if (response.statusCode >= 300) {
+        throw TripFailure(
+          'Unable to add customer (status: ${response.statusCode}).',
+        );
+      }
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (payload['status'] != 'ok') {
+        throw TripFailure(
+          payload['error']?.toString() ?? 'Unable to add customer.',
+        );
+      }
+
+      return payload['message']?.toString() ?? 'Customer added.';
+    } on TripFailure {
+      rethrow;
+    } catch (_) {
+      throw TripFailure('Unable to add customer.');
+    }
+  }
+
+  Future<String> updateCustomer({
+    required AppUser user,
+    required int customerId,
+    required String customerName,
+    required String status,
+    bool regenerateCode = false,
+  }) async {
+    final uri = Uri.parse('${_mobileBase}customers_manage.php');
+
+    try {
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(<String, dynamic>{
+          'action': 'update',
+          'role': _roleToString(user.role),
+          if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+          if (_tryParseInt(user.driverId) != null)
+            'driverId': _tryParseInt(user.driverId),
+          'id': customerId,
+          'customer_name': customerName,
+          'status': status,
+          'regen_code': regenerateCode ? 1 : 0,
+        }),
+      );
+
+      if (response.statusCode >= 300) {
+        throw TripFailure(
+          'Unable to update customer (status: ${response.statusCode}).',
+        );
+      }
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (payload['status'] != 'ok') {
+        throw TripFailure(
+          payload['error']?.toString() ?? 'Unable to update customer.',
+        );
+      }
+
+      return payload['message']?.toString() ??
+          (regenerateCode ? 'Regenerated.' : 'Updated.');
+    } on TripFailure {
+      rethrow;
+    } catch (_) {
+      throw TripFailure('Unable to update customer.');
+    }
+  }
+
+  Future<String> deleteCustomer({
+    required AppUser user,
+    required int customerId,
+  }) async {
+    final uri = Uri.parse('${_mobileBase}customers_manage.php');
+
+    try {
+      final response = await _client.post(
+        uri,
+        headers: const {'Content-Type': 'application/json'},
+        body: jsonEncode(<String, dynamic>{
+          'action': 'delete',
+          'role': _roleToString(user.role),
+          if (_tryParseInt(user.id) != null) 'userId': _tryParseInt(user.id),
+          if (_tryParseInt(user.driverId) != null)
+            'driverId': _tryParseInt(user.driverId),
+          'id': customerId,
+        }),
+      );
+
+      if (response.statusCode >= 300) {
+        throw TripFailure(
+          'Unable to delete customer (status: ${response.statusCode}).',
+        );
+      }
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (payload['status'] != 'ok') {
+        throw TripFailure(
+          payload['error']?.toString() ?? 'Unable to delete customer.',
+        );
+      }
+
+      return payload['message']?.toString() ?? 'Deleted.';
+    } on TripFailure {
+      rethrow;
+    } catch (_) {
+      throw TripFailure('Unable to delete customer.');
+    }
+  }
 
   Future<TripMeta> fetchMetaForUser(AppUser user) async {
     final fallbackDrivers = _buildFallbackDrivers(user);
@@ -155,8 +326,25 @@ class TripRepository {
         String? name;
         String? shortCode;
         if (item is Map<String, dynamic>) {
-          name = item['name']?.toString();
-          shortCode = item['short_code']?.toString();
+          name =
+              item['name']?.toString() ??
+              item['customer_name']?.toString() ??
+              item['customerName']?.toString() ??
+              item['title']?.toString();
+          shortCode =
+              item['short_code']?.toString() ??
+              item['shortCode']?.toString() ??
+              item['code']?.toString();
+        } else if (item is Map) {
+          name =
+              item['name']?.toString() ??
+              item['customer_name']?.toString() ??
+              item['customerName']?.toString() ??
+              item['title']?.toString();
+          shortCode =
+              item['short_code']?.toString() ??
+              item['shortCode']?.toString() ??
+              item['code']?.toString();
         } else {
           name = item?.toString();
         }
@@ -839,6 +1027,8 @@ class TripRepository {
         return 'supervisor';
       case UserRole.driver:
         return 'driver';
+      case UserRole.referral:
+        return 'referral';
     }
   }
 

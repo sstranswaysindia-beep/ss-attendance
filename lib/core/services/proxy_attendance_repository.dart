@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 
 import '../models/proxy_employee.dart';
 
@@ -33,14 +34,19 @@ class ProxyAttendanceRepository {
   final http.Client _client;
   final Uri _listEndpoint;
   final Uri _submitEndpoint;
+  static final DateFormat _dateFormat = DateFormat('yyyy-MM-dd');
 
   Future<ProxyAttendanceResponse> fetchEmployees({
     required String supervisorUserId,
     String? plantId,
+    DateTime? attendanceDate,
   }) async {
     final query = <String, String>{'supervisorUserId': supervisorUserId};
     if (plantId != null && plantId.isNotEmpty) {
       query['plantId'] = plantId;
+    }
+    if (attendanceDate != null) {
+      query['date'] = _dateFormat.format(attendanceDate);
     }
 
     final uri = _listEndpoint.replace(queryParameters: query);
@@ -78,6 +84,7 @@ class ProxyAttendanceRepository {
     required String userId,
     required String action,
     String? notes,
+    DateTime? attendanceDate,
   }) async {
     final response = await _client.post(
       _submitEndpoint,
@@ -87,6 +94,8 @@ class ProxyAttendanceRepository {
         'driverId': driverId,
         'userId': userId,
         'action': action,
+        if (attendanceDate != null)
+          'attendanceDate': _dateFormat.format(attendanceDate),
         if (notes != null && notes.isNotEmpty) 'notes': notes,
       }),
     );

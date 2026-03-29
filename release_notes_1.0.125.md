@@ -1,4 +1,0 @@
-- Safety training player: extra-slow Hindi TTS, better inline markup (bold/italic/underline) and images, auto-scroll to highlighted word, and progress saves on back/exit.
-- Progress API: 95% auto-complete threshold retained; no downgrade on re-save.
-- Admin: Added progress report page showing started/completed counts per module.
-- Version bumped to 1.0.125+125; release AAB built with rewarded ad dart defines.

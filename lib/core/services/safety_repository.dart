@@ -44,6 +44,9 @@ class SafetyRepository {
       case UserRole.admin:
         role = 'admin';
         break;
+      case UserRole.referral:
+        role = 'referral';
+        break;
     }
 
     Map<String, String> data = {if (role != null) 'role': role};

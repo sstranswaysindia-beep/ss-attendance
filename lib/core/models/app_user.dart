@@ -1,6 +1,6 @@
 import 'driver_vehicle.dart';
 
-enum UserRole { admin, supervisor, driver }
+enum UserRole { admin, supervisor, driver, referral }
 
 class AppUser {
   AppUser({
@@ -159,7 +159,8 @@ class AppUser {
       assignmentPlantId: assignmentPlantId ?? this.assignmentPlantId,
       assignmentPlantName: assignmentPlantName ?? this.assignmentPlantName,
       assignmentVehicleId: assignmentVehicleId ?? this.assignmentVehicleId,
-      assignmentVehicleNumber: assignmentVehicleNumber ?? this.assignmentVehicleNumber,
+      assignmentVehicleNumber:
+          assignmentVehicleNumber ?? this.assignmentVehicleNumber,
       salary: salary ?? this.salary,
       profilePhoto: profilePhoto ?? this.profilePhoto,
       aadhaar: aadhaar ?? this.aadhaar,
@@ -276,11 +277,12 @@ class AppUser {
       address: json['address'] as String?,
       dlNumber: (json['dlNumber'] ?? json['dl_number']) as String?,
       dlValidity:
-          (json['dlValidity'] ?? json['dl_validity'] ?? json['license_expiry_date'])
+          (json['dlValidity'] ??
+                  json['dl_validity'] ??
+                  json['license_expiry_date'])
               as String?,
       dlIssueDate: (json['dlIssueDate'] ?? json['dl_issue_date']) as String?,
-      nomineeName:
-          (json['nomineeName'] ?? json['nominee_name']) as String?,
+      nomineeName: (json['nomineeName'] ?? json['nominee_name']) as String?,
       nomineeRelation:
           (json['nomineeRelation'] ?? json['relation_nominee']) as String?,
       nomineeContact:

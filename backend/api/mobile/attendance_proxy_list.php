@@ -19,9 +19,23 @@ require __DIR__ . '/common.php';
 
 $supervisorUserId = apiSanitizeInt($_GET['supervisorUserId'] ?? null);
 $plantFilter = apiSanitizeInt($_GET['plantId'] ?? null);
+$attendanceDateRaw = trim((string) ($_GET['date'] ?? ''));
 
 if (!$supervisorUserId) {
     apiRespond(400, ['status' => 'error', 'error' => 'supervisorUserId is required']);
+}
+
+$attendanceDate = date('Y-m-d');
+if ($attendanceDateRaw !== '') {
+    $parsedDate = DateTime::createFromFormat('Y-m-d', $attendanceDateRaw);
+    $dateErrors = DateTime::getLastErrors();
+    if (
+        !$parsedDate ||
+        ($dateErrors !== false && (($dateErrors['warning_count'] ?? 0) > 0 || ($dateErrors['error_count'] ?? 0) > 0))
+    ) {
+        apiRespond(400, ['status' => 'error', 'error' => 'date must be in YYYY-MM-DD format']);
+    }
+    $attendanceDate = $parsedDate->format('Y-m-d');
 }
 
 try {
@@ -76,6 +90,9 @@ try {
         $linkedStmt->close();
     }
 
+    $accessiblePlantIdList = array_keys($plantIds);
+    sort($accessiblePlantIdList);
+
     if ($plantFilter !== null) {
         if (!isset($plantIds[$plantFilter])) {
             apiRespond(403, ['status' => 'error', 'error' => 'You do not supervise this plant']);
@@ -109,21 +126,26 @@ try {
             d.status AS driver_status,
             d.plant_id,
             COALESCE(p.plant_name, '') AS plant_name,
-            last_attendance.in_time AS last_in_time,
-            last_attendance.out_time AS last_out_time
+            selected_attendance.in_time AS last_in_time,
+            selected_attendance.out_time AS last_out_time
         FROM users u
         JOIN drivers d ON d.id = u.driver_id
         LEFT JOIN plants p ON p.id = d.plant_id
-        LEFT JOIN (
-            SELECT a1.driver_id, a1.in_time, a1.out_time
-            FROM attendance a1
-            JOIN (
-                SELECT driver_id, MAX(in_time) AS max_in_time
-                FROM attendance
-                GROUP BY driver_id
-            ) latest
-                ON latest.driver_id = a1.driver_id AND latest.max_in_time = a1.in_time
-        ) AS last_attendance ON last_attendance.driver_id = d.id
+        LEFT JOIN attendance AS selected_attendance
+            ON selected_attendance.id = (
+                SELECT a1.id
+                FROM attendance a1
+                WHERE a1.driver_id = d.id
+                  AND (
+                    (a1.in_time IS NOT NULL AND DATE(a1.in_time) = ?)
+                    OR (a1.out_time IS NOT NULL AND DATE(a1.out_time) = ?)
+                  )
+                ORDER BY
+                    COALESCE(a1.out_time, a1.in_time) DESC,
+                    a1.in_time DESC,
+                    a1.id DESC
+                LIMIT 1
+            )
         WHERE u.proxy_enabled = 'Y'
           AND d.status = 'Active'
           AND d.plant_id IN ($placeholders)
@@ -135,8 +157,9 @@ try {
         throw new RuntimeException('Failed to prepare proxy list query: ' . $conn->error);
     }
 
-    $types = str_repeat('i', count($plantIdList));
-    apiBindParams($stmt, $types, $plantIdList);
+    $types = 'ss' . str_repeat('i', count($plantIdList));
+    $params = array_merge([$attendanceDate, $attendanceDate], $plantIdList);
+    apiBindParams($stmt, $types, $params);
 
     $stmt->execute();
     $result = $stmt->get_result();
@@ -166,7 +189,7 @@ try {
     $stmt->close();
 
     $plantsPayload = [];
-    foreach ($plantIdList as $pid) {
+    foreach ($accessiblePlantIdList as $pid) {
         $plantsPayload[] = [
             'plantId' => $pid,
             'plantName' => $plantNames[$pid] ?? ('Plant #' . $pid),
@@ -177,6 +200,7 @@ try {
         'status' => 'ok',
         'employees' => $employees,
         'plants' => $plantsPayload,
+        'attendanceDate' => $attendanceDate,
         'generatedAt' => gmdate('c'),
         'supervisor' => [
             'userId' => $supervisorUserId,

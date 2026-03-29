@@ -24,7 +24,7 @@ if (!$driverId || $lat === null || $lng === null) {
     apiRespond(400, ['status' => 'error', 'error' => 'driverId, lat, and lng are required']);
 }
 
-if (!in_array($source, ['mobile_fg', 'mobile_bg', 'device'], true)) {
+if (!in_array($source, ['mobile_fg', 'mobile_fg_push', 'mobile_bg', 'mobile_bg_work', 'device'], true)) {
     $source = 'mobile_fg';
 }
 
@@ -35,6 +35,28 @@ if ($capturedAt === false) {
 $capturedAtSql = date('Y-m-d H:i:s', $capturedAt);
 
 try {
+    $dupStmt = $conn->prepare(
+        "SELECT id
+         FROM gps_pings
+         WHERE driver_id = ?
+           AND captured_at = ?
+           AND ABS(lat - ?) < 0.00001
+           AND ABS(lng - ?) < 0.00001
+         LIMIT 1"
+    );
+    $dupStmt->bind_param('isdd', $driverId, $capturedAtSql, $lat, $lng);
+    $dupStmt->execute();
+    $duplicateId = $dupStmt->get_result()->fetch_column();
+    $dupStmt->close();
+
+    if ($duplicateId !== false) {
+        apiRespond(200, [
+            'status' => 'ok',
+            'pingId' => (int)$duplicateId,
+            'duplicate' => true,
+        ]);
+    }
+
     $stmt = $conn->prepare(
         "INSERT INTO gps_pings (
             driver_id,

@@ -1,3 +1,0 @@
-- Prevented repeated biometric unlock prompts by adding a short cooldown and auto-disabling on unsupported devices.
-- Adjusted attendance photo preview to fit within the frame without cropping.
-- Added animated truck badge for ongoing trips using the bundled Lottie asset.

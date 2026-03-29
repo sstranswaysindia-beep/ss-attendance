@@ -13,6 +13,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 
 require __DIR__ . '/common.php';
 
+function buildInPlaceholders(int $count): string
+{
+    return implode(', ', array_fill(0, max(0, $count), '?'));
+}
+
 $adminUserId = apiSanitizeInt($_GET['adminUserId'] ?? null);
 $statusFilter   = trim($_GET['status'] ?? 'Pending');
 $dateFilter     = trim($_GET['date'] ?? '');
@@ -139,29 +144,108 @@ try {
     $stmt->execute();
     $result = $stmt->get_result();
 
+    $approvalRows = [];
+    $driverIds = [];
+
+    while ($row = $result->fetch_assoc()) {
+        $approvalRows[] = $row;
+        $driverId = (int) ($row['driver_id'] ?? 0);
+        if ($driverId > 0) {
+            $driverIds[$driverId] = true;
+        }
+    }
+    $stmt->close();
+
+    $tripMap = [];
+    if (!empty($driverIds)) {
+        $tripSql = '
+            SELECT
+                td.driver_id,
+                t.id AS trip_id,
+                t.start_date,
+                t.end_date,
+                v.id AS trip_vehicle_id,
+                v.vehicle_no AS trip_vehicle_no,
+                p.id AS trip_plant_id,
+                p.plant_name AS trip_plant_name
+            FROM trip_drivers td
+            JOIN trips t ON t.id = td.trip_id
+            LEFT JOIN vehicles v ON v.id = t.vehicle_id
+            LEFT JOIN plants p ON p.id = v.plant_id
+            WHERE td.driver_id IN (' . buildInPlaceholders(count($driverIds)) . ')
+              AND t.start_date <= ?
+              AND COALESCE(NULLIF(t.end_date, "0000-00-00"), t.start_date) >= ?
+            ORDER BY t.start_date DESC, t.id DESC
+        ';
+        $tripStmt = $conn->prepare($tripSql);
+        $tripTypes = str_repeat('i', count($driverIds)) . 'ss';
+        $tripValues = array_map('intval', array_keys($driverIds));
+        $tripValues[] = $toDate;
+        $tripValues[] = $fromDate;
+        apiBindParams($tripStmt, $tripTypes, $tripValues);
+        $tripStmt->execute();
+        $tripResult = $tripStmt->get_result();
+        while ($tripRow = $tripResult->fetch_assoc()) {
+            $tripDriverId = (int) ($tripRow['driver_id'] ?? 0);
+            $tripStart = (string) ($tripRow['start_date'] ?? '');
+            $tripEnd = (string) ($tripRow['end_date'] ?? '');
+            if ($tripDriverId <= 0 || $tripStart === '') {
+                continue;
+            }
+            $tripEnd = ($tripEnd !== '' && $tripEnd !== '0000-00-00') ? $tripEnd : $tripStart;
+            $currentDate = $tripStart;
+            while ($currentDate <= $tripEnd) {
+                $tripKey = $tripDriverId . '|' . $currentDate;
+                if (!isset($tripMap[$tripKey])) {
+                    $tripMap[$tripKey] = $tripRow;
+                }
+                $nextTs = strtotime($currentDate . ' +1 day');
+                if ($nextTs === false) {
+                    break;
+                }
+                $currentDate = date('Y-m-d', $nextTs);
+            }
+        }
+        $tripStmt->close();
+    }
+
     $plantMap  = [];
     $plantMeta = [];
     $approvals = [];
 
-    while ($row = $result->fetch_assoc()) {
-        if (!empty($row['plant_id']) && !isset($plantMap[$row['plant_id']])) {
-            $plantMap[$row['plant_id']] = true;
+    foreach ($approvalRows as $row) {
+        $attendanceDate = !empty($row['in_time']) ? substr((string) $row['in_time'], 0, 10) : '';
+        $driverId = (int) ($row['driver_id'] ?? 0);
+        $tripKey = $driverId > 0 && $attendanceDate !== '' ? ($driverId . '|' . $attendanceDate) : '';
+        $tripRow = $tripKey !== '' ? ($tripMap[$tripKey] ?? null) : null;
+
+        $displayPlantId = $tripRow ? (int) ($tripRow['trip_plant_id'] ?? 0) : 0;
+        $displayPlantName = $tripRow
+            ? (string) ($tripRow['trip_plant_name'] ?? '')
+            : 'No pending trip';
+        $displayVehicleId = $tripRow ? (int) ($tripRow['trip_vehicle_id'] ?? 0) : 0;
+        $displayVehicleNo = $tripRow
+            ? (string) ($tripRow['trip_vehicle_no'] ?? '')
+            : 'No pending trip';
+
+        if ($displayPlantId > 0 && !isset($plantMap[$displayPlantId])) {
+            $plantMap[$displayPlantId] = true;
             $plantMeta[] = [
-                'plantId'   => (int) $row['plant_id'],
-                'plantName' => $row['plant_name'],
+                'plantId'   => $displayPlantId,
+                'plantName' => $displayPlantName,
             ];
         }
 
         $approvals[] = [
             'attendanceId'  => (int) $row['id'],
-            'driverId'      => (int) $row['driver_id'],
+            'driverId'      => $driverId,
             'driverName'    => $row['driver_name'],
             'role'          => $row['role'], // <-- used by UI for Supervisor / Driver toggle
             'profilePhoto'  => apiBuildProfileUrl($row['profile_photo_url'] ?? null),
-            'plantId'       => (int) $row['plant_id'],
-            'plantName'     => $row['plant_name'],
-            'vehicleId'     => $row['vehicle_id'],
-            'vehicleNumber' => $row['vehicle_no'],
+            'plantId'       => $displayPlantId,
+            'plantName'     => $displayPlantName,
+            'vehicleId'     => $displayVehicleId,
+            'vehicleNumber' => $displayVehicleNo,
             'inTime'        => $row['in_time'],
             'outTime'       => $row['out_time'],
             'inPhotoUrl'    => $row['in_photo_url'],
@@ -172,7 +256,6 @@ try {
             'createdAt'     => $row['created_at'],
         ];
     }
-    $stmt->close();
 
     usort($plantMeta, static fn(array $a, array $b): int => strcmp($a['plantName'], $b['plantName']));
 

@@ -6,6 +6,7 @@ class AttendanceApproval {
     required this.plantId,
     required this.plantName,
     required this.role,
+    required this.tripMatched,
     this.profilePhotoUrl,
     this.vehicleId,
     this.vehicleNumber,
@@ -27,6 +28,9 @@ class AttendanceApproval {
       plantId: json['plantId']?.toString() ?? '',
       plantName: json['plantName']?.toString() ?? '',
       role: json['role']?.toString().toLowerCase() ?? 'driver',
+      tripMatched:
+          json['tripMatched'] == true ||
+          json['tripMatched']?.toString() == '1',
       profilePhotoUrl:
           json['profilePhoto']?.toString() ??
           json['profilePhotoUrl']?.toString(),
@@ -49,6 +53,7 @@ class AttendanceApproval {
   final String plantId;
   final String plantName;
   final String role;
+  final bool tripMatched;
   final String? profilePhotoUrl;
   final String? vehicleId;
   final String? vehicleNumber;

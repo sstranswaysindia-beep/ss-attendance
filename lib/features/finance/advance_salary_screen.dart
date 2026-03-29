@@ -23,6 +23,7 @@ import '../../core/services/trip_repository.dart';
 import '../../core/widgets/profile_photo_widget.dart';
 import '../../core/services/notification_service.dart';
 import '../../core/widgets/app_loader.dart';
+import 'khata_all_expenses_screen.dart';
 
 class AdvanceSalaryScreen extends StatefulWidget {
   final AppUser user;
@@ -64,15 +65,142 @@ class _VehicleOption {
       plantName.trim().isEmpty ? number : '$number (${plantName.trim()})';
 }
 
-class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
+class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen>
+    with TickerProviderStateMixin {
   static final NumberFormat _inrNumber = NumberFormat.decimalPattern('en_IN');
   static const String _prefHideChargesInDescriptionPicker =
       'khata_hide_charges_description_picker';
+
+  // ─── Khata UI Tokens (match Salary & Advances) ───
+  static const Color _khataPrimary = Color(
+    0xFF0A1628,
+  ); // salary_advance_screen.dart
+  static const Color _khataPrimary2 = Color(
+    0xFF1B3A5C,
+  ); // salary_advance_screen.dart
+  static const Color _khataAccent = Color(
+    0xFF00BFA6,
+  ); // salary_advance_screen.dart
+  static const Color _khataSurface = Color(
+    0xFFF0F4F8,
+  ); // salary_advance_screen.dart
+  static const Color _khataCard = Colors.white;
+  static const Color _khataText = Color(0xFF1A1A2E);
+  static const Color _khataMuted = Color(0xFF6B7280);
+  static const Color _gradientMid = Color(0xFF0D4F6B);
+
+  BoxDecoration _glassDecoration({
+    Gradient? gradient,
+    Color? color,
+    Color borderColor = const Color(0x00000000),
+  }) {
+    return BoxDecoration(
+      color: color,
+      gradient: gradient,
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: borderColor),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withOpacity(0.06),
+          blurRadius: 18,
+          offset: const Offset(0, 6),
+        ),
+      ],
+    );
+  }
+
+  Widget _glassCard({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(14),
+    EdgeInsetsGeometry? margin,
+    Gradient? gradient,
+    Color? color,
+    Color borderColor = const Color(0x00000000),
+  }) {
+    return Container(
+      margin: margin,
+      decoration: _glassDecoration(
+        gradient: gradient,
+        color: color ?? _khataCard,
+        borderColor: borderColor,
+      ),
+      child: Padding(padding: padding, child: child),
+    );
+  }
+
+  Widget _iconBadge(IconData icon, {Color? bg, Color? fg}) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: (bg ?? Colors.white).withOpacity(0.16),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white.withOpacity(0.18)),
+      ),
+      child: Icon(icon, color: fg ?? Colors.white, size: 14),
+    );
+  }
+
+  Widget _sectionHeader(String title, {String? subtitle, IconData? icon}) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 2, bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (icon != null) ...[
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_khataPrimary, _khataPrimary2],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: Colors.white, size: 18),
+            ),
+            const SizedBox(width: 10),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: _khataText,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                if (subtitle != null && subtitle.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: _khataMuted.withOpacity(0.9),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   bool _hideChargesInDescriptionPicker = true;
   String? _selectedReceiptPath;
   Uint8List? _selectedReceiptBytes;
   String? _selectedReceiptName;
+
+  void _clearSelectedReceipt() {
+    _selectedReceiptPath = null;
+    _selectedReceiptBytes = null;
+    _selectedReceiptName = null;
+  }
 
   String _selectedMonthCompactLabel() {
     if (_selectedMonth == 'All Months') return 'All';
@@ -133,12 +261,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     final raw = (transaction.category ?? '').trim();
     final key = _normalizeCategoryKey(raw);
     if (key.isEmpty) return false;
-    const blocked = <String>{
-      'home',
-      'charges',
-      'advanceoffice',
-      'advance',
-    };
+    const blocked = <String>{'home', 'charges', 'advanceoffice', 'advance'};
     return blocked.contains(key);
   }
 
@@ -183,6 +306,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   // ignore: unused_field
   bool _isVehicleListLoading = false;
   String? _vehicleLoadError;
+  bool _heroVehicleIsOngoing = false;
+  String? _heroVehicleNumber;
 
   // Fund transfer modal state
   String? _selectedDriverId;
@@ -200,6 +325,19 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   final Map<String, String> _driverNameCache = {};
   bool _requestedBellHide = false;
 
+  // ─── Animation controllers ───
+  late final AnimationController _heroController;
+  late final AnimationController _staggerController;
+  late final Animation<double> _heroFade;
+  late final Animation<double> _heroScale;
+
+  void _startAnimations() {
+    _heroController.forward(from: 0);
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) _staggerController.forward(from: 0);
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -209,6 +347,20 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     final now = DateTime.now();
     _selectedMonth = _monthNames[now.month - 1];
     _selectedYear = now.year;
+
+    _heroController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _heroFade = CurvedAnimation(parent: _heroController, curve: Curves.easeOut);
+    _heroScale = Tween<double>(begin: 0.92, end: 1.0).animate(
+      CurvedAnimation(parent: _heroController, curve: Curves.easeOutBack),
+    );
+    _staggerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+
     _loadData();
 
     // Add listener to search controller for debugging
@@ -225,6 +377,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       NotificationService().releaseBellHide();
       _requestedBellHide = false;
     }
+    _heroController.dispose();
+    _staggerController.dispose();
     _transferAmountController.dispose();
     _transferDescriptionController.dispose();
     _driverSearchController.dispose();
@@ -240,9 +394,110 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
       _loadTransactionDescriptions(),
       _loadVehiclesForKhata(),
     ]);
+    await _loadKhataHeroTripState();
     setState(() {
       _isLoading = false;
     });
+    _startAnimations();
+  }
+
+  String? _resolveHeroVehicleNumber() {
+    final vehicleTransactions =
+        _transactions
+            .where(
+              (transaction) =>
+                  transaction.vehicleId != null && transaction.vehicleId! > 0,
+            )
+            .toList(growable: false)
+          ..sort(
+            (a, b) => _parseTransactionDate(
+              b.createdAt,
+            ).compareTo(_parseTransactionDate(a.createdAt)),
+          );
+    if (vehicleTransactions.isNotEmpty) {
+      final latestVehicleId = vehicleTransactions.first.vehicleId;
+      final matchedVehicle = _vehicleOptions
+          .where((v) => v.id == latestVehicleId)
+          .toList();
+      if (matchedVehicle.isNotEmpty) {
+        final number = matchedVehicle.first.number.trim();
+        if (number.isNotEmpty) {
+          return number;
+        }
+      }
+    }
+
+    final directCandidates = <String?>[
+      widget.user.assignmentVehicleNumber,
+      widget.user.vehicleNumber,
+    ];
+    for (final candidate in directCandidates) {
+      final trimmed = candidate?.trim();
+      if (trimmed != null && trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+
+    for (final vehicle in widget.user.availableVehicles) {
+      final trimmed = vehicle.vehicleNumber.trim();
+      if (trimmed.isNotEmpty) {
+        return trimmed;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _loadKhataHeroTripState() async {
+    final heroVehicleNumber = _resolveHeroVehicleNumber();
+    if (heroVehicleNumber == null || heroVehicleNumber.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _heroVehicleNumber = null;
+        _heroVehicleIsOngoing = false;
+      });
+      return;
+    }
+
+    try {
+      final repository = TripRepository();
+      final plantId = _inferPlantId()?.toString();
+      final now = DateTime.now();
+      var hasOngoingTrip = false;
+
+      for (var monthOffset = 0; monthOffset < 3; monthOffset++) {
+        final monthDate = DateTime(now.year, now.month - monthOffset, 1);
+        final monthStart = DateTime(monthDate.year, monthDate.month, 1);
+        final monthEnd = DateTime(monthDate.year, monthDate.month + 1, 0);
+        final response = await repository.fetchOverview(
+          from: monthStart,
+          to: monthEnd,
+          status: 'ongoing',
+          plantId: plantId,
+        );
+        hasOngoingTrip = response.trips.any(
+          (trip) =>
+              trip.vehicleNumber.trim().toLowerCase() ==
+                  heroVehicleNumber.toLowerCase() &&
+              trip.status.toLowerCase() == 'ongoing',
+        );
+        if (hasOngoingTrip) {
+          break;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _heroVehicleNumber = heroVehicleNumber;
+        _heroVehicleIsOngoing = hasOngoingTrip;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _heroVehicleNumber = heroVehicleNumber;
+        _heroVehicleIsOngoing = false;
+      });
+    }
   }
 
   Future<void> _loadBalance() async {
@@ -641,7 +896,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         final isMedical = lower.trim() == 'medical';
         final isExtra = lower.trim() == 'extra';
         return option.driverMandatory ||
-            (!isAdvanceReceived && (isIncentive || isDa || isMedical || isExtra)) ||
+            (!isAdvanceReceived &&
+                (isIncentive || isDa || isMedical || isExtra)) ||
             isAdvance;
       }
     }
@@ -947,9 +1203,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                 ),
                 child: Text(
                   'Attach receipt',
-                  style: Theme.of(
-                    sheetContext,
-                  ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+                  style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               ListTile(
@@ -960,7 +1216,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               ListTile(
                 leading: const Icon(Icons.photo_library_outlined),
                 title: const Text('Choose from gallery (Multiple)'),
-                onTap: () => Navigator.pop(sheetContext, _ReceiptSource.gallery),
+                onTap: () =>
+                    Navigator.pop(sheetContext, _ReceiptSource.gallery),
               ),
               ListTile(
                 leading: const Icon(Icons.picture_as_pdf_outlined),
@@ -1017,7 +1274,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         final bytes = file?.bytes;
         final name = file?.name;
         final path = file?.path;
-        if ((path == null || path.isEmpty) && (bytes == null || bytes.isEmpty)) {
+        if ((path == null || path.isEmpty) &&
+            (bytes == null || bytes.isEmpty)) {
           showAppToast(
             context,
             'Unable to pick PDF on this device.',
@@ -1030,10 +1288,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               ? path
               : (name ?? 'PDF receipt');
           _selectedReceiptPath = displayName;
-          _selectedReceiptBytes =
-              (path == null || path.isEmpty) ? bytes : null;
-          _selectedReceiptName =
-              (path == null || path.isEmpty) ? name : null;
+          _selectedReceiptBytes = (path == null || path.isEmpty) ? bytes : null;
+          _selectedReceiptName = (path == null || path.isEmpty) ? name : null;
           onPathSelected(displayName);
         });
         return;
@@ -1108,6 +1364,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
   }
 
   void _showAddTransactionDialog(bool isAdvanceReceived) {
+    _clearSelectedReceipt();
     print(
       'DEBUG: _showAddTransactionDialog called. isAdvanceReceived: $isAdvanceReceived',
     );
@@ -1156,7 +1413,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           .where((opt) => !_isHiddenInDescriptionPicker(opt))
           .toList(growable: false);
       selectedDescriptionLabel =
-          (visible.isNotEmpty ? visible.first : _descriptionOptions.first).label;
+          (visible.isNotEmpty ? visible.first : _descriptionOptions.first)
+              .label;
     }
     // ignore: unused_local_variable
     int? selectedVehicleId;
@@ -1360,12 +1618,15 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                             onTap: _descriptionOptions.isEmpty
                                 ? null
                                 : () async {
-                                    final visibleDescriptions = _descriptionOptions
-                                        .where(
-                                          (opt) =>
-                                              !_isHiddenInDescriptionPicker(opt),
-                                        )
-                                        .toList(growable: false);
+                                    final visibleDescriptions =
+                                        _descriptionOptions
+                                            .where(
+                                              (opt) =>
+                                                  !_isHiddenInDescriptionPicker(
+                                                    opt,
+                                                  ),
+                                            )
+                                            .toList(growable: false);
                                     final selected =
                                         await showSelectionDialog<
                                           _DescriptionOption
@@ -1420,7 +1681,9 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                     final visible = _descriptionOptions
                                         .where(
                                           (opt) =>
-                                              !_isHiddenInDescriptionPicker(opt),
+                                              !_isHiddenInDescriptionPicker(
+                                                opt,
+                                              ),
                                         )
                                         .toList(growable: false);
                                     if (visible.isNotEmpty) {
@@ -1852,7 +2115,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                         driver['id'].toString();
                                     final plantName = (driver['plant'] ?? '')
                                         .toString();
-                                    final rawPlantId = driver['plant_id'] ??
+                                    final rawPlantId =
+                                        driver['plant_id'] ??
                                         driver['plantId'] ??
                                         driver['plantID'] ??
                                         driver['plant_id_fk'];
@@ -1900,8 +2164,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                         advanceSelectedDriverPlant = plantName;
                                         advanceSelectedDriverPlantId =
                                             (plantId != null && plantId > 0)
-                                                ? plantId
-                                                : null;
+                                            ? plantId
+                                            : null;
                                         showAdvanceDriverList = false;
                                         setSheetState(() {});
                                       },
@@ -2045,9 +2309,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               mainAxisSize: MainAxisSize.min,
                                               children: [
                                                 Icon(
-                                                  _selectedReceiptPath?.endsWith(
-                                                            '.pdf',
-                                                          ) ==
+                                                  _selectedReceiptPath
+                                                              ?.endsWith(
+                                                                '.pdf',
+                                                              ) ==
                                                           true
                                                       ? Icons.picture_as_pdf
                                                       : Icons.receipt,
@@ -2056,9 +2321,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                 ),
                                                 const SizedBox(width: 4),
                                                 Text(
-                                                  _selectedReceiptPath?.endsWith(
-                                                            '.pdf',
-                                                          ) ==
+                                                  _selectedReceiptPath
+                                                              ?.endsWith(
+                                                                '.pdf',
+                                                              ) ==
                                                           true
                                                       ? 'PDF Selected'
                                                       : 'Receipt Selected',
@@ -2148,8 +2414,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                             children: [
                               Expanded(
                                 child: OutlinedButton(
-                                  onPressed: () =>
-                                      Navigator.of(sheetContext).pop(),
+                                  onPressed: () {
+                                    _clearSelectedReceipt();
+                                    Navigator.of(sheetContext).pop();
+                                  },
                                   child: const Text('Cancel'),
                                 ),
                               ),
@@ -2265,6 +2533,13 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                 ? 'ADVANCE -'
                                                 : 'ADVANCE - $rest';
                                           }
+                                          final receiptPathForUpload =
+                                              _selectedReceiptPath;
+                                          final receiptBytesForUpload =
+                                              _selectedReceiptBytes;
+                                          final receiptNameForUpload =
+                                              _selectedReceiptName;
+                                          _clearSelectedReceipt();
                                           Navigator.of(sheetContext).pop();
                                           final type = isAdvanceReceived
                                               ? 'advance_received'
@@ -2276,7 +2551,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                             '🔵 Description: $finalDescription',
                                           );
                                           print(
-                                            '🔵 Selected Receipt Path: $_selectedReceiptPath',
+                                            '🔵 Selected Receipt Path: $receiptPathForUpload',
                                           );
 
                                           // If this is an advance entry with a target driver, treat it like a fund transfer
@@ -2328,42 +2603,40 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                             return;
                                           }
 
-                                          final transactionId =
-                                              await _addTransactionWithDate(
-                                                type,
-                                                amount,
-                                                descriptionText.isEmpty
-                                                    ? finalDescription
-                                                    : descriptionText,
-                                                selectedDate,
-                                                // For driver-required categories like SALARY/UNIFORM,
-                                                // store the entry in the current user's Khata Book,
-                                                // and attach the selected driver as counterparty.
-                                                counterpartyDriverId:
-                                                    needsDriverSelection
-                                                    ? int.tryParse(
-                                                        advanceSelectedDriverId ??
-                                                            '',
-                                                      )
-                                                    : null,
-                                                counterpartyPlantId:
-                                                    needsDriverSelection
-                                                    ? advanceSelectedDriverPlantId
-                                                    : null,
-                                                vehicleId: selectedVehicleId,
-                                                vehiclePlantId:
-                                                    selectedVehiclePlantId,
-                                                // Store the base description label separately as category
-                                                category:
-                                                    selectedDescriptionLabel,
-                                              );
+                                          final transactionId = await _addTransactionWithDate(
+                                            type,
+                                            amount,
+                                            descriptionText.isEmpty
+                                                ? finalDescription
+                                                : descriptionText,
+                                            selectedDate,
+                                            // For driver-required categories like SALARY/UNIFORM,
+                                            // store the entry in the current user's Khata Book,
+                                            // and attach the selected driver as counterparty.
+                                            counterpartyDriverId:
+                                                needsDriverSelection
+                                                ? int.tryParse(
+                                                    advanceSelectedDriverId ??
+                                                        '',
+                                                  )
+                                                : null,
+                                            counterpartyPlantId:
+                                                needsDriverSelection
+                                                ? advanceSelectedDriverPlantId
+                                                : null,
+                                            vehicleId: selectedVehicleId,
+                                            vehiclePlantId:
+                                                selectedVehiclePlantId,
+                                            // Store the base description label separately as category
+                                            category: selectedDescriptionLabel,
+                                          );
                                           print(
                                             '🔵 Transaction ID returned: $transactionId',
                                           );
                                           if (!isAdvanceReceived &&
                                               (transactionId != null) &&
-                                              (_selectedReceiptPath != null ||
-                                                  _selectedReceiptBytes !=
+                                              (receiptPathForUpload != null ||
+                                                  receiptBytesForUpload !=
                                                       null)) {
                                             try {
                                               print('🔵 RECEIPT UPLOAD START');
@@ -2373,13 +2646,14 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               print(
                                                 '🔵 Driver ID: ${widget.user.driverId ?? widget.user.id}',
                                               );
-                                              if (_selectedReceiptPath != null) {
+                                              if (receiptPathForUpload !=
+                                                  null) {
                                                 print(
-                                                  '🔵 File path: $_selectedReceiptPath',
+                                                  '🔵 File path: $receiptPathForUpload',
                                                 );
                                                 try {
                                                   final file = File(
-                                                    _selectedReceiptPath!,
+                                                    receiptPathForUpload,
                                                   );
                                                   final fileExists = await file
                                                       .exists();
@@ -2387,8 +2661,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                     '🔵 File exists: $fileExists',
                                                   );
                                                   if (fileExists) {
-                                                    final fileSize =
-                                                        await file.length();
+                                                    final fileSize = await file
+                                                        .length();
                                                     print(
                                                       '🔵 File size: $fileSize bytes',
                                                     );
@@ -2397,25 +2671,23 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                   // Ignore on web/no file access
                                                 }
                                               }
-                                              final response =
-                                                  await _financeRepository
-                                                      .uploadReceipt(
-                                                        transactionId:
-                                                            transactionId,
-                                                        driverId:
-                                                            widget
-                                                                .user
-                                                                .driverId ??
-                                                            widget.user.id,
-                                                        filePath: _selectedReceiptBytes ==
-                                                                null
-                                                            ? _selectedReceiptPath
-                                                            : null,
-                                                        bytes:
-                                                            _selectedReceiptBytes,
-                                                        fileName:
-                                                            _selectedReceiptName,
-                                                      );
+                                              final response = await _financeRepository
+                                                  .uploadReceipt(
+                                                    transactionId:
+                                                        transactionId,
+                                                    driverId:
+                                                        widget.user.driverId ??
+                                                        widget.user.id,
+                                                    filePath:
+                                                        receiptBytesForUpload ==
+                                                            null
+                                                        ? receiptPathForUpload
+                                                        : null,
+                                                    bytes:
+                                                        receiptBytesForUpload,
+                                                    fileName:
+                                                        receiptNameForUpload,
+                                                  );
                                               print(
                                                 '🟢 Upload response: $response',
                                               );
@@ -2425,61 +2697,61 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                                   'Receipt uploaded successfully',
                                                 );
                                                 print(
-                                               '🟢 Receipt upload SUCCESS',
-                                             );
-                                             if (mounted) {
-                                               final path =
-                                                   response['receiptPath']
-                                                       ?.toString();
-                                               if (path != null &&
-                                                   path.isNotEmpty) {
-                                                 final transactionIdStr =
-                                                     transactionId.toString();
-                                                 var updated = false;
-                                                 setState(() {
-                                                   _transactions =
-                                                       _transactions
-                                                           .map((txn) {
-                                                             if (txn.id ==
-                                                                 transactionIdStr) {
-                                                               updated = true;
-                                                               return txn.copyWith(
-                                                                 receiptPath:
-                                                                     path,
-                                                               );
-                                                             }
-                                                             return txn;
-                                                           })
-                                                           .toList();
-                                                   _filteredTransactions =
-                                                       _filteredTransactions
-                                                           .map((txn) {
-                                                             if (txn.id ==
-                                                                 transactionIdStr) {
-                                                               updated = true;
-                                                               return txn.copyWith(
-                                                                 receiptPath:
-                                                                     path,
-                                                               );
-                                                             }
-                                                             return txn;
-                                                           })
-                                                           .toList();
-                                                 });
-                                                 _filterTransactions();
-                                                 Future.delayed(
-                                                   const Duration(
-                                                     milliseconds: 600,
-                                                   ),
-                                                   () {
-                                                     if (mounted) {
-                                                       _loadData();
-                                                     }
-                                                   },
-                                                 );
-                                               }
-                                             }
-                                           } else {
+                                                  '🟢 Receipt upload SUCCESS',
+                                                );
+                                                if (mounted) {
+                                                  final path =
+                                                      response['receiptPath']
+                                                          ?.toString();
+                                                  if (path != null &&
+                                                      path.isNotEmpty) {
+                                                    final transactionIdStr =
+                                                        transactionId
+                                                            .toString();
+                                                    setState(() {
+                                                      _transactions =
+                                                          _transactions.map((
+                                                            txn,
+                                                          ) {
+                                                            if (txn.id ==
+                                                                transactionIdStr) {
+                                                              return txn
+                                                                  .copyWith(
+                                                                    receiptPath:
+                                                                        path,
+                                                                  );
+                                                            }
+                                                            return txn;
+                                                          }).toList();
+                                                      _filteredTransactions =
+                                                          _filteredTransactions.map((
+                                                            txn,
+                                                          ) {
+                                                            if (txn.id ==
+                                                                transactionIdStr) {
+                                                              return txn
+                                                                  .copyWith(
+                                                                    receiptPath:
+                                                                        path,
+                                                                  );
+                                                            }
+                                                            return txn;
+                                                          }).toList();
+                                                    });
+                                                    _filterTransactions();
+                                                    Future.delayed(
+                                                      const Duration(
+                                                        milliseconds: 600,
+                                                      ),
+                                                      () {
+                                                        if (mounted) {
+                                                          _loadData();
+                                                        }
+                                                      },
+                                                    );
+                                                  }
+                                                }
+                                              } else {
                                                 print(
                                                   '🔴 Receipt upload FAILED: ${response['error']}',
                                                 );
@@ -2511,7 +2783,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                                               '🔵 isAdvanceReceived: $isAdvanceReceived',
                                             );
                                             print(
-                                              '🔵 selectedReceiptPath: $_selectedReceiptPath',
+                                              '🔵 selectedReceiptPath: $receiptPathForUpload',
                                             );
                                             print(
                                               '🔵 transactionId: $transactionId',
@@ -2549,184 +2821,613 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.book, color: Colors.white),
-            const SizedBox(width: 8),
-            const Text('Khata Book', style: TextStyle(color: Colors.white)),
-          ],
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: _khataSurface,
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [_khataPrimary, _khataSurface],
+              stops: [0.0, 0.4],
+            ),
+          ),
+          child: const Center(child: AppLoader()),
         ),
-        centerTitle: true,
-        backgroundColor: const Color(0xFF12355B),
-        foregroundColor: Colors.white,
-        iconTheme: const IconThemeData(color: Colors.white),
-        elevation: 0,
-      ),
-      body: Container(
-        color: Colors.grey[200],
-        child: _isLoading
-            ? const Center(child: AppLoader())
-            : RefreshIndicator(
-                onRefresh: _loadData,
-                child: SingleChildScrollView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildProfileSection(),
-                      const SizedBox(height: 16),
-                      _buildBalanceCard(),
-                      const SizedBox(height: 16),
-                      _buildTransactionHistory(),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: _khataSurface,
+      body: NestedScrollView(
+        physics: const BouncingScrollPhysics(),
+        headerSliverBuilder: (context, innerBoxIsScrolled) {
+          return [
+            SliverAppBar(
+              pinned: true,
+              centerTitle: true,
+              expandedHeight: 220,
+              backgroundColor: _khataPrimary2,
+              surfaceTintColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              iconTheme: const IconThemeData(color: Colors.white),
+              leading: IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.arrow_back_rounded,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+              title: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _iconBadge(Icons.menu_book_rounded),
+                  const SizedBox(width: 10),
+                  const Text(
+                    'Khata Book',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 20,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                if (widget.user.canViewDocuments)
+                  IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.public,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                    tooltip: 'All User Expenses',
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              KhataAllExpensesScreen(user: widget.user),
+                        ),
+                      );
+                    },
+                  ),
+                const SizedBox(width: 4),
+              ],
+              flexibleSpace: FlexibleSpaceBar(
+                background: Container(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [_khataPrimary, _khataPrimary2, _gradientMid],
+                    ),
+                  ),
+                  child: SafeArea(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: FadeTransition(
+                        opacity: _heroFade,
+                        child: ScaleTransition(
+                          scale: _heroScale,
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [_buildProfileSection()],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              bottom: PreferredSize(
+                preferredSize: const Size.fromHeight(20),
+                child: Container(
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: _khataSurface,
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(24),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10,
+                        offset: const Offset(0, -2),
+                      ),
                     ],
                   ),
                 ),
               ),
+            ),
+          ];
+        },
+        body: RefreshIndicator(
+          color: _khataAccent,
+          onRefresh: _loadData,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            children: [_buildTransactionHistory()],
+          ),
+        ),
       ),
       bottomNavigationBar: _buildBottomButtons(),
     );
   }
 
   Widget _buildProfileSection() {
-    return Row(
-      children: [
-        ProfilePhotoWithUpload(
-          user: widget.user,
-          radius: 30,
-          onPhotoSelected: _handlePhotoSelected,
-          isUploading: _isUploadingPhoto,
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                widget.user.displayName,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.blue,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  'Driver',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+    final isPositive = _currentBalance > 0;
+    final isZero = _currentBalance == 0;
+    final balanceColor = isZero
+        ? const Color(0xFFD4A017)
+        : isPositive
+        ? const Color(0xFF10B981)
+        : const Color(0xFFEF4444);
+    final useYellowHero = isZero;
+    final heroGradient = useYellowHero
+        ? const LinearGradient(
+            colors: [Color(0xFFE0BC00), Color(0xFFF2C94C), Color(0xFFD4A017)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : isPositive
+        ? const LinearGradient(
+            colors: [Color(0xFF2E7D32), Color(0xFF43A047), Color(0xFF66BB6A)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          )
+        : const LinearGradient(
+            colors: [Color(0xFFD32F2F), Color(0xFFE53935), Color(0xFFEF5350)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          );
+    final textColor = useYellowHero
+        ? Colors.black.withOpacity(0.85)
+        : Colors.white;
+    final subtleTextColor = useYellowHero
+        ? Colors.black.withOpacity(0.68)
+        : Colors.white.withOpacity(0.7);
+    final chipBackground = useYellowHero
+        ? Colors.black.withOpacity(0.08)
+        : Colors.white.withOpacity(0.14);
+    final chipBorder = useYellowHero
+        ? Colors.black.withOpacity(0.14)
+        : Colors.white.withOpacity(0.18);
+    final heroBorder = useYellowHero
+        ? Colors.black.withOpacity(0.10)
+        : Colors.white.withOpacity(0.18);
+    final heroShadowColor = useYellowHero
+        ? const Color(0xFFD4A017).withOpacity(0.28)
+        : isPositive
+        ? const Color(0xFF43A047).withOpacity(0.35)
+        : const Color(0xFFE53935).withOpacity(0.35);
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: heroGradient,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: heroBorder),
+        boxShadow: [
+          BoxShadow(
+            color: heroShadowColor,
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Top row: Profile + Balance
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 9),
+            child: Row(
+              children: [
+                // Profile photo
+                Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: textColor.withOpacity(0.6),
+                      width: 2,
+                    ),
+                  ),
+                  child: ProfilePhotoWithUpload(
+                    user: widget.user,
+                    radius: 24,
+                    onPhotoSelected: _handlePhotoSelected,
+                    isUploading: _isUploadingPhoto,
                   ),
                 ),
-              ),
-              const SizedBox(height: 4),
-            ],
+                const SizedBox(width: 12),
+                // Name + badge
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.user.displayName,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
+                          letterSpacing: 0.3,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: chipBackground,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: chipBorder),
+                        ),
+                        child: Text(
+                          '● Driver',
+                          style: TextStyle(
+                            color: subtleTextColor,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Balance on the right
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      isZero
+                          ? 'Balance settled'
+                          : isPositive
+                          ? 'You will get'
+                          : 'You will give',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: subtleTextColor,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatInrSigned(_currentBalance),
+                      style: TextStyle(
+                        fontSize: 34,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
-        IconButton(
-          onPressed: () {
-            // TODO: Implement call functionality
-          },
-          icon: const Icon(Icons.phone),
-        ),
-      ],
+          // Divider
+          Container(
+            height: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            color: textColor.withOpacity(0.15),
+          ),
+          // Bottom row: Month selector
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 9),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: _showMonthSelector,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: chipBackground,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: chipBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_month_rounded,
+                          size: 16,
+                          color: subtleTextColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _selectedMonthCompactLabel(),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 18,
+                          color: subtleTextColor,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_heroVehicleNumber != null &&
+                    _heroVehicleNumber!.trim().isNotEmpty) ...[
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: chipBackground,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: chipBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.local_shipping_outlined,
+                          size: 16,
+                          color: subtleTextColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _heroVehicleNumber!,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                const Spacer(),
+                Icon(
+                  isPositive
+                      ? Icons.trending_up_rounded
+                      : Icons.trending_down_rounded,
+                  color: balanceColor,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildBalanceCard() {
-    final isPositive = _currentBalance >= 0;
-    final bgColor = isPositive
-        ? const Color(0xFFE8F5E9) // light green
-        : const Color(0xFFFFEBEE); // light red
+    final isPositive = _currentBalance > 0;
+    final isZero = _currentBalance == 0;
+    final accentColor = isZero
+        ? const Color(0xFFD4A017)
+        : isPositive
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFC62828);
+    final lightBg = isZero
+        ? const Color(0xFFFFF8E1)
+        : isPositive
+        ? const Color(0xFFE8F5E9)
+        : const Color(0xFFFFEBEE);
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE7ECF3)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
+            color: accentColor.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 6),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      isPositive ? 'You will get' : 'You will give',
-                      style: const TextStyle(fontSize: 14, color: Colors.grey),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _formatInrSigned(_currentBalance),
-                      style: TextStyle(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: isPositive ? Colors.green : Colors.red,
+          // Top balance area with gradient accent
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 14),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [lightBg, lightBg.withOpacity(0.4), Colors.white],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(20),
+              ),
+            ),
+            child: Row(
+              children: [
+                // Left: balance info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  accentColor,
+                                  accentColor.withOpacity(0.6),
+                                ],
+                              ),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isZero
+                                ? 'Balance settled'
+                                : isPositive
+                                ? 'You will get'
+                                : 'You will give',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 6),
+                      Text(
+                        _formatInrSigned(_currentBalance),
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: accentColor,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  TextButton.icon(
-                    onPressed: _showFundTransferDialog,
-                    style: TextButton.styleFrom(
-                      foregroundColor: Colors.blue,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                // Right: status icon with gradient background
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        accentColor.withOpacity(0.15),
+                        accentColor.withOpacity(0.05),
+                      ],
                     ),
-                    icon: const Icon(Icons.sync_alt, size: 18),
-                    label: const Text('Fund Transfer'),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: accentColor.withOpacity(0.1)),
                   ),
-                  const SizedBox(height: 6),
-                  ElevatedButton.icon(
-                    onPressed: _showMonthSelector,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.grey.shade100,
-                      foregroundColor: Colors.black87,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
+                  child: Icon(
+                    isZero
+                        ? Icons.balance_rounded
+                        : isPositive
+                        ? Icons.trending_up_rounded
+                        : Icons.trending_down_rounded,
+                    color: accentColor,
+                    size: 28,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Bottom action row
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1A4A7A), Color(0xFF0D6EBD)],
                       ),
-                      minimumSize: Size.zero,
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF1A4A7A).withOpacity(0.2),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
                     ),
-                    icon: const Icon(Icons.calendar_today, size: 16),
-                    label: Text(_selectedMonthCompactLabel()),
+                    child: ElevatedButton.icon(
+                      onPressed: _showFundTransferDialog,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        shadowColor: Colors.transparent,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      icon: const Icon(Icons.sync_alt_rounded, size: 18),
+                      label: const Text(
+                        'Fund Transfer',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                   ),
-                ],
-              ),
-            ],
+                ),
+                const SizedBox(width: 10),
+                OutlinedButton.icon(
+                  onPressed: _showMonthSelector,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.grey.shade700,
+                    side: BorderSide(color: Colors.grey.shade300, width: 1.2),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  icon: const Icon(Icons.calendar_month_rounded, size: 18),
+                  label: Text(
+                    _selectedMonthCompactLabel(),
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2735,11 +3436,27 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   Widget _buildTransactionHistory() {
     if (_filteredTransactions.isEmpty) {
-      return Center(
-        child: Text(
-          _transactions.isEmpty
-              ? 'No transactions found'
-              : 'No transactions found for ${_currentFilterLabel()}',
+      return Container(
+        padding: const EdgeInsets.symmetric(vertical: 40),
+        child: Column(
+          children: [
+            Icon(
+              Icons.receipt_long_rounded,
+              size: 56,
+              color: Colors.grey.shade300,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _transactions.isEmpty
+                  ? 'No transactions found'
+                  : 'No transactions found for ${_currentFilterLabel()}',
+              style: TextStyle(
+                fontSize: 15,
+                color: Colors.grey.shade500,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
         ),
       );
     }
@@ -2768,76 +3485,125 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Text(
-              'ENTRIES (${_filteredTransactions.length})',
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey,
-              ),
-            ),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      children: [
-                        const Text(
-                          'YOU GAVE',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.red,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatInr(youGaveTotal),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.red,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: Column(
-                      children: [
-                        const Text(
-                          'YOU GOT',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.green,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _formatInr(youGotTotal),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.green,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
+        _sectionHeader(
+          'Transaction History',
+          subtitle:
+              '${_filteredTransactions.length} entries • $_selectedMonth ${_selectedYear ?? ''}',
+          icon: Icons.receipt_long_rounded,
         ),
-        const SizedBox(height: 6),
-        const SizedBox(height: 8),
+        // Summary header card with gradient
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.white, const Color(0xFFF8FAFC)],
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFFE7ECF3)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+          child: Row(
+            children: [
+              // Entries count badge
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: _khataPrimary2.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${_filteredTransactions.length}',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
+                    color: _khataPrimary2,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Entries',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+              const Spacer(),
+              // You Gave pill
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFEBEE),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.arrow_upward_rounded,
+                      size: 14,
+                      color: Color(0xFFC62828),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatInr(youGaveTotal),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFFC62828),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              // You Got pill
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.arrow_downward_rounded,
+                      size: 14,
+                      color: Color(0xFF2E7D32),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatInr(youGotTotal),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF2E7D32),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
         // Display transactions grouped by date
         ...sortedDates.map((dateKey) {
           final transactions = groupedTransactions[dateKey]!;
@@ -2846,41 +3612,113 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildDateHeaderWithTodayYesterday(dateKey),
-              const SizedBox(height: 8),
+              const SizedBox(height: 2),
               // Display each transaction individually
               ...transactions.map((transaction) {
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onTap: () => _showTransactionDetail(transaction),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // ENTRIES Column (Left) - Date, Time, Balance, Description
-                        Expanded(flex: 3, child: _buildEntryCard(transaction)),
-                        const SizedBox(width: 8),
-                        // YOU GAVE Column (Middle) - Red amounts
-                        Expanded(
-                          flex: 1,
-                          child: transaction.type == 'expense'
-                              ? _buildAmountCard(transaction, isYouGot: false)
-                              : const SizedBox(height: 60),
-                        ),
-                        const SizedBox(width: 8),
-                        // YOU GOT Column (Right) - Green amounts
-                        Expanded(
-                          flex: 1,
-                          child: transaction.type == 'advance_received'
-                              ? _buildAmountCard(transaction, isYouGot: true)
-                              : const SizedBox(height: 60),
-                        ),
-                      ],
-                    ),
+                final currentDriverId = widget.user.driverId ?? widget.user.id;
+                final canSwipeDelete = _canDeleteTransaction(
+                  transaction,
+                  currentDriverId,
+                );
+
+                final rowContent = GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _showTransactionDetail(transaction),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ENTRIES Column (Left) - Date, Time, Balance, Description
+                      Expanded(flex: 3, child: _buildEntryCard(transaction)),
+                      const SizedBox(width: 6),
+                      // YOU GAVE Column (Middle) - Red amounts
+                      Expanded(
+                        flex: 1,
+                        child: transaction.type == 'expense'
+                            ? _buildAmountCard(transaction, isYouGot: false)
+                            : const SizedBox(height: 60),
+                      ),
+                      const SizedBox(width: 6),
+                      // YOU GOT Column (Right) - Green amounts
+                      Expanded(
+                        flex: 1,
+                        child: transaction.type == 'advance_received'
+                            ? _buildAmountCard(transaction, isYouGot: true)
+                            : const SizedBox(height: 60),
+                      ),
+                    ],
                   ),
                 );
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: canSwipeDelete
+                      ? Dismissible(
+                          key: ValueKey('txn_${transaction.id}'),
+                          direction: DismissDirection.startToEnd,
+                          background: Container(
+                            alignment: Alignment.centerLeft,
+                            padding: const EdgeInsets.only(left: 20),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFC62828),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.delete_rounded,
+                                  color: Colors.white,
+                                  size: 22,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          confirmDismiss: (direction) async {
+                            // Show confirmation dialog
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('Delete Transaction'),
+                                content: const Text(
+                                  'Are you sure you want to delete this transaction?\nThis action cannot be undone.',
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(false),
+                                    child: const Text('Cancel'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(context).pop(true),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.red,
+                                    ),
+                                    child: const Text('Delete'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            return confirmed == true;
+                          },
+                          onDismissed: (direction) {
+                            _deleteTransaction(transaction);
+                          },
+                          child: rowContent,
+                        )
+                      : rowContent,
+                );
               }),
-              const SizedBox(height: 16),
+              const SizedBox(height: 4),
             ],
           );
         }),
@@ -2924,18 +3762,85 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     );
 
     String displayText = displayKey;
+    String? badge;
     if (entryDate.isAtSameMomentAs(todayDate)) {
-      displayText = '$displayKey - Today';
+      badge = 'Today';
     } else if (entryDate.isAtSameMomentAs(yesterdayDate)) {
-      displayText = '$displayKey - Yesterday';
+      badge = 'Yesterday';
     }
 
-    return Text(
-      displayText,
-      style: const TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        color: Colors.black87,
+    return Padding(
+      padding: const EdgeInsets.only(top: 2, bottom: 2),
+      child: Row(
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [_khataPrimary, _khataPrimary2],
+              ),
+              borderRadius: BorderRadius.circular(5),
+              boxShadow: [
+                BoxShadow(
+                  color: _khataPrimary2.withOpacity(0.3),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            displayText,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: _khataText,
+              letterSpacing: 0.25,
+            ),
+          ),
+          if (badge != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    _khataPrimary2.withOpacity(0.12),
+                    _khataPrimary.withOpacity(0.06),
+                  ],
+                ),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: _khataPrimary2.withOpacity(0.16)),
+              ),
+              child: Text(
+                badge,
+                style: const TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: _khataPrimary2,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ),
+          ],
+          const Spacer(),
+          Expanded(
+            child: Container(
+              height: 1,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.transparent,
+                    const Color(0xFFE7ECF3).withOpacity(0.8),
+                    const Color(0xFFE7ECF3),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2945,136 +3850,220 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     // Get current user's driver ID - use driverId if available, otherwise use user ID
     final currentDriverId = widget.user.driverId ?? widget.user.id;
     final canDelete = _canDeleteTransaction(transaction, currentDriverId);
+    final isExpense = transaction.type == 'expense';
+    final accentColor = isExpense
+        ? const Color(0xFFC62828)
+        : const Color(0xFF2E7D32);
+
+    String? vehicleLabelFor(int? id) {
+      if (id == null || id <= 0) return null;
+      final match = _vehicleOptions.where((v) => v.id == id).toList();
+      if (match.isNotEmpty) return match.first.number;
+      return 'Vehicle #$id';
+    }
+
+    String? driverLabelFor(int? id) {
+      if (id == null || id <= 0) return null;
+      final match = _driversList.firstWhere(
+        (d) =>
+            d['id']?.toString() == id.toString() ||
+            d['driver_id']?.toString() == id.toString() ||
+            d['driverId']?.toString() == id.toString(),
+        orElse: () => {},
+      );
+      if (match.isEmpty) return 'Driver #$id';
+      return match['name']?.toString() ??
+          match['driver_name']?.toString() ??
+          match['driverName']?.toString() ??
+          'Driver #$id';
+    }
 
     String buildMetaLine() {
       final parts = <String>[];
       if (transaction.vehicleId != null && transaction.vehicleId! > 0) {
-        parts.add('Vehicle ID: ${transaction.vehicleId}');
+        parts.add('Vehicle: ${vehicleLabelFor(transaction.vehicleId)}');
       }
       if (transaction.vehiclePlantId != null &&
           transaction.vehiclePlantId! > 0) {
-        parts.add('Vehicle Plant ID: ${transaction.vehiclePlantId}');
+        parts.add(
+          'Vehicle Plant: ${_plantNameForId(transaction.vehiclePlantId)}',
+        );
       }
       if (transaction.counterpartyDriverId != null &&
           transaction.counterpartyDriverId! > 0) {
-        parts.add('Driver ID: ${transaction.counterpartyDriverId}');
+        parts.add(
+          'Driver: ${driverLabelFor(transaction.counterpartyDriverId)}',
+        );
       }
       if (transaction.counterpartyPlantId != null &&
           transaction.counterpartyPlantId! > 0) {
-        parts.add('Driver Plant ID: ${transaction.counterpartyPlantId}');
+        parts.add(
+          'Driver Plant: ${_plantNameForId(transaction.counterpartyPlantId)}',
+        );
       }
       return parts.join(' • ');
     }
 
     final metaLine = buildMetaLine();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 2,
-            offset: const Offset(0, 1),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header row with date-time and delete button
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  _formatDateTime(transaction.createdAt),
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+    return _glassCard(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: EdgeInsets.zero,
+      borderColor: const Color(0xFFE7ECF3),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            // Left gradient accent bar
+            Container(
+              width: 4,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: isExpense
+                      ? [const Color(0xFFEF4444), const Color(0xFFC62828)]
+                      : [const Color(0xFF10B981), const Color(0xFF2E7D32)],
                 ),
-              ),
-              if (canDelete)
-                IconButton(
-                  onPressed: () => _confirmDeleteTransaction(transaction),
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    color: Colors.red,
-                    size: 20,
-                  ),
-                  tooltip: _getDeleteTooltip(transaction),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(
-                    minWidth: 32,
-                    minHeight: 32,
-                  ),
+                borderRadius: const BorderRadius.horizontal(
+                  left: Radius.circular(12),
                 ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          // Balance
-          if (transaction.runningBalance != null)
-            Text(
-              'Bal. ${transaction.formattedBalance}',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Colors.red,
-                fontWeight: FontWeight.w500,
+                boxShadow: [
+                  BoxShadow(
+                    color: accentColor.withOpacity(0.3),
+                    blurRadius: 4,
+                    offset: const Offset(1, 0),
+                  ),
+                ],
               ),
             ),
-          const SizedBox(height: 4),
-          if (_isFundTransferTransaction(transaction))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: _buildFundTransferLabel(transaction),
-            ),
-          // Description (full text with smaller font)
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  _formatTransactionDescription(transaction),
-                  style: const TextStyle(fontSize: 13, color: Colors.black87),
-                ),
-              ),
-              // Show receipt attachment icon if receipt exists
-              if (transaction.receiptPath != null &&
-                  transaction.receiptPath!.isNotEmpty)
-                GestureDetector(
-                  onTap: () => _viewReceipt(transaction.receiptPath!),
-                  child: Container(
-                    margin: const EdgeInsets.only(left: 8),
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: Colors.green.withOpacity(0.3)),
+            // Card content
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Header row with date-time and delete button
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _formatDateTime(transaction.createdAt),
+                            style: const TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Color(0xFF2C3E50),
+                            ),
+                          ),
+                        ),
+                        if (canDelete)
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: IconButton(
+                              onPressed: () =>
+                                  _confirmDeleteTransaction(transaction),
+                              icon: Icon(
+                                Icons.delete_outline_rounded,
+                                color: Colors.red.shade300,
+                                size: 18,
+                              ),
+                              tooltip: _getDeleteTooltip(transaction),
+                              padding: EdgeInsets.zero,
+                            ),
+                          ),
+                      ],
                     ),
-                    child: const Icon(
-                      Icons.receipt,
-                      size: 16,
-                      color: Colors.green,
+                    // Balance
+                    if (transaction.runningBalance != null) ...[
+                      const SizedBox(height: 3),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          'Bal. ${transaction.formattedBalance}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFE65100),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 4),
+                    if (_isFundTransferTransaction(transaction))
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: _buildFundTransferLabel(transaction),
+                      ),
+                    // Description
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _formatTransactionDescription(transaction),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade700,
+                              height: 1.3,
+                            ),
+                          ),
+                        ),
+                        // Receipt icon with gradient badge
+                        if (transaction.receiptPath != null &&
+                            transaction.receiptPath!.isNotEmpty)
+                          GestureDetector(
+                            onTap: () => _viewReceipt(transaction.receiptPath!),
+                            child: Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    const Color(0xFF2E7D32).withOpacity(0.12),
+                                    const Color(0xFF10B981).withOpacity(0.06),
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(
+                                  color: const Color(
+                                    0xFF2E7D32,
+                                  ).withOpacity(0.15),
+                                ),
+                              ),
+                              child: const Icon(
+                                Icons.receipt_long_rounded,
+                                size: 15,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                  ),
+                    if (metaLine.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        metaLine,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade500,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
-            ],
-          ),
-          if (metaLine.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Text(
-              metaLine,
-              style: TextStyle(
-                fontSize: 11,
-                color: Colors.grey.shade700,
-                fontWeight: FontWeight.w500,
               ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -3195,39 +4184,18 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: isEditLocked
-                              ? null
-                              : () {
-                                  Navigator.of(context).pop();
-                                  _showEditTransactionSheet(
-                                    transaction,
-                                    createdAt,
-                                  );
-                                },
-                          icon: const Icon(Icons.edit),
-                          label: const Text('Edit Transaction'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _confirmDeleteTransaction(transaction);
-                          },
-                          icon: const Icon(Icons.delete_outline),
-                          label: const Text('Delete'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
-                          ),
-                        ),
-                      ),
-                    ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: isEditLocked
+                          ? null
+                          : () {
+                              Navigator.of(context).pop();
+                              _showEditTransactionSheet(transaction, createdAt);
+                            },
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Edit Transaction'),
+                    ),
                   ),
                   const SizedBox(height: 8),
                 ],
@@ -3244,11 +4212,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     DateTime initialDate,
   ) {
     if (_isEditLockedTransaction(transaction)) {
-      showAppToast(
-        context,
-        'This category cannot be edited.',
-        isError: true,
-      );
+      showAppToast(context, 'This category cannot be edited.', isError: true);
       return;
     }
     final amountController = TextEditingController(
@@ -3629,18 +4593,32 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
     AdvanceTransaction transaction, {
     bool isYouGot = true,
   }) {
+    final bgColors = isYouGot
+        ? [const Color(0xFFE8F5E9), const Color(0xFFF1F8E9)]
+        : [const Color(0xFFFFEBEE), const Color(0xFFFFF3E0)];
+    final textColor = isYouGot
+        ? const Color(0xFF2E7D32)
+        : const Color(0xFFC62828);
+    final borderColor = isYouGot
+        ? const Color(0xFF2E7D32).withOpacity(0.15)
+        : const Color(0xFFC62828).withOpacity(0.15);
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: bgColors,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 2,
-            offset: const Offset(0, 1),
+            color: textColor.withOpacity(0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -3650,9 +4628,10 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
           transaction.formattedAmount.trim(),
           textAlign: TextAlign.center,
           style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: isYouGot ? Colors.green : Colors.red,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: textColor,
+            letterSpacing: -0.3,
           ),
         ),
       ),
@@ -3900,14 +4879,20 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
   Widget _buildBottomButtons() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
         color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
+            color: Colors.black.withOpacity(0.06),
+            blurRadius: 20,
+            offset: const Offset(0, -6),
+          ),
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 6,
+            offset: const Offset(0, -1),
           ),
         ],
       ),
@@ -3915,38 +4900,92 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         child: Row(
           children: [
             Expanded(
-              child: ElevatedButton(
-                onPressed: () => _showAddTransactionDialog(false),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFFEF4444), Color(0xFFC62828)],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFEF4444).withOpacity(0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () => _showAddTransactionDialog(false),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    shadowColor: Colors.transparent,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.arrow_upward_rounded, size: 20),
+                  label: const Text(
+                    'YOU GAVE ₹',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 ),
-                child: const Text('YOU GAVE ₹'),
               ),
             ),
-            const SizedBox(width: 16),
+            const SizedBox(width: 12),
             Expanded(
-              child: ElevatedButton(
-                onPressed: () {
-                  showAppToast(
-                    context,
-                    'Ask Office to Make an Entry.',
-                    isError: true,
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.grey.shade400,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [_khataAccent, Color(0xFF0D8F6B)],
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: _khataAccent.withOpacity(0.3),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    showAppToast(
+                      context,
+                      'Ask Office to Make an Entry.',
+                      isError: true,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    foregroundColor: Colors.white,
+                    shadowColor: Colors.transparent,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  icon: const Icon(Icons.arrow_downward_rounded, size: 20),
+                  label: const Text(
+                    'YOU GOT ₹',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      letterSpacing: 0.3,
+                    ),
                   ),
                 ),
-                child: const Text('YOU GOT ₹'),
               ),
             ),
           ],
@@ -4685,7 +5724,7 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
 
           // Apply client-side category rules:
           // - Force driver mandatory for incentive-like categories and the listed expense categories.
-          // - Hide categories containing "safety" or "advance office".
+          // - Hide only legacy/internal categories that should not appear in the picker.
           const _forceDriverKeywords = <String>[
             'incentive',
             'shoes',
@@ -4697,33 +5736,35 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
             'driver name',
           ];
           const _hideKeywords = <String>[
-            'safety',
             'advance office',
             // Hide both "DRIVETRACK" and variants like "DRIVE TRACK" / "DRIVE_TRACK".
             'drivetrack',
             'drive track',
             'drive_track',
           ];
+          const _hideExactNormalized = <String>['safety'];
 
           String _normalizeKey(String input) =>
               input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
 
-          final _hideNormalized = _hideKeywords.map(_normalizeKey).toList(
-            growable: false,
-          );
+          final _hideNormalized = _hideKeywords
+              .map(_normalizeKey)
+              .toList(growable: false);
 
           List<_DescriptionOption> normalized = descriptions
-              .where(
-                (opt) {
-                  final rawLower = opt.label.toLowerCase();
-                  final compact = _normalizeKey(opt.label);
-                  // Keep legacy contains check + robust normalized check.
-                  final legacyHit = _hideKeywords.any((h) => rawLower.contains(h));
-                  final normalizedHit =
-                      _hideNormalized.any((h) => h.isNotEmpty && compact.contains(h));
-                  return !(legacyHit || normalizedHit);
-                },
-              )
+              .where((opt) {
+                final rawLower = opt.label.toLowerCase();
+                final compact = _normalizeKey(opt.label);
+                // Keep legacy contains check + robust normalized check.
+                final legacyHit = _hideKeywords.any(
+                  (h) => rawLower.contains(h),
+                );
+                final normalizedHit = _hideNormalized.any(
+                  (h) => h.isNotEmpty && compact.contains(h),
+                );
+                final exactHit = _hideExactNormalized.contains(compact);
+                return !(legacyHit || normalizedHit || exactHit);
+              })
               .map((opt) {
                 final lower = opt.label.toLowerCase();
                 final forceDriver = _forceDriverKeywords.any(
@@ -4973,7 +6014,8 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
         ? trimmedPath
         : 'https://sstranswaysindia.com'
               '${trimmedPath.startsWith('/') ? trimmedPath : '/$trimmedPath'}';
-    final isPdf = imageUrl != null &&
+    final isPdf =
+        imageUrl != null &&
         imageUrl.toLowerCase().split('?').first.trim().endsWith('.pdf');
 
     showDialog(
@@ -4988,40 +6030,40 @@ class _AdvanceSalaryScreenState extends State<AdvanceSalaryScreen> {
               content: imageUrl == null
                   ? const Text('No receipt available for this entry.')
                   : isPdf
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const Text('PDF receipt attached.'),
-                            const SizedBox(height: 12),
-                            ElevatedButton.icon(
-                              onPressed: () async {
-                                final uri = Uri.tryParse(imageUrl);
-                                if (uri == null) {
-                                  showAppToast(
-                                    context,
-                                    'Invalid PDF URL.',
-                                    isError: true,
-                                  );
-                                  return;
-                                }
-                                final ok = await launchUrl(
-                                  uri,
-                                  mode: LaunchMode.externalApplication,
-                                );
-                                if (!ok && context.mounted) {
-                                  showAppToast(
-                                    context,
-                                    'Unable to open PDF.',
-                                    isError: true,
-                                  );
-                                }
-                              },
-                              icon: const Icon(Icons.open_in_new),
-                              label: const Text('Open PDF'),
-                            ),
-                          ],
-                        )
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('PDF receipt attached.'),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            final uri = Uri.tryParse(imageUrl);
+                            if (uri == null) {
+                              showAppToast(
+                                context,
+                                'Invalid PDF URL.',
+                                isError: true,
+                              );
+                              return;
+                            }
+                            final ok = await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+                            if (!ok && context.mounted) {
+                              showAppToast(
+                                context,
+                                'Unable to open PDF.',
+                                isError: true,
+                              );
+                            }
+                          },
+                          icon: const Icon(Icons.open_in_new),
+                          label: const Text('Open PDF'),
+                        ),
+                      ],
+                    )
                   : Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,

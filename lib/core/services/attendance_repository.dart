@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -105,6 +106,8 @@ class AttendanceRepository {
       'https://sstranswaysindia.com/api/mobile/attendance_salary_details.php';
   static const String _defaultAdvanceEntryEndpoint =
       'https://sstranswaysindia.com/api/mobile/user_advance_entry.php';
+  static const Duration _submitRequestTimeout = Duration(seconds: 25);
+  static const Duration _submitResponseTimeout = Duration(seconds: 25);
 
 
   final http.Client _client;
@@ -179,8 +182,20 @@ class AttendanceRepository {
       }
     }
 
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
+    http.StreamedResponse streamedResponse;
+    http.Response response;
+    try {
+      streamedResponse = await _client
+          .send(request)
+          .timeout(_submitRequestTimeout);
+      response = await http.Response.fromStream(
+        streamedResponse,
+      ).timeout(_submitResponseTimeout);
+    } on TimeoutException {
+      throw AttendanceFailure(
+        'Attendance request timed out. Please try again.',
+      );
+    }
     final statusCode = response.statusCode;
 
     Map<String, dynamic> payload;
@@ -672,7 +687,7 @@ class AttendanceRepository {
       if (!await file.exists()) return null;
 
       final fileSize = await file.length();
-      if (fileSize <= 350 * 1024) {
+      if (fileSize <= 700 * 1024) {
         return await file.readAsBytes();
       }
 

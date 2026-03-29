@@ -153,17 +153,10 @@ try {
     $cleanupDoc    = !isset($_POST['cleanup_doc']) || ((string)$_POST['cleanup_doc'] === '1');
     $scoreComment  = trim((string)($_POST['score_comment'] ?? ''));
 
-    $DEFAULT_ROOT   = 'GOOGLE_DRIVE_ROOT_FOLDER_ID';
-    $DEFAULT_TPL_ID = 'GOOGLE_DOC_TEMPLATE_ID_PLACEHOLDER';
+    $DEFAULT_ROOT = 'GOOGLE_DRIVE_ROOT_FOLDER_ID';
 
     $rootFolder = trim((string)($_POST['folder_override'] ?? '')) ?: (getSettingValue($GLOBALS['conn'], 'spot_audit_root_folder_id') ?: $DEFAULT_ROOT);
-    $templateId = trim((string)($_POST['template_override'] ?? '')) ?: (getSettingValue($GLOBALS['conn'], 'spot_audit_template_doc_id') ?: $DEFAULT_TPL_ID);
-
-    if (!$templateId || $templateId === 'GOOGLE_DOC_TEMPLATE_ID_PLACEHOLDER') {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Template ID not configured. Set setting spot_audit_template_doc_id or pass template_override', 'trace_id' => $traceId]);
-        exit;
-    }
+    $templateId = trim((string)($_POST['template_override'] ?? '')) ?: (getSettingValue($GLOBALS['conn'], 'spot_audit_template_doc_id') ?: '');
 
     $sqlAudit = "
         SELECT
@@ -344,12 +337,14 @@ try {
         throw new RuntimeException('Failed to prepare Drive folders');
     }
 
-    try {
-        $drive->files->get($templateId, ['supportsAllDrives' => true, 'fields' => 'id']);
-    } catch (Throwable $e) {
-        http_response_code(500);
-        echo json_encode(['success' => false, 'message' => 'Template not accessible to service account', 'trace_id' => $traceId]);
-        exit;
+    $useTemplate = ($templateId !== '' && $templateId !== 'GOOGLE_DOC_TEMPLATE_ID_PLACEHOLDER');
+    if ($useTemplate) {
+        try {
+            $drive->files->get($templateId, ['supportsAllDrives' => true, 'fields' => 'id']);
+        } catch (Throwable $e) {
+            $useTemplate = false;
+            $log->log('WARN', 'template:unavailable_fallback_plain_doc', ['error' => $e->getMessage()]);
+        }
     }
 
     $safeName = fn(string $value) => trim(preg_replace('~\s+~', ' ', preg_replace('~[^\w\s\-\.\(\)]~u', '', $value)));
@@ -426,25 +421,103 @@ try {
         }
     }
 
-    $copyMeta = new \Google\Service\Drive\DriveFile(['name' => $fileBase, 'parents' => [$monthFolder]]);
-    $docCopy = $withRetry(function () use ($drive, $templateId, $copyMeta) {
-        return $drive->files->copy($templateId, $copyMeta, ['supportsAllDrives' => true, 'fields' => 'id,name,webViewLink']);
-    }, 'copy_template');
-    $docId = $docCopy->getId();
+    if ($useTemplate) {
+        $copyMeta = new \Google\Service\Drive\DriveFile(['name' => $fileBase, 'parents' => [$monthFolder]]);
+        $docCopy = $withRetry(function () use ($drive, $templateId, $copyMeta) {
+            return $drive->files->copy($templateId, $copyMeta, ['supportsAllDrives' => true, 'fields' => 'id,name,webViewLink']);
+        }, 'copy_template');
+        $docId = $docCopy->getId();
 
-    $requests = [];
-    foreach ($vars as $key => $value) {
-        $requests[] = new \Google\Service\Docs\Request([
-            'replaceAllText' => [
-                'containsText' => ['text' => '{{' . $key . '}}', 'matchCase' => true],
-                'replaceText' => (string)$value,
-            ],
+        $requests = [];
+        foreach ($vars as $key => $value) {
+            $requests[] = new \Google\Service\Docs\Request([
+                'replaceAllText' => [
+                    'containsText' => ['text' => '{{' . $key . '}}', 'matchCase' => true],
+                    'replaceText' => (string)$value,
+                ],
+            ]);
+        }
+        $withRetry(function () use ($docs, $docId, $requests) {
+            $docs->documents->batchUpdate($docId, new \Google\Service\Docs\BatchUpdateDocumentRequest(['requests' => $requests]));
+            return true;
+        }, 'docs_replace');
+    } else {
+        $docMeta = new \Google\Service\Docs\Document(['title' => $fileBase]);
+        $createdDoc = $withRetry(function () use ($docs, $docMeta) {
+            return $docs->documents->create($docMeta);
+        }, 'create_plain_doc');
+        $docId = (string)$createdDoc->getDocumentId();
+        if ($docId === '') {
+            throw new RuntimeException('Failed to create fallback document');
+        }
+
+        $plainText = implode("\n", [
+            'Spot Audit Report',
+            'Audit ID: ' . (string)($vars['AUDIT_ID'] ?? ''),
+            'Plant: ' . (string)($vars['PLANT_NAME'] ?? ''),
+            'Vehicle: ' . (string)($vars['VEHICLE_NUMBER'] ?? ''),
+            'Driver: ' . (string)($vars['DRIVER_NAME'] ?? ''),
+            'Assessment Date: ' . (string)($vars['ASSESSMENT_DATE'] ?? ''),
+            'Target Date: ' . (string)($vars['TARGET_DATE'] ?? ''),
+            'Category: ' . (string)($vars['TRUCK_CATEGORY'] ?? ''),
+            'Language: ' . (string)($vars['LANGUAGE_CODE'] ?? ''),
+            'Assessed By: ' . (string)($vars['ASSESSED_BY'] ?? ''),
+            'Created By: ' . (string)($vars['CREATED_BY'] ?? ''),
+            'Total Score: ' . (string)($vars['TOTAL_SCORE'] ?? ''),
+            '',
+            'Highlights:',
+            (string)($vars['HIGHLIGHTS'] ?? ''),
+            '',
+            'Action Plan:',
+            (string)($vars['ACTION_PLAN'] ?? ''),
+            '',
+            'Section Summary:',
+            (string)($vars['SECTION_SUMMARY'] ?? ''),
+            '',
+            'Category Scores:',
+            (string)($vars['CATEGORY_SCORES'] ?? ''),
+            '',
+            'Category Comments:',
+            (string)($vars['CATEGORY_COMMENTS'] ?? ''),
+            '',
+            'Final Action:',
+            (string)($vars['FINAL_ACTION'] ?? ''),
+            '',
+            'Score Comment:',
+            (string)($vars['SCORE_COMMENT'] ?? ''),
         ]);
+
+        $withRetry(function () use ($docs, $docId, $plainText) {
+            $docs->documents->batchUpdate($docId, new \Google\Service\Docs\BatchUpdateDocumentRequest([
+                'requests' => [
+                    new \Google\Service\Docs\Request([
+                        'insertText' => [
+                            'location' => ['index' => 1],
+                            'text' => $plainText,
+                        ],
+                    ]),
+                ],
+            ]));
+            return true;
+        }, 'write_plain_doc');
+
+        $withRetry(function () use ($drive, $docId, $monthFolder, $fileBase) {
+            $current = $drive->files->get($docId, [
+                'supportsAllDrives' => true,
+                'fields' => 'parents',
+            ]);
+            $parents = method_exists($current, 'getParents') ? (array)$current->getParents() : [];
+            $removeParents = implode(',', array_filter($parents, 'is_string'));
+            return $drive->files->update($docId, new \Google\Service\Drive\DriveFile([
+                'name' => $fileBase,
+            ]), [
+                'addParents' => $monthFolder,
+                'removeParents' => $removeParents,
+                'supportsAllDrives' => true,
+                'fields' => 'id',
+            ]);
+        }, 'move_plain_doc');
     }
-    $withRetry(function () use ($docs, $docId, $requests) {
-        $docs->documents->batchUpdate($docId, new \Google\Service\Docs\BatchUpdateDocumentRequest(['requests' => $requests]));
-        return true;
-    }, 'docs_replace');
 
     $pdfBin = $withRetry(function () use ($drive, $docId) {
         return $drive->files->export($docId, 'application/pdf', ['alt' => 'media']);

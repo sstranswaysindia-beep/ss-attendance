@@ -17,6 +17,7 @@ $targetDriverId   = apiSanitizeInt($data['driverId'] ?? null);
 $targetUserId     = apiSanitizeInt($data['userId'] ?? null);
 $actionRaw        = strtolower(trim((string)($data['action'] ?? '')));
 $notesRaw         = trim((string)($data['notes'] ?? ''));
+$attendanceDateRaw = trim((string)($data['attendanceDate'] ?? ''));
 
 if (!$supervisorUserId || !$targetDriverId) {
     apiRespond(400, ['status' => 'error', 'error' => 'supervisorUserId and driverId are required']);
@@ -26,7 +27,26 @@ if (!in_array($actionRaw, ['check_in', 'check_out'], true)) {
     apiRespond(400, ['status' => 'error', 'error' => 'action must be check_in or check_out']);
 }
 
-$eventTime = date('Y-m-d H:i:s');
+$attendanceDate = date('Y-m-d');
+if ($attendanceDateRaw !== '') {
+    $parsedDate = DateTime::createFromFormat('Y-m-d', $attendanceDateRaw);
+    $dateErrors = DateTime::getLastErrors();
+    if (
+        !$parsedDate ||
+        ($dateErrors !== false && (($dateErrors['warning_count'] ?? 0) > 0 || ($dateErrors['error_count'] ?? 0) > 0))
+    ) {
+        apiRespond(400, ['status' => 'error', 'error' => 'attendanceDate must be in YYYY-MM-DD format']);
+    }
+    $attendanceDate = $parsedDate->format('Y-m-d');
+}
+
+$today = date('Y-m-d');
+if ($attendanceDate > $today) {
+    apiRespond(400, ['status' => 'error', 'error' => 'Future attendance dates are not allowed']);
+}
+
+$eventDateTime = new DateTimeImmutable($attendanceDate . ' ' . date('H:i:s'));
+$eventTime = $eventDateTime->format('Y-m-d H:i:s');
 
 try {
     // Validate supervisor
@@ -118,18 +138,30 @@ try {
         apiRespond(403, ['status' => 'error', 'error' => 'Proxy attendance is disabled for this driver']);
     }
 
-    // Determine current open attendance
+    // Determine current open attendance for the selected date
     $openStmt = $conn->prepare(
-        'SELECT id, plant_id, vehicle_id, assignment_id, notes
+        'SELECT id, plant_id, vehicle_id, assignment_id, notes, in_time
            FROM attendance
-          WHERE driver_id = ? AND out_time IS NULL
+          WHERE driver_id = ? AND out_time IS NULL AND DATE(in_time) = ?
           ORDER BY in_time DESC
           LIMIT 1'
     );
-    $openStmt->bind_param('i', $targetDriverId);
+    $openStmt->bind_param('is', $targetDriverId, $attendanceDate);
     $openStmt->execute();
     $openRow = $openStmt->get_result()->fetch_assoc();
     $openStmt->close();
+
+    $dateRecordStmt = $conn->prepare(
+        'SELECT id, in_time, out_time
+           FROM attendance
+          WHERE driver_id = ? AND DATE(in_time) = ?
+          ORDER BY in_time DESC
+          LIMIT 1'
+    );
+    $dateRecordStmt->bind_param('is', $targetDriverId, $attendanceDate);
+    $dateRecordStmt->execute();
+    $dateRecordRow = $dateRecordStmt->get_result()->fetch_assoc();
+    $dateRecordStmt->close();
 
     $proxyNote = sprintf(
         'Proxy %s by %s (#%d)',
@@ -140,8 +172,28 @@ try {
     $combinedNotes = trim($notesRaw) !== '' ? ($notesRaw . ' | ' . $proxyNote) : $proxyNote;
 
     if ($actionRaw === 'check_in') {
+        if ($dateRecordRow && !empty($dateRecordRow['out_time'])) {
+            apiRespond(409, ['status' => 'error', 'error' => 'Attendance is already completed for the selected date']);
+        }
+
         if ($openRow) {
-            apiRespond(409, ['status' => 'error', 'error' => 'Driver already has an open attendance record']);
+            apiRespond(409, ['status' => 'error', 'error' => 'Driver already has an open attendance record for the selected date']);
+        }
+
+        $anyOpenStmt = $conn->prepare(
+            'SELECT id
+               FROM attendance
+              WHERE driver_id = ? AND out_time IS NULL
+              ORDER BY in_time DESC
+              LIMIT 1'
+        );
+        $anyOpenStmt->bind_param('i', $targetDriverId);
+        $anyOpenStmt->execute();
+        $anyOpenRow = $anyOpenStmt->get_result()->fetch_assoc();
+        $anyOpenStmt->close();
+
+        if ($anyOpenRow) {
+            apiRespond(409, ['status' => 'error', 'error' => 'Driver already has an open attendance record on another date. Complete that check-out first.']);
         }
 
         $assignmentStmt = $conn->prepare(
@@ -210,13 +262,22 @@ try {
             'status' => 'ok',
             'attendanceId' => (int)$attendanceId,
             'action' => 'check_in',
+            'attendanceDate' => $attendanceDate,
             'timestamp' => $eventTime,
         ]);
     }
 
     // Handle check-out
     if (!$openRow) {
-        apiRespond(404, ['status' => 'error', 'error' => 'No open attendance record to close']);
+        apiRespond(404, ['status' => 'error', 'error' => 'No open attendance record found for the selected date']);
+    }
+
+    if (!empty($openRow['in_time'])) {
+        $inDateTime = new DateTimeImmutable((string) $openRow['in_time']);
+        if ($eventDateTime <= $inDateTime) {
+            $eventDateTime = $inDateTime->modify('+1 minute');
+            $eventTime = $eventDateTime->format('Y-m-d H:i:s');
+        }
     }
 
     $existingNotes = trim((string)($openRow['notes'] ?? ''));
@@ -249,6 +310,7 @@ try {
         'status' => 'ok',
         'attendanceId' => $attendanceId,
         'action' => 'check_out',
+        'attendanceDate' => $attendanceDate,
         'timestamp' => $eventTime,
     ]);
 } catch (Throwable $error) {

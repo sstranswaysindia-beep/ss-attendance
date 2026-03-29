@@ -7,24 +7,33 @@ import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'dart:async';
+import 'package:geolocator/geolocator.dart';
 
 import 'core/models/app_user.dart';
+import 'core/navigation/app_route_observer.dart';
 import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
+import 'core/services/background_location_disclosure_service.dart';
 import 'core/services/biometric_unlock_service.dart';
 import 'core/services/training_flag_service.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/session_event_bus.dart';
+import 'core/services/gps_ping_repository.dart';
+import 'core/services/gps_ping_background_scheduler.dart';
+import 'core/services/gps_ping_service.dart';
 import 'firebase_options.dart';
 import 'features/auth/login_screen.dart';
+import 'features/auth/background_location_disclosure_screen.dart';
 import 'features/auth/biometric_lock_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/driver_dashboard_screen.dart';
 import 'features/dashboard/supervisor_dashboard_screen.dart';
+import 'features/referral/referral_entry_screen.dart';
 import 'features/safety/training/training_screen.dart';
 import 'core/services/safety_repository.dart';
 import 'core/widgets/in_app_notification_banner.dart';
 import 'core/widgets/app_loader.dart';
+import 'core/widgets/location_permission_sheet.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,6 +59,7 @@ Future<void> main() async {
 
   // Initialize notification service
   await NotificationService().initialize();
+  await GpsPingBackgroundScheduler.initialize();
 
   runApp(const SSTranswaysApp());
 }
@@ -69,7 +79,9 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
   bool _forcingTrainingNav = false;
   late final StreamSubscription<void> _logoutSub;
+  late final StreamSubscription<GpsPingRefreshRequest> _gpsPingRefreshSub;
   final BiometricUnlockService _biometricService = BiometricUnlockService();
+  final Set<String> _gpsPingRefreshInFlight = <String>{};
   bool _biometricPromptActive = false;
   DateTime? _lastBiometricUnlockAt;
 
@@ -80,19 +92,26 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     _logoutSub = SessionEventBus.onLogoutRequested.listen((_) {
       _handleLogout();
     });
+    _gpsPingRefreshSub = NotificationService().gpsPingRefreshRequests.listen((
+      request,
+    ) {
+      unawaited(_handleGpsPingRefreshRequest(request));
+    });
     _loadSavedUser();
+    unawaited(_drainPendingGpsPingRefreshRequests());
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _logoutSub.cancel();
+    _gpsPingRefreshSub.cancel();
     super.dispose();
   }
 
   Future<void> _loadSavedUser() async {
+    final savedUser = await AuthStorageService.getUser();
     try {
-      final savedUser = await AuthStorageService.getUser();
       if (savedUser != null) {
         await _authRepository.syncDeviceInfo(
           user: savedUser,
@@ -100,6 +119,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
         );
       }
       final mergedUser = await _mergeTrainingFlag(savedUser);
+      await _applyBackgroundGpsPolicy(mergedUser);
       if (mounted) {
         setState(() {
           _currentUser = mergedUser;
@@ -110,7 +130,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     } catch (e) {
       if (mounted) {
         setState(() {
-          _currentUser = null;
+          _currentUser = savedUser;
           _isLoading = false;
         });
       }
@@ -118,26 +138,92 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   }
 
   void _handleLogin(AppUser user) async {
-    await _authRepository.syncDeviceInfo(user: user, appVariant: 'driver');
-    final mergedUser = (await _mergeTrainingFlag(user)) ?? user;
-    await AuthStorageService.saveUser(mergedUser);
+    var resolvedUser = user;
+    try {
+      await _authRepository.syncDeviceInfo(user: user, appVariant: 'driver');
+      resolvedUser = (await _mergeTrainingFlag(user)) ?? user;
+      await _applyBackgroundGpsPolicy(resolvedUser);
+    } catch (_) {
+      resolvedUser = user;
+    }
+    await AuthStorageService.saveUser(resolvedUser);
     if (mounted) {
-      setState(() => _currentUser = mergedUser);
+      setState(() => _currentUser = resolvedUser);
     }
     _forceTrainingIfRequired();
   }
 
   void _handleLogout() async {
     await AuthStorageService.clearUser();
+    await GpsPingBackgroundScheduler.cancel();
+    NotificationService().unbindInboxUser();
     if (mounted) {
       setState(() => _currentUser = null);
     }
+  }
+
+  Future<void> _drainPendingGpsPingRefreshRequests() async {
+    final pending = NotificationService().takePendingGpsPingRefreshRequests();
+    for (final request in pending) {
+      await _handleGpsPingRefreshRequest(request);
+    }
+  }
+
+  Future<void> _handleGpsPingRefreshRequest(
+    GpsPingRefreshRequest request,
+  ) async {
+    if (_gpsPingRefreshInFlight.contains(request.requestId)) {
+      return;
+    }
+
+    _gpsPingRefreshInFlight.add(request.requestId);
+    try {
+      final user = _currentUser ?? await AuthStorageService.getUser();
+      if (user == null || !_matchesGpsPingRefreshRequest(user, request)) {
+        return;
+      }
+
+      final alreadyHandled =
+          await NotificationService.hasHandledGpsPingRefreshRequest(
+            user.id,
+            request.requestId,
+          );
+      if (alreadyHandled) {
+        return;
+      }
+
+      final gpsPingService = GpsPingService(
+        user: user,
+        repository: GpsPingRepository(),
+      );
+      final sent = await gpsPingService.sendImmediatePing(
+        source: 'mobile_fg_push',
+        bypassThrottle: true,
+      );
+      if (sent) {
+        await NotificationService.markGpsPingRefreshRequestHandled(
+          user.id,
+          request.requestId,
+        );
+      }
+    } finally {
+      _gpsPingRefreshInFlight.remove(request.requestId);
+    }
+  }
+
+  bool _matchesGpsPingRefreshRequest(
+    AppUser user,
+    GpsPingRefreshRequest request,
+  ) {
+    return NotificationService.matchesGpsPingRefreshRequest(user, request);
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      await NotificationService().hydratePendingGpsPingRefreshRequests();
+      await _drainPendingGpsPingRefreshRequests();
       await _maybePromptBiometricUnlock();
       await _refreshTrainingRequirement();
       _forceTrainingIfRequired();
@@ -149,6 +235,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
       return;
     }
     if (_currentUser == null) return;
+    if (BiometricUnlockService.isPromptTemporarilySuppressed) return;
     if (_biometricPromptActive) return;
     if (_lastBiometricUnlockAt != null) {
       final elapsed = DateTime.now().difference(_lastBiometricUnlockAt!);
@@ -164,13 +251,13 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     }
 
     _biometricPromptActive = true;
-    final context = _navKey.currentContext;
-    if (context == null) {
+    final navigator = _navKey.currentState;
+    if (navigator == null) {
       _biometricPromptActive = false;
       return;
     }
 
-    final unlocked = await Navigator.of(context).push<bool>(
+    final unlocked = await navigator.push<bool>(
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => BiometricLockScreen(service: _biometricService),
@@ -190,6 +277,86 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     if (merged != null && merged != _currentUser) {
       setState(() => _currentUser = merged);
     }
+  }
+
+  Future<void> _applyBackgroundGpsPolicy(AppUser? user) async {
+    final allowed = await _ensureBackgroundLocationConsentAndPermission(user);
+    if (allowed) {
+      await GpsPingBackgroundScheduler.scheduleForUser(user);
+      return;
+    }
+    await GpsPingBackgroundScheduler.cancel();
+  }
+
+  Future<bool> _ensureBackgroundLocationConsentAndPermission(
+    AppUser? user,
+  ) async {
+    if (user == null ||
+        kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android) {
+      return false;
+    }
+
+    final driverId = user.driverId;
+    if (driverId == null || driverId.isEmpty) {
+      return false;
+    }
+
+    final alreadyAccepted =
+        await BackgroundLocationDisclosureService.isAccepted();
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.always && alreadyAccepted) {
+      return true;
+    }
+
+    if (!alreadyAccepted) {
+      final navigator = await _waitForNavigatorState();
+      if (!mounted || navigator == null) {
+        return false;
+      }
+      final accepted = await navigator.push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const BackgroundLocationDisclosureScreen(),
+        ),
+      );
+      if (accepted != true) {
+        return false;
+      }
+      await BackgroundLocationDisclosureService.markAccepted();
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.always) {
+      return true;
+    }
+
+    final navigator = await _waitForNavigatorState();
+    if (!mounted || navigator == null) {
+      return false;
+    }
+
+    // Show the premium bottom-sheet permission prompt
+    final granted = await LocationPermissionSheet.show(navigator.context);
+    if (granted) {
+      return true;
+    }
+
+    // Re-check in case the user toggled the permission in settings
+    permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.always;
+  }
+
+  Future<NavigatorState?> _waitForNavigatorState() async {
+    for (var i = 0; i < 25; i++) {
+      final nav = _navKey.currentState;
+      if (nav != null) return nav;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    return null;
   }
 
   Future<AppUser?> _mergeTrainingFlag(AppUser? user) async {
@@ -317,6 +484,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
         debugShowCheckedModeBanner: false,
         title: 'SS Transways India',
         navigatorKey: _navKey,
+        navigatorObservers: [appRouteObserver],
         theme: baseTheme.copyWith(
           textTheme: textTheme,
           appBarTheme: baseTheme.appBarTheme.copyWith(
@@ -341,20 +509,25 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
           }
           final mediaQuery = MediaQuery.of(context);
 
+          // Lock text scaling, bold text, and device pixel ratio so that
+          // Android system font-size / display-size / bold-text changes
+          // do not affect the app layout at all.
+          final fixedData = mediaQuery.copyWith(
+            textScaler: const TextScaler.linear(1.0),
+            boldText: false,
+            devicePixelRatio: mediaQuery.devicePixelRatio.clamp(1.0, 3.5),
+          );
+
           return MediaQuery(
-            // Lock text scaling across all platforms so system display/font size
-            // changes do not inflate UI text sizes.
-            data: mediaQuery.copyWith(
-              textScaler: const TextScaler.linear(1.0),
-            ),
+            data: fixedData,
             child: InAppNotificationBannerHost(
-              hideBell: child is _LoginRoute,
+              hideBell: _currentUser == null,
               child: child,
             ),
           );
         },
         home: _isLoading
-            ? const Scaffold(body: Center(child: AppLoader()))
+            ? const Scaffold(body: AppStartupLoader())
             : _currentUser == null
             ? _LoginRoute(
                 child: LoginScreen(onLogin: _handleLogin, screenTitle: 'Login'),
@@ -388,6 +561,8 @@ class _HomeSwitchboard extends StatelessWidget {
         return SupervisorDashboardScreen(user: user, onLogout: onLogout);
       case UserRole.admin:
         return AdminDashboardScreen(user: user, onLogout: onLogout);
+      case UserRole.referral:
+        return ReferralEntryScreen(user: user, onLogout: onLogout);
     }
   }
 }

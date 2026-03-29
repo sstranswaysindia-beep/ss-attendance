@@ -1,6 +1,26 @@
 <?php
 declare(strict_types=1);
 
+@ini_set('display_errors', '0');
+@ini_set('log_errors', '1');
+if (function_exists('ob_start')) { @ob_start(); }
+
+// Ensure fatal errors return JSON instead of HTML
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if (!$e) {
+        return;
+    }
+    $fatalTypes = [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR];
+    if (!in_array($e['type'], $fatalTypes, true)) {
+        return;
+    }
+    apiRespond(500, [
+        'status' => 'error',
+        'error' => 'Server error: ' . ($e['message'] ?? 'Fatal error'),
+    ]);
+});
+
 function apiSendCorsHeaders(): void {
     if (headers_sent()) {
         return;
@@ -39,6 +59,9 @@ if (!$configLoaded) {
 }
 
 function apiRespond(int $status, array $payload): void {
+    if (function_exists('ob_get_level')) {
+        while (ob_get_level() > 0) { @ob_end_clean(); }
+    }
     if (!headers_sent()) {
         apiSendCorsHeaders();
         http_response_code($status);

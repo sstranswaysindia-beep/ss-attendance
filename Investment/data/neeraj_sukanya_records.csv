@@ -1,0 +1,11 @@
+s_no,value_date,transaction_date,cheque_number,transaction_remarks,withdrawal_amount_inr,deposit_amount_inr,interest_deposited_inr,balance_inr
+1,6/17/2021,6/17/2021,-,"TRF FROM 000101623251_SR752975001",-,1000,-,1000
+2,28/03/2022,28/03/2022,-,Transfer,-,149000,-,150000
+3,31/03/2022,31/03/2022,-,Interest,-,-,57,150057
+4,5/4/2022,5/4/2022,-,Transfer,-,150000,-,300057
+5,3/31/2023,3/31/2023,-,Transfer,-,-,22804,322861
+6,4/3/2023,4/3/2023,-,Transfer,-,150000,-,472861
+7,3/31/2024,3/31/2024,-,Transfer,-,-,38065,510926
+8,4/2/2024,4/2/2024,-,Transfer,-,150000,-,660926
+9,31/03/2025,31/03/2025,-,"Interest credited",-,-,54196,715122
+10,02/04/2025,02/04/2025,-,Transfer,-,150000,-,865122

@@ -44,7 +44,10 @@ class _TasksScreenState extends State<TasksScreen> {
       final response = await http.post(
         Uri.parse(_tasksUrl),
         headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({'userId': int.tryParse(widget.user.id), 'limit': 100}),
+        body: jsonEncode({
+          'userId': int.tryParse(widget.user.id),
+          'limit': 100,
+        }),
       );
       final body = utf8.decode(response.bodyBytes);
       final data = jsonDecode(body) as Map<String, dynamic>;
@@ -82,6 +85,7 @@ class _TasksScreenState extends State<TasksScreen> {
   Future<void> _updateTaskStatus({
     required int taskId,
     required String status,
+    String? taskerRemarks,
   }) async {
     if (_updatingTaskIds.contains(taskId)) return;
     setState(() => _updatingTaskIds.add(taskId));
@@ -93,6 +97,7 @@ class _TasksScreenState extends State<TasksScreen> {
           'taskId': taskId,
           'userId': int.tryParse(widget.user.id),
           'status': status,
+          if (taskerRemarks != null) 'taskerRemarks': taskerRemarks,
         }),
       );
       final body = utf8.decode(response.bodyBytes);
@@ -125,12 +130,20 @@ class _TasksScreenState extends State<TasksScreen> {
     final normalized = _normalizeStatus(status);
 
     if (direction == DismissDirection.endToStart) {
-      if (normalized == 'open') {
+      if (normalized == 'open' || normalized == 'pending') {
         await _updateTaskStatus(taskId: taskId, status: 'In-Progress');
         return false;
       }
       if (normalized == 'in-progress') {
-        await _updateTaskStatus(taskId: taskId, status: 'Closed');
+        final completionNote = await _askCompletionNote();
+        if (!mounted || completionNote == null) {
+          return false;
+        }
+        await _updateTaskStatus(
+          taskId: taskId,
+          status: 'Closed',
+          taskerRemarks: completionNote,
+        );
         return false;
       }
       showAppToast(context, 'Task cannot be updated.', isError: true);
@@ -141,11 +154,60 @@ class _TasksScreenState extends State<TasksScreen> {
   }
 
   String _normalizeStatus(String status) {
-    final normalized = status
+    var normalized = status
         .trim()
         .toLowerCase()
+        .replaceAll('_', '-')
         .replaceAll(RegExp(r'\s+'), '-');
+    if (normalized == 'inprogress') {
+      normalized = 'in-progress';
+    }
     return normalized.isEmpty ? 'pending' : normalized;
+  }
+
+  Future<String?> _askCompletionNote() async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            backgroundColor: Colors.white,
+            title: const Text('Completion Note'),
+            content: TextField(
+              controller: controller,
+              minLines: 2,
+              maxLines: 4,
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Enter completion note',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(''),
+                child: const Text('Skip'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  final note = controller.text.trim();
+                  Navigator.of(dialogContext).pop(note);
+                },
+                child: const Text('Completed'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   String _statusLabel(String status) {
@@ -190,7 +252,11 @@ class _TasksScreenState extends State<TasksScreen> {
       final endDateOnly = DateTime(endDate.year, endDate.month, endDate.day);
       final diff = endDateOnly.difference(todayDate).inDays;
       if (diff == 0) {
-        return const _PendingInfo(label: 'Due', value: 'Today', isOverdue: false);
+        return const _PendingInfo(
+          label: 'Due',
+          value: 'Today',
+          isOverdue: false,
+        );
       }
       if (diff > 0) {
         return _PendingInfo(
@@ -210,8 +276,11 @@ class _TasksScreenState extends State<TasksScreen> {
       if (taskDateObj == null) return null;
       final today = DateTime.now();
       final todayDate = DateTime(today.year, today.month, today.day);
-      final taskDateOnly =
-          DateTime(taskDateObj.year, taskDateObj.month, taskDateObj.day);
+      final taskDateOnly = DateTime(
+        taskDateObj.year,
+        taskDateObj.month,
+        taskDateObj.day,
+      );
       final diff = taskDateOnly.difference(todayDate).inDays;
       final days = diff < 0 ? diff.abs() : diff;
       return _PendingInfo(
@@ -232,13 +301,12 @@ class _TasksScreenState extends State<TasksScreen> {
     final scheduledEnd = (task['scheduled_end_date'] ?? '').toString();
     final desc = (task['task_description'] ?? '').toString();
     final priority = (task['priority'] ?? '').toString();
-    final vehicleNo =
-        (task['vehicle_no'] ?? task['vehicle_number'] ?? '').toString();
-    final location = (task['location'] ?? '').toString();
-    final assignedBy = (task['assigned_by_label'] ??
-            task['assigned_by_username'] ??
-            '')
+    final vehicleNo = (task['vehicle_no'] ?? task['vehicle_number'] ?? '')
         .toString();
+    final location = (task['location'] ?? '').toString();
+    final assignedBy =
+        (task['assigned_by_label'] ?? task['assigned_by_username'] ?? '')
+            .toString();
 
     final pendingLabel = _pendingLabel(
       status: status,
@@ -248,9 +316,12 @@ class _TasksScreenState extends State<TasksScreen> {
 
     final isInProgress = _normalizeStatus(status) == 'in-progress';
     final swipeLabel = isInProgress ? 'Swipe: Completed' : 'Swipe: In-Progress';
-    final swipeColor = isInProgress ? Colors.green.shade100 : Colors.amber.shade100;
-    final swipeTextColor =
-        isInProgress ? Colors.green.shade800 : Colors.amber.shade800;
+    final swipeColor = isInProgress
+        ? Colors.green.shade100
+        : Colors.amber.shade100;
+    final swipeTextColor = isInProgress
+        ? Colors.green.shade800
+        : Colors.amber.shade800;
 
     return Dismissible(
       key: ValueKey('task-${taskIdValue ?? 'na'}'),
@@ -300,10 +371,8 @@ class _TasksScreenState extends State<TasksScreen> {
           ],
         ),
       ),
-      confirmDismiss: (direction) => _handleSwipe(
-        direction: direction,
-        task: task,
-      ),
+      confirmDismiss: (direction) =>
+          _handleSwipe(direction: direction, task: task),
       child: Card(
         elevation: 0,
         color: statusColor.withOpacity(0.06),
@@ -318,18 +387,18 @@ class _TasksScreenState extends State<TasksScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (scheduledEnd.isNotEmpty)
-                        Text(
-                          'Scheduled End: $scheduledEnd',
-                          style: TextStyle(
-                            color: Colors.orange.shade700,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (scheduledEnd.isNotEmpty)
+                          Text(
+                            'Scheduled End: $scheduledEnd',
+                            style: TextStyle(
+                              color: Colors.orange.shade700,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -383,8 +452,7 @@ class _TasksScreenState extends State<TasksScreen> {
                       label: 'Assigned By',
                       value: assignedBy,
                     ),
-                  if (pendingLabel != null)
-                    _PendingMeta(info: pendingLabel),
+                  if (pendingLabel != null) _PendingMeta(info: pendingLabel),
                 ],
               ),
               if (desc.isNotEmpty) ...[
@@ -429,58 +497,51 @@ class _TasksScreenState extends State<TasksScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_error!, style: TextStyle(color: Colors.red.shade700)),
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: _loadTasks,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : _tasks.isEmpty
+          ? Center(
+              child: Text(
+                'No tasks assigned.',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Row(
                     children: [
-                      Text(
-                        _error!,
-                        style: TextStyle(color: Colors.red.shade700),
-                      ),
-                      const SizedBox(height: 12),
-                      ElevatedButton(
-                        onPressed: _loadTasks,
-                        child: const Text('Retry'),
+                      Icon(Icons.swipe, color: Colors.grey.shade600, size: 16),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Swipe left to move Open → In-Progress → Completed.',
+                          style: TextStyle(
+                            color: Colors.grey.shade600,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ],
                   ),
-                )
-              : _tasks.isEmpty
-                  ? Center(
-                      child: Text(
-                        'No tasks assigned.',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.all(16),
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.swipe,
-                                color: Colors.grey.shade600,
-                                size: 16,
-                              ),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  'Swipe left to move Open → In-Progress → Completed.',
-                                  style: TextStyle(
-                                    color: Colors.grey.shade600,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        ..._tasks.map(_buildTaskCard),
-                      ],
-                    ),
+                ),
+                ..._tasks.map(_buildTaskCard),
+              ],
+            ),
     );
   }
 }
@@ -514,10 +575,7 @@ class _TaskMeta extends StatelessWidget {
         Flexible(
           child: Text(
             value,
-            style: TextStyle(
-              color: Colors.blueGrey.shade900,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: Colors.blueGrey.shade900, fontSize: 12),
           ),
         ),
       ],
@@ -558,9 +616,10 @@ class _PendingMetaState extends State<_PendingMeta>
       vsync: this,
       duration: const Duration(milliseconds: 1100),
     );
-    _scale = Tween<double>(begin: 1.0, end: 1.08).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 1.08,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
     if (widget.info.isOverdue) {
       _controller.repeat(reverse: true);
     }
@@ -585,10 +644,12 @@ class _PendingMetaState extends State<_PendingMeta>
 
   @override
   Widget build(BuildContext context) {
-    final labelColor =
-        widget.info.isOverdue ? Colors.red.shade700 : Colors.green.shade700;
-    final iconColor =
-        widget.info.isOverdue ? Colors.red.shade700 : Colors.green.shade700;
+    final labelColor = widget.info.isOverdue
+        ? Colors.red.shade700
+        : Colors.green.shade700;
+    final iconColor = widget.info.isOverdue
+        ? Colors.red.shade700
+        : Colors.green.shade700;
 
     return ScaleTransition(
       scale: _scale,
@@ -608,10 +669,7 @@ class _PendingMetaState extends State<_PendingMeta>
           Flexible(
             child: Text(
               widget.info.value,
-              style: TextStyle(
-                color: labelColor,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: labelColor, fontSize: 12),
             ),
           ),
         ],

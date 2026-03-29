@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,18 +15,19 @@ import '../../core/models/trip_vehicle.dart';
 import '../../core/services/gps_service.dart';
 import '../../core/services/local_storage_service.dart';
 import '../../core/services/trip_repository.dart';
-import '../../core/widgets/app_gradient_background.dart';
 import '../../core/widgets/app_toast.dart';
 import '../../core/widgets/app_loader.dart';
 import '../../core/widgets/glowing_badge.dart';
 import '../../core/services/notification_service.dart';
+import 'trip_customer_manage_screen.dart';
 
 const Color _adminPrimaryColor = Color(0xFF00296B);
 
 class TripScreen extends StatefulWidget {
-  const TripScreen({required this.user, super.key});
+  const TripScreen({required this.user, this.onBack, super.key});
 
   final AppUser user;
+  final VoidCallback? onBack;
 
   @override
   State<TripScreen> createState() => _TripScreenState();
@@ -63,11 +65,13 @@ class _TripScreenState extends State<TripScreen> {
   List<TripHelper> _helpersForPlant = const <TripHelper>[];
   List<TripHelper> _selectedHelpers = const <TripHelper>[];
   List<String> _globalCustomerSuggestions = const <String>[];
+  List<String> _recentTripCustomerSuggestions = const <String>[];
   List<String> _customerSuggestions = const <String>[];
   List<String> _customerNames = const <String>[];
   late final TextEditingController _startDateController;
   final TextEditingController _startKmController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+  final TextEditingController _tripSheetNoController = TextEditingController();
   final TextEditingController _customerController = TextEditingController();
   final TextEditingController _gatePassController = TextEditingController();
   final TextEditingController _cylInController = TextEditingController();
@@ -95,6 +99,31 @@ class _TripScreenState extends State<TripScreen> {
   int? _lastSuggestedStartKm;
   String? _savedVehicleId;
   bool _requestedBellHide = false;
+
+  void _handleBack() {
+    final onBack = widget.onBack;
+    if (onBack != null) {
+      onBack();
+      return;
+    }
+
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
+    }
+  }
+
+  Future<void> _openCustomerManager() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (context) => TripCustomerManageScreen(user: widget.user),
+      ),
+    );
+
+    if (changed == true && mounted) {
+      await _loadMeta();
+    }
+  }
 
   @override
   void initState() {
@@ -142,6 +171,7 @@ class _TripScreenState extends State<TripScreen> {
     _startDateController.dispose();
     _startKmController.dispose();
     _noteController.dispose();
+    _tripSheetNoController.dispose();
     _customerController.dispose();
     _gatePassController.dispose();
     _cylInController.dispose();
@@ -240,6 +270,10 @@ class _TripScreenState extends State<TripScreen> {
           trips: adjustedTrips,
           plants: response.plants,
         );
+        _recentTripCustomerSuggestions = _collectRecentTripCustomers(
+          adjustedTrips,
+        );
+        _customerSuggestions = _buildCustomerSuggestions(_selectedVehicle);
       });
     } on TripFailure catch (error) {
       if (!mounted || currentRequestId != _loadTripsRequestId) {
@@ -269,6 +303,8 @@ class _TripScreenState extends State<TripScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.white,
         title: const Text('Delete Trip'),
         content: Text(
           'Are you sure you want to delete trip #${trip.id}? This action cannot be undone.',
@@ -316,10 +352,20 @@ class _TripScreenState extends State<TripScreen> {
 
   List<String> _buildCustomerSuggestions(
     TripVehicle? vehicle, {
-    int limit = 12,
+    int maxPool = 5000,
   }) {
     final results = <String>[];
     final seen = <String>{};
+    for (final name in _recentTripCustomerSuggestions) {
+      final trimmed = name.trim();
+      if (trimmed.isEmpty) {
+        continue;
+      }
+      final key = trimmed.toLowerCase();
+      if (seen.add(key)) {
+        results.add(trimmed);
+      }
+    }
     for (final name in _globalCustomerSuggestions) {
       final trimmed = name.trim();
       if (trimmed.isEmpty) {
@@ -328,6 +374,38 @@ class _TripScreenState extends State<TripScreen> {
       final key = trimmed.toLowerCase();
       if (seen.add(key)) {
         results.add(trimmed);
+      }
+    }
+    if (results.length > maxPool) {
+      return results.sublist(0, maxPool);
+    }
+    return results;
+  }
+
+  List<String> _collectRecentTripCustomers(
+    List<TripRecord> trips, {
+    int limit = 12,
+  }) {
+    final seen = <String>{};
+    final results = <String>[];
+    for (final trip in trips) {
+      final rawCustomers = trip.customers;
+      if (rawCustomers == null || rawCustomers.trim().isEmpty) {
+        continue;
+      }
+      final names = rawCustomers.split(',');
+      for (final name in names) {
+        final trimmed = name.trim();
+        if (trimmed.isEmpty) {
+          continue;
+        }
+        final key = trimmed.toLowerCase();
+        if (seen.add(key)) {
+          results.add(trimmed);
+          if (results.length >= limit) {
+            return results;
+          }
+        }
       }
     }
     return results;
@@ -345,6 +423,10 @@ class _TripScreenState extends State<TripScreen> {
       return (code: code, name: name.isNotEmpty ? name : trimmed);
     }
     return (code: '', name: trimmed);
+  }
+
+  String _normalizeCustomerSearch(String input) {
+    return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
   }
 
   List<String> _mergeRecentCustomerNames(
@@ -385,7 +467,7 @@ class _TripScreenState extends State<TripScreen> {
   List<String> _mergeGlobalCustomerNames(
     List<String> existing,
     Iterable<String> additions, {
-    int limit = 30,
+    int limit = 5000,
   }) {
     final merged = _mergeRecentCustomerNames(existing, additions, limit: limit);
     return merged;
@@ -813,11 +895,9 @@ class _TripScreenState extends State<TripScreen> {
                           }
                           return Theme(
                             data: Theme.of(context).copyWith(
-                              colorScheme: Theme.of(context)
-                                  .colorScheme
-                                  .copyWith(
-                                    surface: Colors.white,
-                                  ),
+                              colorScheme: Theme.of(
+                                context,
+                              ).colorScheme.copyWith(surface: Colors.white),
                               dialogBackgroundColor: Colors.white,
                             ),
                             child: child,
@@ -1040,8 +1120,10 @@ class _TripScreenState extends State<TripScreen> {
         );
         _selectedVehicle = updatedVehicle;
         _vehicles = _vehicles
-            .map((vehicle) =>
-                vehicle.id == updatedVehicle.id ? updatedVehicle : vehicle)
+            .map(
+              (vehicle) =>
+                  vehicle.id == updatedVehicle.id ? updatedVehicle : vehicle,
+            )
             .toList(growable: false);
       }
 
@@ -1497,12 +1579,40 @@ class _TripScreenState extends State<TripScreen> {
     }
     String? matchedName;
     final query = value.toLowerCase();
+    final normalizedQuery = _normalizeCustomerSearch(query);
     for (final suggestion in _customerSuggestions) {
       final parsed = _parseCustomerSuggestion(suggestion);
       if (parsed.name.toLowerCase() == query ||
           (parsed.code.isNotEmpty && parsed.code.toLowerCase() == query)) {
         matchedName = parsed.name;
         break;
+      }
+    }
+    if (matchedName == null) {
+      for (final suggestion in _customerSuggestions) {
+        final parsed = _parseCustomerSuggestion(suggestion);
+        final name = parsed.name.toLowerCase();
+        final code = parsed.code.toLowerCase();
+        final full = suggestion.toLowerCase();
+        if ((code.isNotEmpty &&
+                (code.startsWith(query) || code.contains(query))) ||
+            name.contains(query) ||
+            full.contains(query)) {
+          matchedName = parsed.name;
+          break;
+        }
+
+        final normalizedCode = _normalizeCustomerSearch(code);
+        final normalizedName = _normalizeCustomerSearch(name);
+        final normalizedFull = _normalizeCustomerSearch(full);
+        if (normalizedQuery.isNotEmpty &&
+            ((normalizedCode.isNotEmpty &&
+                    normalizedCode.contains(normalizedQuery)) ||
+                normalizedName.contains(normalizedQuery) ||
+                normalizedFull.contains(normalizedQuery))) {
+          matchedName = parsed.name;
+          break;
+        }
       }
     }
     if (matchedName == null) {
@@ -1531,8 +1641,9 @@ class _TripScreenState extends State<TripScreen> {
         }
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme:
-                Theme.of(context).colorScheme.copyWith(surface: Colors.white),
+            colorScheme: Theme.of(
+              context,
+            ).colorScheme.copyWith(surface: Colors.white),
             dialogBackgroundColor: Colors.white,
           ),
           child: child,
@@ -1583,9 +1694,15 @@ class _TripScreenState extends State<TripScreen> {
       return;
     }
 
+    final tripSheetNo = _tripSheetNoController.text.trim();
+    if (tripSheetNo.isEmpty) {
+      showAppToast(context, 'Enter Trip Sheet No.', isError: true);
+      return;
+    }
+
     final isInoxPlant = _isPlantInox(_selectedPlant);
     final baseNote = _noteController.text.trim();
-    String submissionNote = baseNote;
+    String submissionNote = 'Trip No - $tripSheetNo';
     if (isInoxPlant) {
       final gatePass = _gatePassController.text.trim();
       final cylIn = _cylInController.text.trim();
@@ -1601,10 +1718,12 @@ class _TripScreenState extends State<TripScreen> {
       }
 
       submissionNote =
-          'Gate Pass No $gatePass - Cyl In $cylIn - Cyl Out $cylOut';
-      if (baseNote.isNotEmpty) {
-        submissionNote = '$submissionNote - $baseNote';
-      }
+          '$submissionNote, Gate Pass No $gatePass - Cyl In $cylIn - Cyl Out $cylOut';
+    } else {
+      submissionNote = 'Trip No - $tripSheetNo';
+    }
+    if (baseNote.isNotEmpty) {
+      submissionNote = '$submissionNote, $baseNote';
     }
 
     final newCustomers = List<String>.from(_customerNames);
@@ -1641,6 +1760,7 @@ class _TripScreenState extends State<TripScreen> {
 
       _customerController.clear();
       _noteController.clear();
+      _tripSheetNoController.clear();
       _startKmController.clear();
       _gatePassController.clear();
       _cylInController.clear();
@@ -1724,172 +1844,278 @@ class _TripScreenState extends State<TripScreen> {
   Widget build(BuildContext context) {
     final overview = _overview;
     final bool showOngoingCard = _hasOngoingTrip && _ongoingTrip != null;
+    final theme = Theme.of(context);
+    final topInset = MediaQuery.of(context).padding.top;
+    const heroBaseHeight = 200.0;
+    const heroCardOverlap = 96.0;
+    const plantVehicleCardTopPadding = 40.0;
+    final heroTotalHeight = topInset + heroBaseHeight;
+    final plantVehicleCardTop =
+        (heroTotalHeight - heroCardOverlap + plantVehicleCardTopPadding).clamp(
+          0.0,
+          9999.0,
+        );
+    final driverLabel = _selectedDrivers.isEmpty
+        ? 'Select driver'
+        : _selectedDrivers.map((d) => d.name).join(', ');
+    final helperLabel = _selectedHelpers.isEmpty
+        ? 'Select helper'
+        : _selectedHelpers.map((h) => h.name).join(', ');
+    final selectedVehicleHasOngoingTrip =
+        _selectedVehicle != null &&
+        (overview?.trips.any(
+              (trip) =>
+                  trip.vehicleNumber == _selectedVehicle!.number &&
+                  trip.status.toLowerCase() == 'ongoing',
+            ) ??
+            false);
+    final plantVehicleCard = _SectionReveal(
+      delay: const Duration(milliseconds: 0),
+      child: _PlantVehicleCard(
+        plants: _plants,
+        vehicles: _vehicles,
+        isLoadingPlants: _isLoadingPlants,
+        isLoadingVehicles: _isLoadingVehicles,
+        selectedPlant: _selectedPlant,
+        selectedVehicle: _selectedVehicle,
+        onPlantChanged: (widget.user.role == UserRole.driver)
+            ? (plant) {} // Empty function for drivers
+            : (plant) {
+                setState(() {
+                  _selectedPlant = plant;
+                  _selectedPlantId = plant.id.toString();
+                  _selectedVehicle = null;
+                  _tripSheetNoController.clear();
+                  _gatePassController.clear();
+                  _cylInController.clear();
+                  _cylOutController.clear();
+                });
+                // Save plant selection to local storage
+                _localStorage.savePlantId(plant.id.toString());
+                _filterDriversForPlant(plant.id.toString());
+                _primeHelpersForPlant(plant.id.toString());
+                _loadVehicles(plant.id.toString());
+              },
+        onVehicleChanged: (vehicle) {
+          _applyVehicleSelection(vehicle);
+          if (_selectedPlantId != null) {
+            unawaited(
+              _loadHelpers(
+                _selectedPlantId!,
+                vehicleId: _selectedVehicle?.id.toString(),
+              ),
+            );
+          }
+          _loadTrips();
+        },
+        onReloadPlants: _loadPlants,
+        hasOngoingTrip: _hasOngoingTrip,
+        user: widget.user,
+      ),
+    );
 
-    return KeyboardListener(
-      focusNode: FocusNode(),
-      onKeyEvent: _handleKeyEvent,
-      child: Scaffold(
-        appBar: AppBar(
-          backgroundColor: _adminPrimaryColor,
-          foregroundColor: Colors.white,
-          title: const Text(
-            'Trips',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-        ),
-        body: Container(
-          color: Colors.white,
-          child: RefreshIndicator(
-            onRefresh: () async {
-              await Future.wait([_loadTrips(), _loadPlants(), _loadMeta()]);
-              if (_selectedPlantId != null) {
-                await _loadHelpers(
-                  _selectedPlantId!,
-                  vehicleId: _selectedVehicle?.id.toString(),
-                );
-              }
-            },
-            child: Stack(
-              children: [
-                // Main content with bottom padding for sticky card
-                Positioned.fill(
-                  child: ListView(
-                    padding: EdgeInsets.only(
+    return PopScope<Object?>(
+      canPop: widget.onBack == null,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          return;
+        }
+        _handleBack();
+      },
+      child: KeyboardListener(
+        focusNode: FocusNode(),
+        onKeyEvent: _handleKeyEvent,
+        child: Scaffold(
+          backgroundColor: Colors.transparent,
+          body: AnnotatedRegion<SystemUiOverlayStyle>(
+            value: SystemUiOverlayStyle.light,
+            child: DecoratedBox(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[Color(0xFFF6F7FB), Color(0xFFFFFFFF)],
+                ),
+              ),
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  await Future.wait([_loadTrips(), _loadPlants(), _loadMeta()]);
+                  if (_selectedPlantId != null) {
+                    await _loadHelpers(
+                      _selectedPlantId!,
+                      vehicleId: _selectedVehicle?.id.toString(),
+                    );
+                  }
+                },
+                child: Stack(
+                  children: [
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      top: 0,
+                      child: IgnorePointer(
+                        ignoring: true,
+                        child: _SectionReveal(
+                          child: _HeroHeader(
+                            plantName: _selectedPlant?.name ?? 'Select plant',
+                            vehicleNo:
+                                _selectedVehicle?.number ?? 'Select vehicle',
+                            monthLabel:
+                                '${_selectedStartDate.year}-${_selectedStartDate.month.toString().padLeft(2, '0')}',
+                            isDriver: widget.user.role == UserRole.driver,
+                            isVehicleOngoing: selectedVehicleHasOngoingTrip,
+                            highlight: theme.colorScheme.primary,
+                            baseHeight: heroBaseHeight,
+                            driverLabel: driverLabel,
+                            helperLabel: helperLabel,
+                            onBack: _handleBack,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Positioned.fill(
+                      child: ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: EdgeInsets.only(
+                          top: plantVehicleCardTop,
+                          bottom: showOngoingCard ? 120 : 16,
+                        ),
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: plantVehicleCard,
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Column(
+                              children: [
+                                _SectionReveal(
+                                  delay: const Duration(milliseconds: 70),
+                                  child: _DriverHelperCard(
+                                    drivers: _filteredDrivers,
+                                    selectedDrivers: _selectedDrivers,
+                                    helpers: _helpersForPlant,
+                                    selectedHelpers: _selectedHelpers,
+                                    isLoadingDrivers: _isLoadingMeta,
+                                    isLoadingHelpers: _isLoadingHelpers,
+                                    currentDriverId: int.tryParse(
+                                      widget.user.driverId ?? '',
+                                    ),
+                                    driverFieldKey: _driverDropdownKey,
+                                    helperFieldKey: _helperDropdownKey,
+                                    driverFocusNode: _driverFocusNode,
+                                    helperFocusNode: _helperFocusNode,
+                                    onDriverAdded: (driver) =>
+                                        _handleDriverAdded(driver),
+                                    onDriverRemoved: (driver) =>
+                                        _handleDriverRemoved(driver),
+                                    onHelperAdded: (helper) =>
+                                        _handleHelperAdded(helper),
+                                    onHelperRemoved: (helper) =>
+                                        _handleHelperRemoved(helper),
+                                    onReloadHelpers: () {
+                                      if (_selectedPlantId != null) {
+                                        return _loadHelpers(
+                                          _selectedPlantId!,
+                                          vehicleId: _selectedVehicle?.id
+                                              .toString(),
+                                        );
+                                      }
+                                      return Future<void>.value();
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                _SectionReveal(
+                                  delay: const Duration(milliseconds: 140),
+                                  child: _TripStartCard(
+                                    startDateController: _startDateController,
+                                    onPickStartDate: _pickStartDate,
+                                    startKmController: _startKmController,
+                                    noteController: _noteController,
+                                    tripSheetNoController:
+                                        _tripSheetNoController,
+                                    gatePassController: _gatePassController,
+                                    cylInController: _cylInController,
+                                    cylOutController: _cylOutController,
+                                    customerController: _customerController,
+                                    customerSuggestions: _customerSuggestions,
+                                    selectedCustomers: _customerNames,
+                                    onCustomerAdded: _handleCustomerAdded,
+                                    onCustomerRemoved: _handleCustomerRemoved,
+                                    onCustomerSubmitted:
+                                        _handleCustomerSubmitted,
+                                    onStartTrip: _handleCreateTrip,
+                                    isCreating: _isCreatingTrip,
+                                    hasVehicle: _selectedVehicle != null,
+                                    selectedDrivers: _selectedDrivers,
+                                    hasOngoingTrip: _hasOngoingTrip,
+                                    selectedPlant: _selectedPlant,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                if (_isLoading && overview == null)
+                                  const Center(child: AppLoader())
+                                else if (_error != null && overview == null)
+                                  _ErrorState(
+                                    message: _error!,
+                                    onRetry: _loadTrips,
+                                  )
+                                else if (overview != null) ...[
+                                  _SectionReveal(
+                                    delay: const Duration(milliseconds: 210),
+                                    child: _SummarySection(
+                                      summary: overview.summary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  _SectionReveal(
+                                    delay: const Duration(milliseconds: 260),
+                                    child: _TripsList(
+                                      trips: overview.trips,
+                                      onDeleteTrip: _handleDeleteTrip,
+                                      canDeleteAll:
+                                          widget.user.role != UserRole.driver,
+                                    ),
+                                  ),
+                                ] else
+                                  const SizedBox.shrink(),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Positioned(
                       left: 16,
                       right: 16,
-                      top: 16,
-                      bottom: showOngoingCard ? 120 : 16,
+                      top: topInset + 6,
+                      child: _HeroHeaderTopBar(
+                        monthLabel:
+                            '${_selectedStartDate.year}-${_selectedStartDate.month.toString().padLeft(2, '0')}',
+                        isVehicleOngoing: selectedVehicleHasOngoingTrip,
+                        onBack: _handleBack,
+                        onAddCustomer: _openCustomerManager,
+                      ),
                     ),
-                    children: [
-                      _PlantVehicleCard(
-                        plants: _plants,
-                        vehicles: _vehicles,
-                        isLoadingPlants: _isLoadingPlants,
-                        isLoadingVehicles: _isLoadingVehicles,
-                        selectedPlant: _selectedPlant,
-                        selectedVehicle: _selectedVehicle,
-                        onPlantChanged: (widget.user.role == UserRole.driver)
-                            ? (plant) {} // Empty function for drivers
-                            : (plant) {
-                                setState(() {
-                                  _selectedPlant = plant;
-                                  _selectedPlantId = plant.id.toString();
-                                  _selectedVehicle = null;
-                                  _gatePassController.clear();
-                                  _cylInController.clear();
-                                  _cylOutController.clear();
-                                });
-                                // Save plant selection to local storage
-                                _localStorage.savePlantId(plant.id.toString());
-                                _filterDriversForPlant(plant.id.toString());
-                                _primeHelpersForPlant(plant.id.toString());
-                                _loadVehicles(plant.id.toString());
-                              },
-                        onVehicleChanged: (vehicle) {
-                          _applyVehicleSelection(vehicle);
-                          if (_selectedPlantId != null) {
-                            unawaited(
-                              _loadHelpers(
-                                _selectedPlantId!,
-                                vehicleId: _selectedVehicle?.id.toString(),
-                              ),
-                            );
-                          }
-                          _loadTrips();
-                        },
-                        onReloadPlants: _loadPlants,
-                        hasOngoingTrip: _hasOngoingTrip,
-                        user: widget.user,
-                      ),
-                      const SizedBox(height: 12),
-                      _DriverHelperCard(
-                        drivers: _filteredDrivers,
-                        selectedDrivers: _selectedDrivers,
-                        helpers: _helpersForPlant,
-                        selectedHelpers: _selectedHelpers,
-                        isLoadingDrivers: _isLoadingMeta,
-                        isLoadingHelpers: _isLoadingHelpers,
-                        currentDriverId: int.tryParse(
-                          widget.user.driverId ?? '',
+                    // Sticky ON-GOING TRIP CARD at the bottom
+                    if (showOngoingCard)
+                      Positioned(
+                        left: 16,
+                        right: 16,
+                        bottom: 16,
+                        child: _AnimatedSticky(
+                          visible: showOngoingCard,
+                          child: _OngoingTripCard(
+                            trip: _ongoingTrip!,
+                            onUpdate: _handleUpdateTrip,
+                            onEnd: _handleEndTrip,
+                          ),
                         ),
-                        driverFieldKey: _driverDropdownKey,
-                        helperFieldKey: _helperDropdownKey,
-                        driverFocusNode: _driverFocusNode,
-                        helperFocusNode: _helperFocusNode,
-                        onDriverAdded: (driver) => _handleDriverAdded(driver),
-                        onDriverRemoved: (driver) =>
-                            _handleDriverRemoved(driver),
-                        onHelperAdded: (helper) => _handleHelperAdded(helper),
-                        onHelperRemoved: (helper) =>
-                            _handleHelperRemoved(helper),
-                        onReloadHelpers: () {
-                          if (_selectedPlantId != null) {
-                            return _loadHelpers(
-                              _selectedPlantId!,
-                              vehicleId: _selectedVehicle?.id.toString(),
-                            );
-                          }
-                          return Future<void>.value();
-                        },
                       ),
-                      const SizedBox(height: 12),
-                      _TripStartCard(
-                        startDateController: _startDateController,
-                        onPickStartDate: _pickStartDate,
-                        startKmController: _startKmController,
-                        noteController: _noteController,
-                        gatePassController: _gatePassController,
-                        cylInController: _cylInController,
-                        cylOutController: _cylOutController,
-                        customerController: _customerController,
-                        customerSuggestions: _customerSuggestions,
-                        selectedCustomers: _customerNames,
-                        onCustomerAdded: _handleCustomerAdded,
-                        onCustomerRemoved: _handleCustomerRemoved,
-                        onCustomerSubmitted: _handleCustomerSubmitted,
-                        onStartTrip: _handleCreateTrip,
-                        isCreating: _isCreatingTrip,
-                        hasVehicle: _selectedVehicle != null,
-                        selectedDrivers: _selectedDrivers,
-                        hasOngoingTrip: _hasOngoingTrip,
-                        selectedPlant: _selectedPlant,
-                      ),
-                      const SizedBox(height: 12),
-
-                      if (_isLoading && overview == null)
-                        const Center(child: AppLoader())
-                      else if (_error != null && overview == null)
-                        _ErrorState(message: _error!, onRetry: _loadTrips)
-                      else if (overview != null) ...[
-                        _SummarySection(summary: overview.summary),
-                        const SizedBox(height: 12),
-                        _TripsList(
-                          trips: overview.trips,
-                          onDeleteTrip: _handleDeleteTrip,
-                          canDeleteAll: widget.user.role != UserRole.driver,
-                        ),
-                      ] else
-                        const SizedBox.shrink(),
-                    ],
-                  ),
+                  ],
                 ),
-
-                // Sticky ON-GOING TRIP CARD at the bottom
-                if (showOngoingCard)
-                  Positioned(
-                    left: 16,
-                    right: 16,
-                    bottom: 16,
-                    child: _OngoingTripCard(
-                      trip: _ongoingTrip!,
-                      onUpdate: _handleUpdateTrip,
-                      onEnd: _handleEndTrip,
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
         ),
@@ -2516,14 +2742,36 @@ class _PlantVehicleCard extends StatelessWidget {
     InputDecoration buildDropdownDecoration(String label) {
       return InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        isDense: true,
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.45),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.2)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.25)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.4),
+        ),
       );
     }
 
     return Card(
       clipBehavior: Clip.antiAlias,
       color: Colors.white,
-      elevation: 2,
+      elevation: 1.5,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
@@ -2540,7 +2788,7 @@ class _PlantVehicleCard extends StatelessWidget {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.teal.shade300,
+                        color: theme.colorScheme.primary,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       padding: const EdgeInsets.all(6),
@@ -2555,7 +2803,6 @@ class _PlantVehicleCard extends StatelessWidget {
                       'Plant & Vehicle',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
-                        fontSize: 15,
                       ),
                     ),
                   ],
@@ -2567,40 +2814,31 @@ class _PlantVehicleCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            // Side-by-side Plant and Vehicle dropdowns
-            Row(
-              children: [
-                Expanded(
-                  child: DropdownButtonFormField<TripPlant>(
+            const SizedBox(height: 10),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 520;
+                final children = <Widget>[
+                  DropdownButtonFormField<TripPlant>(
                     value: plants.contains(selectedPlant)
                         ? selectedPlant
                         : null,
-                    decoration: buildDropdownDecoration('Plant'),
+                    decoration: buildDropdownDecoration('Plant').copyWith(
+                      prefixIcon: const Icon(Icons.factory_outlined, size: 20),
+                    ),
                     dropdownColor: Colors.white,
                     isExpanded: true,
                     items: plants
                         .map(
                           (plant) => DropdownMenuItem(
                             value: plant,
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.local_florist,
-                                  size: 14,
-                                  color: Colors.teal,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    plant.name,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              plant.name,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         )
@@ -2615,39 +2853,29 @@ class _PlantVehicleCard extends StatelessWidget {
                             }
                           },
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: DropdownButtonFormField<TripVehicle>(
+                  DropdownButtonFormField<TripVehicle>(
                     value: vehicles.contains(selectedVehicle)
                         ? selectedVehicle
                         : null,
-                    decoration: buildDropdownDecoration('Vehicle'),
+                    decoration: buildDropdownDecoration('Vehicle').copyWith(
+                      prefixIcon: const Icon(
+                        Icons.local_shipping_outlined,
+                        size: 20,
+                      ),
+                    ),
                     dropdownColor: Colors.white,
                     isExpanded: true,
                     items: vehicles
                         .map((vehicle) {
                           return DropdownMenuItem(
                             value: vehicle,
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.local_shipping,
-                                  size: 14,
-                                  color: Colors.blue,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text(
-                                    vehicle.number,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                    overflow: TextOverflow.ellipsis,
-                                    maxLines: 1,
-                                  ),
-                                ),
-                              ],
+                            child: Text(
+                              vehicle.number,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           );
                         })
@@ -2676,8 +2904,26 @@ class _PlantVehicleCard extends StatelessWidget {
                       return onVehicleChanged;
                     })(),
                   ),
-                ),
-              ],
+                ];
+
+                if (isNarrow) {
+                  return Column(
+                    children: [
+                      children[0],
+                      const SizedBox(height: 10),
+                      children[1],
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: children[0]),
+                    const SizedBox(width: 12),
+                    Expanded(child: children[1]),
+                  ],
+                );
+              },
             ),
             if (isLoadingPlants)
               const Padding(
@@ -2772,14 +3018,36 @@ class _DriverHelperCard extends StatelessWidget {
     InputDecoration buildDropdownDecoration(String label) {
       return InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        isDense: true,
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.45),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.2)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.25)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.4),
+        ),
       );
     }
 
     return Card(
       clipBehavior: Clip.antiAlias,
       color: Colors.white,
-      elevation: 2,
+      elevation: 1.5,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
@@ -2796,7 +3064,7 @@ class _DriverHelperCard extends StatelessWidget {
                   children: [
                     Container(
                       decoration: BoxDecoration(
-                        color: Colors.indigo.shade300,
+                        color: theme.colorScheme.secondary,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       padding: const EdgeInsets.all(6),
@@ -2811,7 +3079,6 @@ class _DriverHelperCard extends StatelessWidget {
                       'Drivers & Helpers',
                       style: theme.textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.bold,
-                        fontSize: 15,
                       ),
                     ),
                   ],
@@ -2827,11 +3094,16 @@ class _DriverHelperCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             DropdownButtonFormField<int?>(
               key: driverFieldKey,
               focusNode: driverFocusNode,
-              decoration: buildDropdownDecoration('Add Driver'),
+              decoration: buildDropdownDecoration('Add Driver').copyWith(
+                prefixIcon: const Icon(
+                  Icons.person_add_alt_1_outlined,
+                  size: 20,
+                ),
+              ),
               dropdownColor: Colors.white,
               value: null,
               isExpanded: true,
@@ -2886,25 +3158,28 @@ class _DriverHelperCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: 5,
+              runSpacing: 5,
               children: selectedDrivers
                   .map((driver) {
-                    final isCurrent =
-                        currentDriverId != null && driver.id == currentDriverId;
                     return InputChip(
                       avatar: const Icon(
                         Icons.directions_car,
-                        size: 18,
+                        size: 16,
                         color: Colors.indigo,
                       ),
                       backgroundColor: driverChipColor,
+                      visualDensity: const VisualDensity(
+                        horizontal: -2,
+                        vertical: -2,
+                      ),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       labelStyle: theme.textTheme.bodyMedium?.copyWith(
                         color: driverChipText,
                         fontWeight: FontWeight.w600,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                       deleteIconColor: driverChipText,
                       label: Text(driverLabel(driver)),
@@ -2913,11 +3188,16 @@ class _DriverHelperCard extends StatelessWidget {
                   })
                   .toList(growable: false),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             DropdownButtonFormField<int?>(
               key: helperFieldKey,
               focusNode: helperFocusNode,
-              decoration: buildDropdownDecoration('Add Helper'),
+              decoration: buildDropdownDecoration('Add Helper').copyWith(
+                prefixIcon: const Icon(
+                  Icons.volunteer_activism_outlined,
+                  size: 20,
+                ),
+              ),
               dropdownColor: Colors.white,
               value: null,
               isExpanded: true,
@@ -2972,23 +3252,28 @@ class _DriverHelperCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Wrap(
-              spacing: 6,
-              runSpacing: 6,
+              spacing: 5,
+              runSpacing: 5,
               children: selectedHelpers
                   .map((helper) {
                     return InputChip(
                       avatar: const Icon(
                         Icons.group,
-                        size: 18,
+                        size: 16,
                         color: Colors.purple,
                       ),
                       backgroundColor: helperChipColor,
+                      visualDensity: const VisualDensity(
+                        horizontal: -2,
+                        vertical: -2,
+                      ),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       labelStyle: theme.textTheme.bodyMedium?.copyWith(
                         color: helperChipText,
                         fontWeight: FontWeight.w600,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                       deleteIconColor: helperChipText,
                       label: Text(helper.name),
@@ -3010,6 +3295,7 @@ class _TripStartCard extends StatefulWidget {
     required this.onPickStartDate,
     required this.startKmController,
     required this.noteController,
+    required this.tripSheetNoController,
     required this.gatePassController,
     required this.cylInController,
     required this.cylOutController,
@@ -3031,6 +3317,7 @@ class _TripStartCard extends StatefulWidget {
   final VoidCallback onPickStartDate;
   final TextEditingController startKmController;
   final TextEditingController noteController;
+  final TextEditingController tripSheetNoController;
   final TextEditingController gatePassController;
   final TextEditingController cylInController;
   final TextEditingController cylOutController;
@@ -3052,6 +3339,10 @@ class _TripStartCard extends StatefulWidget {
 }
 
 class _TripStartCardState extends State<_TripStartCard> {
+  String _normalizeSearchText(String input) {
+    return input.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '');
+  }
+
   ({String code, String name}) _parseCustomerSuggestion(String raw) {
     final trimmed = raw.trim();
     if (trimmed.isEmpty) {
@@ -3074,14 +3365,29 @@ class _TripStartCardState extends State<_TripStartCard> {
     if (query.isEmpty) {
       return suggestions;
     }
+    final normalizedQuery = _normalizeSearchText(query);
     return suggestions.where((suggestion) {
       final parsed = _parseCustomerSuggestion(suggestion);
       final name = parsed.name.toLowerCase();
       final code = parsed.code.toLowerCase();
-      if (code.isNotEmpty && code.startsWith(query)) {
+      final full = suggestion.toLowerCase();
+      if (code.isNotEmpty && (code.startsWith(query) || code.contains(query))) {
         return true;
       }
-      return name.contains(query);
+      if (name.contains(query) || full.contains(query)) {
+        return true;
+      }
+      final normalizedCode = _normalizeSearchText(code);
+      final normalizedName = _normalizeSearchText(name);
+      final normalizedFull = _normalizeSearchText(full);
+      if (normalizedQuery.isNotEmpty &&
+          ((normalizedCode.isNotEmpty &&
+                  normalizedCode.contains(normalizedQuery)) ||
+              normalizedName.contains(normalizedQuery) ||
+              normalizedFull.contains(normalizedQuery))) {
+        return true;
+      }
+      return false;
     }).toList();
   }
 
@@ -3097,6 +3403,7 @@ class _TripStartCardState extends State<_TripStartCard> {
         (widget.gatePassController.text.trim().isNotEmpty &&
             widget.cylInController.text.trim().isNotEmpty &&
             widget.cylOutController.text.trim().isNotEmpty);
+    final tripSheetReady = widget.tripSheetNoController.text.trim().isNotEmpty;
     final canStart =
         !widget.isCreating &&
         widget.hasVehicle &&
@@ -3105,6 +3412,7 @@ class _TripStartCardState extends State<_TripStartCard> {
         (widget.hasOngoingTrip ||
             (widget.startKmController.text.trim().isNotEmpty &&
                 widget.startDateController.text.trim().isNotEmpty)) &&
+        tripSheetReady &&
         inoxFieldsReady;
     final selectedChipColor = Colors.teal.shade100;
     final selectedChipTextColor = Colors.teal.shade900;
@@ -3114,7 +3422,29 @@ class _TripStartCardState extends State<_TripStartCard> {
     InputDecoration buildFieldDecoration(String label, {Widget? suffixIcon}) {
       return InputDecoration(
         labelText: label,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        isDense: true,
+        filled: true,
+        fillColor: theme.colorScheme.surfaceContainerHighest.withOpacity(0.45),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 40,
+          minHeight: 40,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.2)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.dividerColor.withOpacity(0.25)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: theme.colorScheme.primary, width: 1.4),
+        ),
         suffixIcon: suffixIcon,
       );
     }
@@ -3122,7 +3452,11 @@ class _TripStartCardState extends State<_TripStartCard> {
     return Card(
       color: Colors.white,
       clipBehavior: Clip.antiAlias,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 1.5,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: theme.colorScheme.primary.withOpacity(0.08)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -3132,7 +3466,7 @@ class _TripStartCardState extends State<_TripStartCard> {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.deepOrange.shade300,
+                    color: theme.colorScheme.tertiary,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   padding: const EdgeInsets.all(6),
@@ -3147,55 +3481,79 @@ class _TripStartCardState extends State<_TripStartCard> {
                   widget.hasOngoingTrip ? 'Update Trip' : 'Start Trip',
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
-                    fontSize: 15,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: widget.startDateController,
-                    readOnly: true,
-                    decoration: buildFieldDecoration(
-                      'Start Date',
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.calendar_today),
-                        onPressed: widget.onPickStartDate,
+            const SizedBox(height: 10),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isNarrow = constraints.maxWidth < 520;
+                final startDateField = TextField(
+                  controller: widget.startDateController,
+                  readOnly: true,
+                  decoration:
+                      buildFieldDecoration(
+                        'Start Date',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.calendar_today, size: 20),
+                          onPressed: widget.onPickStartDate,
+                        ),
+                      ).copyWith(
+                        prefixIcon: const Icon(Icons.event_outlined, size: 20),
                       ),
-                    ),
-                    onTap: widget.onPickStartDate,
+                  onTap: widget.onPickStartDate,
+                );
+                final startKmField = TextField(
+                  controller: widget.startKmController,
+                  keyboardType: TextInputType.number,
+                  decoration: buildFieldDecoration('Start KM').copyWith(
+                    prefixIcon: const Icon(Icons.speed_outlined, size: 20),
                   ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: TextField(
-                    controller: widget.startKmController,
-                    keyboardType: TextInputType.number,
-                    decoration: buildFieldDecoration('Start KM'),
-                  ),
-                ),
-              ],
+                );
+
+                if (isNarrow) {
+                  return Column(
+                    children: [
+                      startDateField,
+                      const SizedBox(height: 10),
+                      startKmField,
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: startDateField),
+                    const SizedBox(width: 12),
+                    Expanded(child: startKmField),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             TextField(
               controller: widget.customerController,
-              decoration: buildFieldDecoration(
-                'Add Customer',
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.add_circle_outline),
-                  onPressed: widget.onCustomerSubmitted,
-                ),
-              ),
+              decoration:
+                  buildFieldDecoration(
+                    'Add Customer',
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.add_circle_outline, size: 20),
+                      onPressed: widget.onCustomerSubmitted,
+                    ),
+                  ).copyWith(
+                    prefixIcon: const Icon(
+                      Icons.person_search_outlined,
+                      size: 20,
+                    ),
+                  ),
               textInputAction: TextInputAction.done,
               onSubmitted: (_) => widget.onCustomerSubmitted(),
               onChanged: (value) {
                 setState(() {});
               },
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             if (widget.selectedCustomers.isEmpty)
               Text(
                 'No customers added yet.',
@@ -3206,12 +3564,17 @@ class _TripStartCardState extends State<_TripStartCard> {
               )
             else
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                spacing: 5,
+                runSpacing: 5,
                 children: widget.selectedCustomers
                     .map(
                       (name) => InputChip(
                         backgroundColor: selectedChipColor,
+                        visualDensity: const VisualDensity(
+                          horizontal: -2,
+                          vertical: -2,
+                        ),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         labelStyle: theme.textTheme.bodyMedium?.copyWith(
                           color: selectedChipTextColor,
                           fontWeight: FontWeight.w600,
@@ -3225,7 +3588,7 @@ class _TripStartCardState extends State<_TripStartCard> {
                     .toList(growable: false),
               ),
             if (widget.customerSuggestions.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
               Text(
                 'Suggestions',
                 style: theme.textTheme.labelLarge?.copyWith(
@@ -3233,22 +3596,28 @@ class _TripStartCardState extends State<_TripStartCard> {
                   fontSize: 13,
                 ),
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 5),
               Wrap(
-                spacing: 6,
-                runSpacing: 6,
+                spacing: 5,
+                runSpacing: 5,
                 children:
                     _getFilteredSuggestions(
                           widget.customerController.text,
                           widget.customerSuggestions,
                         )
                         .take(12)
-                        .map(
-                          (suggestion) {
-                            final displayName =
-                                _parseCustomerSuggestion(suggestion).name;
-                            return ActionChip(
+                        .map((suggestion) {
+                          final displayName = _parseCustomerSuggestion(
+                            suggestion,
+                          ).name;
+                          return ActionChip(
                             backgroundColor: suggestionChipColor,
+                            visualDensity: const VisualDensity(
+                              horizontal: -2,
+                              vertical: -2,
+                            ),
+                            materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                             labelStyle: theme.textTheme.bodyMedium?.copyWith(
                               color: suggestionChipTextColor,
                               fontWeight: FontWeight.w600,
@@ -3256,19 +3625,18 @@ class _TripStartCardState extends State<_TripStartCard> {
                             ),
                             avatar: const Icon(
                               Icons.bolt,
-                              size: 18,
+                              size: 16,
                               color: Colors.deepOrange,
                             ),
-                              label: Text(displayName),
-                              onPressed: () =>
-                                  widget.onCustomerAdded(displayName),
-                            );
-                          },
-                        )
+                            label: Text(displayName),
+                            onPressed: () =>
+                                widget.onCustomerAdded(displayName),
+                          );
+                        })
                         .toList(growable: false),
               ),
             ],
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             if (isInoxPlant) ...[
               Row(
                 children: [
@@ -3277,7 +3645,9 @@ class _TripStartCardState extends State<_TripStartCard> {
                     child: TextField(
                       controller: widget.gatePassController,
                       textCapitalization: TextCapitalization.characters,
-                      decoration: buildFieldDecoration('Gate Pass No'),
+                      decoration: buildFieldDecoration('Gate Pass No').copyWith(
+                        prefixIcon: const Icon(Icons.badge_outlined, size: 20),
+                      ),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
@@ -3288,7 +3658,9 @@ class _TripStartCardState extends State<_TripStartCard> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: buildFieldDecoration('Cyl Out'),
+                      decoration: buildFieldDecoration('Cyl Out').copyWith(
+                        prefixIcon: const Icon(Icons.upload_outlined, size: 20),
+                      ),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
@@ -3299,42 +3671,68 @@ class _TripStartCardState extends State<_TripStartCard> {
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      decoration: buildFieldDecoration('Cyl In'),
+                      decoration: buildFieldDecoration('Cyl In').copyWith(
+                        prefixIcon: const Icon(
+                          Icons.download_outlined,
+                          size: 20,
+                        ),
+                      ),
                       onChanged: (_) => setState(() {}),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 10),
             ],
+            TextField(
+              controller: widget.tripSheetNoController,
+              textCapitalization: TextCapitalization.characters,
+              decoration: buildFieldDecoration('Trip Sheet No *').copyWith(
+                prefixIcon: const Icon(Icons.receipt_long_outlined, size: 20),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 10),
             TextField(
               controller: widget.noteController,
               maxLines: 2,
-              decoration: buildFieldDecoration(
-                'Note (optional)',
-              ).copyWith(filled: true, fillColor: Colors.amber.shade50),
+              decoration: buildFieldDecoration('Note (optional)').copyWith(
+                prefixIcon: const Icon(Icons.sticky_note_2_outlined, size: 20),
+              ),
             ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
               child: FilledButton.icon(
                 onPressed: canStart ? () => widget.onStartTrip() : null,
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFA3EF4D),
-                  foregroundColor: Colors.black,
+                  minimumSize: const Size.fromHeight(44),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  backgroundColor: theme.colorScheme.primary,
+                  foregroundColor: theme.colorScheme.onPrimary,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 icon: widget.isCreating
-                    ? const SizedBox(
+                    ? SizedBox(
                         width: 16,
                         height: 16,
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
-                          color: Colors.white,
+                          color: theme.colorScheme.onPrimary,
                         ),
                       )
-                    : const Icon(Icons.play_arrow),
+                    : Icon(
+                        widget.hasOngoingTrip ? Icons.update : Icons.play_arrow,
+                      ),
                 label: Text(
                   widget.hasOngoingTrip ? 'Update Trip' : 'Start Trip',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: theme.colorScheme.onPrimary,
+                  ),
                 ),
               ),
             ),
@@ -3501,6 +3899,443 @@ class _OngoingTripCardState extends State<_OngoingTripCard> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _AnimatedSticky extends StatelessWidget {
+  const _AnimatedSticky({required this.visible, required this.child});
+
+  final bool visible;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+      offset: visible ? Offset.zero : const Offset(0, 0.15),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+        opacity: visible ? 1 : 0,
+        child: child,
+      ),
+    );
+  }
+}
+
+class _SectionReveal extends StatefulWidget {
+  const _SectionReveal({required this.child, this.delay = Duration.zero});
+
+  final Widget child;
+  final Duration delay;
+
+  @override
+  State<_SectionReveal> createState() => _SectionRevealState();
+}
+
+class _SectionRevealState extends State<_SectionReveal> {
+  bool _show = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(widget.delay, () {
+      if (!mounted) return;
+      setState(() => _show = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSlide(
+      duration: const Duration(milliseconds: 380),
+      curve: Curves.easeOutCubic,
+      offset: _show ? Offset.zero : const Offset(0, 0.03),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeOut,
+        opacity: _show ? 1 : 0,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _HeroHeader extends StatelessWidget {
+  const _HeroHeader({
+    this.plantName,
+    this.vehicleNo,
+    required this.monthLabel,
+    required this.isDriver,
+    this.isVehicleOngoing = false,
+    this.highlight,
+    required this.baseHeight,
+    required this.driverLabel,
+    required this.helperLabel,
+    required this.onBack,
+  });
+
+  final String? plantName;
+  final String? vehicleNo;
+  final String monthLabel;
+  final bool isDriver;
+  final bool isVehicleOngoing;
+  final Color? highlight;
+  final double baseHeight;
+  final String driverLabel;
+  final String helperLabel;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final top = media.padding.top;
+    final theme = Theme.of(context);
+    final heroGradientColors = isVehicleOngoing
+        ? const <Color>[Color(0xFFE0BC00), Color(0xFFF2C94C), Color(0xFFD4A017)]
+        : const <Color>[
+            _adminPrimaryColor,
+            Color(0xFF0B4AA8),
+            Color(0xFF0A3F90),
+          ];
+    final heroForegroundColor = isVehicleOngoing
+        ? Colors.black.withOpacity(0.85)
+        : Colors.white;
+    final heroMutedForegroundColor = isVehicleOngoing
+        ? Colors.black.withOpacity(0.72)
+        : Colors.white.withOpacity(0.95);
+    final heroChipBackground = isVehicleOngoing
+        ? Colors.black.withOpacity(0.08)
+        : Colors.white.withOpacity(0.16);
+    final heroChipBorder = isVehicleOngoing
+        ? Colors.black.withOpacity(0.14)
+        : Colors.white.withOpacity(0.22);
+
+    return SizedBox(
+      height: top + baseHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: heroGradientColors,
+              ),
+            ),
+          ),
+          Positioned(
+            left: -60,
+            top: top + 20,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.10),
+              ),
+            ),
+          ),
+          Positioned(
+            right: -40,
+            top: top + 0,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.08),
+              ),
+            ),
+          ),
+          Padding(
+            padding: EdgeInsets.fromLTRB(16, top + 6, 16, 10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: heroChipBackground,
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(color: heroChipBorder),
+                      ),
+                      alignment: Alignment.center,
+                      child: IconButton(
+                        padding: EdgeInsets.zero,
+                        iconSize: 16,
+                        color: heroForegroundColor,
+                        onPressed: onBack,
+                        icon: const Icon(Icons.arrow_back_ios_new),
+                        tooltip: 'Back',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: heroChipBackground,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: heroChipBorder),
+                      ),
+                      child: Text(
+                        monthLabel,
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: heroForegroundColor,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      width: 30,
+                      height: 30,
+                      decoration: BoxDecoration(
+                        color: heroChipBackground,
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(color: heroChipBorder),
+                      ),
+                      alignment: Alignment.center,
+                      child: Icon(
+                        Icons.route,
+                        size: 16,
+                        color: heroForegroundColor,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isDriver ? 'Your trips' : 'Trips overview',
+                  style: theme.textTheme.headlineSmall?.copyWith(
+                    color: heroForegroundColor,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _HeaderMetaRow(
+                        icon: Icons.factory_outlined,
+                        label: plantName ?? 'Select plant',
+                        foregroundColor: heroForegroundColor,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _HeaderMetaRow(
+                        icon: Icons.local_shipping_outlined,
+                        label: vehicleNo ?? 'Select vehicle',
+                        foregroundColor: heroForegroundColor,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _HeaderMetaRow(
+                        icon: Icons.person_outline,
+                        label: driverLabel,
+                        foregroundColor: heroMutedForegroundColor,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _HeaderMetaRow(
+                        icon: Icons.group_outlined,
+                        label: helperLabel,
+                        foregroundColor: heroMutedForegroundColor,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroHeaderTopBar extends StatelessWidget {
+  const _HeroHeaderTopBar({
+    required this.monthLabel,
+    required this.isVehicleOngoing,
+    required this.onBack,
+    required this.onAddCustomer,
+  });
+
+  final String monthLabel;
+  final bool isVehicleOngoing;
+  final VoidCallback onBack;
+  final VoidCallback onAddCustomer;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final heroForegroundColor = isVehicleOngoing
+        ? Colors.black.withOpacity(0.85)
+        : Colors.white;
+    final heroChipBackground = isVehicleOngoing
+        ? Colors.black.withOpacity(0.08)
+        : Colors.white.withOpacity(0.16);
+    final heroChipBorder = isVehicleOngoing
+        ? Colors.black.withOpacity(0.14)
+        : Colors.white.withOpacity(0.22);
+
+    return Row(
+      children: [
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: heroChipBackground,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: heroChipBorder),
+          ),
+          alignment: Alignment.center,
+          child: IconButton(
+            padding: EdgeInsets.zero,
+            iconSize: 16,
+            color: heroForegroundColor,
+            onPressed: onBack,
+            icon: const Icon(Icons.arrow_back_ios_new),
+            tooltip: 'Back',
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: heroChipBackground,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(color: heroChipBorder),
+          ),
+          child: Text(
+            monthLabel,
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: heroForegroundColor,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+        const Spacer(),
+        InkWell(
+          onTap: onAddCustomer,
+          borderRadius: BorderRadius.circular(999),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: heroChipBackground,
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: heroChipBorder),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.person_add_alt_1,
+                  size: 13,
+                  color: heroForegroundColor,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'Add Customer',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: heroForegroundColor,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            color: heroChipBackground,
+            borderRadius: BorderRadius.circular(11),
+            border: Border.all(color: heroChipBorder),
+          ),
+          alignment: Alignment.center,
+          child: Icon(Icons.route, size: 16, color: heroForegroundColor),
+        ),
+      ],
+    );
+  }
+}
+
+class _HeaderMetaRow extends StatelessWidget {
+  const _HeaderMetaRow({
+    required this.icon,
+    required this.label,
+    this.accent,
+    this.foregroundColor,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color? accent;
+  final Color? foregroundColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final resolvedForeground =
+        foregroundColor ?? Colors.white.withOpacity(0.95);
+    final resolvedIconColor = accent ?? resolvedForeground;
+    return Row(
+      children: [
+        Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: accent != null
+                ? accent!.withOpacity(0.16)
+                : Colors.white.withOpacity(0.14),
+            borderRadius: BorderRadius.circular(9),
+            border: Border.all(
+              color: accent != null
+                  ? accent!.withOpacity(0.28)
+                  : Colors.white.withOpacity(0.20),
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, color: resolvedIconColor, size: 16),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: resolvedForeground,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

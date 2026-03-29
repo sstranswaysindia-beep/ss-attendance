@@ -56,11 +56,12 @@ try {
 
     $users = [];
 
-    // Collect active driver accounts with their master plant.
+    // Collect active driver/helper accounts with their master plant.
     $driverSql = "
         SELECT u.id            AS user_id,
                u.full_name     AS full_name,
                u.username      AS username,
+               u.role          AS user_role,
                u.geofencing_enable,
                u.last_login_at,
                d.empid         AS emp_id,
@@ -69,7 +70,7 @@ try {
                d.plant_id      AS plant_id
           FROM users u
           JOIN drivers d ON d.id = u.driver_id
-         WHERE LOWER(TRIM(u.role)) = 'driver'
+         WHERE LOWER(TRIM(u.role)) IN ('driver', 'helper')
       ORDER BY u.full_name ASC
     ";
     $driverResult = $conn->query($driverSql);
@@ -94,10 +95,15 @@ try {
                 continue;
             }
 
+            $userRole = strtolower(trim((string) ($row['user_role'] ?? 'driver')));
+            if ($userRole !== 'helper') {
+                $userRole = 'driver';
+            }
+
             $users[] = [
                 'userId' => (int) $row['user_id'],
                 'fullName' => (string) ($row['full_name'] ?? ''),
-                'role' => 'driver',
+                'role' => $userRole,
                 'username' => (string) ($row['username'] ?? ''),
                 'contact' => (string) ($row['contact'] ?? ''),
                 'employeeId' => (string) ($row['emp_id'] ?? ''),

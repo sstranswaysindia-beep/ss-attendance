@@ -19,6 +19,7 @@ $data = apiRequireJson();
 $taskId = apiSanitizeInt($data['taskId'] ?? null);
 $userId = apiSanitizeInt($data['userId'] ?? null);
 $statusRaw = trim((string)($data['status'] ?? ''));
+$taskerRemarks = trim((string)($data['taskerRemarks'] ?? ''));
 
 if (!$taskId || !$userId) {
     apiRespond(400, ['status' => 'error', 'error' => 'taskId and userId are required']);
@@ -71,6 +72,11 @@ try {
     }
     if ($statusKey === 'closed') {
         $updates[] = 'actual_end_date = COALESCE(actual_end_date, CURDATE())';
+        if ($taskerRemarks !== '') {
+            $updates[] = 'tasker_remarks = ?';
+            $params[] = $taskerRemarks;
+            $types .= 's';
+        }
     }
 
     $sql = 'UPDATE driver_tasks SET ' . implode(', ', $updates) . ' WHERE id = ? LIMIT 1';

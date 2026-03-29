@@ -6,14 +6,11 @@ import '../models/app_user.dart';
 import '../models/watch_ads_models.dart';
 
 class WatchAdsRepository {
-  WatchAdsRepository({
-    http.Client? client,
-    Uri? baseUri,
-    AppUser? currentUser,
-  })  : _client = client ?? http.Client(),
-        _baseUri =
-            baseUri ?? Uri.parse('https://sstranswaysindia.com/api/rewards/'),
-        _currentUser = currentUser;
+  WatchAdsRepository({http.Client? client, Uri? baseUri, AppUser? currentUser})
+    : _client = client ?? http.Client(),
+      _baseUri =
+          baseUri ?? Uri.parse('https://sstranswaysindia.com/api/rewards/'),
+      _currentUser = currentUser;
 
   final http.Client _client;
   final Uri _baseUri;
@@ -40,6 +37,9 @@ class WatchAdsRepository {
         break;
       case UserRole.admin:
         role = 'admin';
+        break;
+      case UserRole.referral:
+        role = 'referral';
         break;
     }
 
@@ -103,7 +103,9 @@ class WatchAdsRepository {
     final uri = _resolve('watch/status.php', _authQuery(user));
     final response = await _client.get(uri);
     if (response.statusCode >= 300) {
-      throw Exception('Failed to load watch ads status (${response.statusCode})');
+      throw Exception(
+        'Failed to load watch ads status (${response.statusCode})',
+      );
     }
     final decoded = _decodeJsonMap(response.body, 'Watch ads status fetch');
     if (decoded['ok'] != true) {
@@ -117,25 +119,24 @@ class WatchAdsRepository {
     String adNetwork = 'admob',
   }) async {
     final uri = _resolve('watch/start.php', _authQuery(user));
-    final body = json.encode({
-      'ad_network': adNetwork,
-    });
+    final body = json.encode({'ad_network': adNetwork});
     final response = await _client.post(
       uri,
       headers: const {'Content-Type': 'application/json'},
       body: body,
     );
     if (response.statusCode >= 300) {
-      throw Exception(
-        'Unable to start watch session (${response.statusCode})',
-      );
+      throw Exception('Unable to start watch session (${response.statusCode})');
     }
     final decoded = _decodeJsonMap(response.body, 'Watch ads session start');
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Unable to start session');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Unable to start session',
+      );
     }
     final sessionJson =
-        decoded['session'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+        decoded['session'] as Map<String, dynamic>? ??
+        const <String, dynamic>{};
     return WatchAdsSession.fromJson(sessionJson);
   }
 
@@ -144,22 +145,20 @@ class WatchAdsRepository {
     AppUser? user,
   }) async {
     final uri = _resolve('watch/confirm.php', _authQuery(user));
-    final body = json.encode({
-      'session_token': sessionToken,
-    });
+    final body = json.encode({'session_token': sessionToken});
     final response = await _client.post(
       uri,
       headers: const {'Content-Type': 'application/json'},
       body: body,
     );
     if (response.statusCode >= 300) {
-      throw Exception(
-        'Unable to confirm reward (${response.statusCode})',
-      );
+      throw Exception('Unable to confirm reward (${response.statusCode})');
     }
     final decoded = _decodeJsonMap(response.body, 'Watch ads reward confirm');
     if (decoded['ok'] != true) {
-      throw Exception(decoded['error']?.toString() ?? 'Unable to confirm reward');
+      throw Exception(
+        decoded['error']?.toString() ?? 'Unable to confirm reward',
+      );
     }
     return WatchAdsConfirmResult.fromJson(decoded);
   }

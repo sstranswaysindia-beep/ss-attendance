@@ -48,6 +48,132 @@ if (!function_exists('column_exists')) {
     }
 }
 
+if (!function_exists('table_exists')) {
+    function table_exists(mysqli $db, string $table): bool
+    {
+        $tableEsc = $db->real_escape_string($table);
+        $sql = "SELECT 1 FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = '{$tableEsc}'
+                LIMIT 1";
+        $res = $db->query($sql);
+        $exists = $res && $res->num_rows > 0;
+        if ($res instanceof mysqli_result) {
+            $res->free();
+        }
+        return $exists;
+    }
+}
+
+if (!function_exists('get_prev_month_entry_cutoff_day')) {
+    function normalize_mmdd(?string $raw): ?string
+    {
+        if ($raw === null) {
+            return null;
+        }
+        $value = trim($raw);
+        if ($value === '') {
+            return null;
+        }
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) === 1) {
+            $value = substr($value, 5, 5);
+        }
+        if (preg_match('/^\d{2}-\d{2}$/', $value) !== 1) {
+            return null;
+        }
+        [$mm, $dd] = array_map('intval', explode('-', $value));
+        if ($mm < 1 || $mm > 12 || $dd < 1 || $dd > 31) {
+            return null;
+        }
+        return sprintf('%02d-%02d', $mm, $dd);
+    }
+}
+
+if (!function_exists('is_current_mmdd_in_range')) {
+    function is_current_mmdd_in_range(string $currentMmdd, ?string $fromMmdd, ?string $toMmdd): bool
+    {
+        if ($fromMmdd === null && $toMmdd === null) {
+            return true;
+        }
+        if ($fromMmdd !== null && $toMmdd === null) {
+            return $currentMmdd >= $fromMmdd;
+        }
+        if ($fromMmdd === null && $toMmdd !== null) {
+            return $currentMmdd <= $toMmdd;
+        }
+        if ($fromMmdd <= $toMmdd) {
+            return $currentMmdd >= $fromMmdd && $currentMmdd <= $toMmdd;
+        }
+        // Range wraps year boundary (e.g. 12-15 to 01-10)
+        return $currentMmdd >= $fromMmdd || $currentMmdd <= $toMmdd;
+    }
+}
+
+if (!function_exists('get_prev_month_entry_cutoff_rule')) {
+    function get_prev_month_entry_cutoff_rule(mysqli $db, int $targetMonth): array
+    {
+        $defaultRule = [
+            'cutoff_day' => 31,
+            'cutoff_mmdd' => null,
+        ];
+        if (!table_exists($db, 'khata_entry_controls')) {
+            return $defaultRule;
+        }
+
+        $hasCutoffMmdd = column_exists($db, 'khata_entry_controls', 'previous_month_entry_cutoff_mmdd');
+        $stmt = $db->prepare(
+            "SELECT previous_month_entry_cutoff_day"
+            . ($hasCutoffMmdd ? ", previous_month_entry_cutoff_mmdd" : "") . ",
+                    effective_from,
+                    effective_to,
+                    id
+             FROM khata_entry_controls
+             WHERE is_active = 'Y'
+             ORDER BY id DESC"
+        );
+        if (!$stmt) {
+            return $defaultRule;
+        }
+        $stmt->execute();
+        $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+        $stmt->close();
+
+        foreach ($rows as $row) {
+            $rowMonth = 0;
+            if (!empty($row['effective_from'])) {
+                $rowMonth = (int)date('n', strtotime((string)$row['effective_from']));
+            } elseif (!empty($row['effective_to'])) {
+                $rowMonth = (int)date('n', strtotime((string)$row['effective_to']));
+            }
+            if ($rowMonth < 1 || $rowMonth > 12 || $rowMonth !== $targetMonth) {
+                continue;
+            }
+
+            $cutoffDay = isset($row['previous_month_entry_cutoff_day'])
+                ? (int)$row['previous_month_entry_cutoff_day']
+                : 31;
+            if ($cutoffDay < 1 || $cutoffDay > 31) {
+                $cutoffDay = 31;
+            }
+            $cutoffMmdd = null;
+            if ($hasCutoffMmdd) {
+                $cutoffMmdd = normalize_mmdd(
+                    isset($row['previous_month_entry_cutoff_mmdd'])
+                        ? (string)$row['previous_month_entry_cutoff_mmdd']
+                        : null
+                );
+            }
+
+            return [
+                'cutoff_day' => $cutoffDay,
+                'cutoff_mmdd' => $cutoffMmdd,
+            ];
+        }
+
+        return $defaultRule;
+    }
+}
+
 if (!$driverId || !$type || !$amount) {
     apiRespond(400, ['status' => 'error', 'error' => 'driverId, type, and amount are required']);
 }
@@ -111,18 +237,25 @@ try {
         }
     }
 
-    // Enforce date rule: after 5th, block past-month entries unless allowed
+    // Enforce date rule: block past-month entries after configured cutoff day
     $now = new DateTime();
     $currentYear = (int)$now->format('Y');
     $currentMonth = (int)$now->format('n');
+    $currentDay = (int)$now->format('j');
+    $currentMmdd = $now->format('m-d');
     $entryYear = (int)$entryDate->format('Y');
     $entryMonth = (int)$entryDate->format('n');
+    $cutoffRule = get_prev_month_entry_cutoff_rule($conn, $entryMonth);
+    $cutoffDay = (int)($cutoffRule['cutoff_day'] ?? 31);
+    $cutoffMmdd = isset($cutoffRule['cutoff_mmdd']) ? normalize_mmdd((string)$cutoffRule['cutoff_mmdd']) : null;
 
     $isPastMonth = ($entryYear < $currentYear) || ($entryYear === $currentYear && $entryMonth < $currentMonth);
-    if ($isPastMonth && !$advanceEntryAllowed && $now->format('j') > 5) {
+    $windowClosed = $cutoffMmdd !== null ? ($currentMmdd > $cutoffMmdd) : ($currentDay > $cutoffDay);
+    if ($isPastMonth && !$advanceEntryAllowed && $windowClosed) {
+        $limitLabel = $cutoffMmdd !== null ? $cutoffMmdd : sprintf('%02d', $cutoffDay);
         apiRespond(200, [
             'status' => 'error',
-            'error' => 'Last day is already passed.',
+            'error' => "Previous month entry window closed after {$limitLabel}.",
         ]);
     }
 

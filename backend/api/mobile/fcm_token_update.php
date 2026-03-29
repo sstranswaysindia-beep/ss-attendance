@@ -4,9 +4,9 @@ require_once 'common.php';
 $data = apiRequireJson();
 apiEnsurePost();
 
-$userId = $data['userId'] ?? '';
-$fcmToken = $data['fcmToken'] ?? '';
-$platform = $data['platform'] ?? 'mobile';
+$userId = trim((string)($data['userId'] ?? ''));
+$fcmToken = trim((string)($data['fcmToken'] ?? ''));
+$platform = trim((string)($data['platform'] ?? 'mobile'));
 
 if (empty($userId) || empty($fcmToken)) {
     apiRespond(400, ['status' => 'error', 'error' => 'Missing required fields: userId and fcmToken']);
@@ -31,6 +31,26 @@ try {
     if (!$conn->query($createTableSQL)) {
         throw new Exception('Failed to create FCM tokens table: ' . $conn->error);
     }
+
+    // Ensure the same device token is not left attached to older accounts.
+    $cleanupStmt = $conn->prepare("
+        DELETE FROM user_fcm_tokens
+        WHERE platform = ?
+          AND fcm_token = ?
+          AND user_id <> ?
+    ");
+
+    if (!$cleanupStmt) {
+        throw new Exception('Failed to prepare cleanup statement: ' . $conn->error);
+    }
+
+    $cleanupStmt->bind_param("sss", $platform, $fcmToken, $userId);
+
+    if (!$cleanupStmt->execute()) {
+        throw new Exception('Failed to execute cleanup statement: ' . $cleanupStmt->error);
+    }
+
+    $cleanupStmt->close();
 
     // Insert or update FCM token
     $stmt = $conn->prepare("

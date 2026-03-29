@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SS Transways Investments</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="investment-shell" id="investmentShell">
+      <div class="next-animation" aria-hidden="true">
+        <span class="blob blob-one"></span>
+        <span class="blob blob-two"></span>
+        <span class="blob blob-three"></span>
+      </div>
+
+      <div class="page-grid">
+        <aside class="global-nav hidden" aria-label="Investment navigation">
+          <div class="nav-card">
+            <p class="eyebrow">Navigation</p>
+            <h3>Jump into sections</h3>
+            <div class="nav-list">
+              <button data-tab="stocks" class="nav-btn active">Stocks</button>
+              <button data-tab="mutualFunds" class="nav-btn">Mutual Funds</button>
+              <button data-tab="lifeInsurance" class="nav-btn">Life Insurance</button>
+              <button data-tab="medical" class="nav-btn">Medical</button>
+              <button data-tab="pf" class="nav-btn">PF</button>
+              <button data-tab="esop" class="nav-btn">ESOP</button>
+              <button data-tab="ppf" class="nav-btn">PPF</button>
+              <button data-tab="fd" class="nav-btn">FD</button>
+              <button data-tab="nps" class="nav-btn">NPS</button>
+              <button data-tab="term" class="nav-btn">Term Insurance</button>
+              <button data-tab="sukanya" class="nav-btn">Sukanya</button>
+            </div>
+            <p class="muted nav-note">
+              Choose a section before you enter the dashboard, and the sidebar will stay in sync with the content.
+            </p>
+          </div>
+        </aside>
+        <main class="investment-wrap">
+          <header class="page-header">
+            <div class="heading-text">
+              <p class="eyebrow">Family portfolio · multi-profile</p>
+              <div class="header-identity">
+                <div class="header-avatar hidden" id="headerAvatar">
+                  <img id="headerAvatarImage" alt="" hidden />
+                  <span id="headerAvatarFallback"></span>
+                </div>
+                <h1><span id="headerTitle">Investment portfolio cockpit</span></h1>
+              </div>
+            </div>
+            <div class="header-actions hidden">
+              <div class="hero-stat-row header-stat-row" id="heroStatRow"></div>
+              <button class="ghost" id="headerSwitch">Switch profile</button>
+            </div>
+          </header>
+
+          <section class="login-panel" id="loginPanel">
+            <div class="login-heading">
+              <p class="muted">Pick a profile</p>
+              <h2>Select a profile to continue</h2>
+            </div>
+            <div class="profile-grid" id="profileGrid"></div>
+            <div class="profile-login-overlay hidden" id="profileLoginOverlay">
+              <div class="profile-login-card" id="profileLoginCard">
+                <button class="ghost profile-back-btn" id="profileBackBtn" type="button">Back</button>
+                <div class="profile-login-head">
+                  <div class="profile-avatar profile-avatar-large" id="selectedProfileAvatar">
+                    <img id="selectedProfileAvatarImage" alt="" hidden />
+                    <span id="selectedProfileAvatarFallback"></span>
+                  </div>
+                  <div class="profile-login-copy">
+                    <p class="eyebrow">Profile preview</p>
+                    <h3 id="selectedProfileName"></h3>
+                    <p class="muted" id="selectedProfileRole"></p>
+                  </div>
+                </div>
+                <p class="profile-login-title" id="selectedProfileTitle"></p>
+                <div class="profile-login-form">
+                  <input type="password" id="selectedProfilePassword" placeholder="Enter password" />
+                  <button type="button" id="selectedProfileEnter">Login</button>
+                </div>
+                <small class="profile-hint" id="selectedProfileHint" aria-live="polite"></small>
+              </div>
+            </div>
+          </section>
+
+          <section class="dashboard-panel" id="dashboardPanel" hidden>
+            <article class="section-panel">
+              <div class="section-panel-header">
+                <p class="eyebrow">Section view</p>
+                <h3 id="sectionTitle">Stocks</h3>
+              </div>
+              <div class="tab-content" id="tabContent"></div>
+            </article>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

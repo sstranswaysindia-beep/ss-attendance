@@ -1,3 +1,0 @@
-- Khata Book: backdate rules respect `advance_entry=Y`; others see a friendly message after cutoff.
-- Safety Training: slower Hindi TTS with word highlighting, resume from last position, and progress bar.
-- Safety UI: capped text scaling to prevent layout issues in safety modules.

@@ -13,6 +13,9 @@ function plantAllowsNullVehicle(mysqli $conn, ?int $plantId): bool {
     if ($plantId === null) {
         return false;
     }
+    if ($plantId === 61) {
+        return true;
+    }
     if (array_key_exists($plantId, $cache)) {
         return $cache[$plantId];
     }
@@ -265,6 +268,16 @@ if ($locationArray !== null && $locationJsonValue === null) {
     $locationJsonIsArray = true;
 }
 
+// Normalize web payload keys (lat/lng -> latitude/longitude)
+if (is_array($locationArray)) {
+    if (!isset($locationArray['latitude']) && isset($locationArray['lat'])) {
+        $locationArray['latitude'] = $locationArray['lat'];
+    }
+    if (!isset($locationArray['longitude']) && isset($locationArray['lng'])) {
+        $locationArray['longitude'] = $locationArray['lng'];
+    }
+}
+
 try {
     if ($actionRaw === 'check_in') {
         $checkInGeofence = geofenceEvaluate($conn, $plantId, $locationArray, $geofencingEnabled);
@@ -457,12 +470,12 @@ try {
     // Find open attendance record for check-out
     if ($driverExists) {
         // For drivers, check by driver_id
-        $openStmt = $conn->prepare('SELECT id FROM attendance WHERE driver_id = ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
+        $openStmt = $conn->prepare('SELECT id, plant_id FROM attendance WHERE driver_id = ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
         $openStmt->bind_param('i', $driverId);
     } else {
         // For supervisors without driver_id, check by NULL driver_id and user_id in notes field
         $supervisorUserIdPattern = "SUPERVISOR_USER_ID:$driverId%";
-        $openStmt = $conn->prepare('SELECT id FROM attendance WHERE driver_id IS NULL AND notes LIKE ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
+        $openStmt = $conn->prepare('SELECT id, plant_id FROM attendance WHERE driver_id IS NULL AND notes LIKE ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
         $openStmt->bind_param('s', $supervisorUserIdPattern);
     }
     
@@ -471,7 +484,7 @@ try {
     $openStmt->close();
 
     if (!$openRow && $assignmentId) {
-        $fallbackStmt = $conn->prepare('SELECT id FROM attendance WHERE assignment_id = ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
+        $fallbackStmt = $conn->prepare('SELECT id, plant_id FROM attendance WHERE assignment_id = ? AND out_time IS NULL ORDER BY in_time DESC LIMIT 1');
         if ($fallbackStmt) {
             $fallbackStmt->bind_param('i', $assignmentId);
             $fallbackStmt->execute();
@@ -518,12 +531,17 @@ try {
     }
 
     $attendanceId = (int)$openRow['id'];
+    $openRecordPlantId = isset($openRow['plant_id']) ? (int)$openRow['plant_id'] : 0;
+    $effectivePlantId = $openRecordPlantId > 0 ? $openRecordPlantId : $plantId;
     logCheckInOut(
         sprintf(
-            'open_record_found action=%s driverId=%s attendanceId=%s',
+            'open_record_found action=%s driverId=%s attendanceId=%s requestPlantId=%s openPlantId=%s effectivePlantId=%s',
             $actionRaw,
             (string) $driverId,
-            (string) $attendanceId
+            (string) $attendanceId,
+            (string) $plantId,
+            (string) $openRecordPlantId,
+            (string) $effectivePlantId
         ),
         $logFile
     );
@@ -534,14 +552,14 @@ try {
     
     $photoUrl = apiSaveUploadedFile('photo', $driverId, 'attendance_out', $photoPath, $photoFilename);
 
-    $checkOutGeofence = geofenceEvaluate($conn, $plantId, $locationArray, $geofencingEnabled);
+    $checkOutGeofence = geofenceEvaluate($conn, $effectivePlantId, $locationArray, $geofencingEnabled);
     if ($checkOutGeofence['status'] === 'error') {
         logCheckInOut(
             sprintf(
                 'geofence_block action=%s driverId=%s plantId=%s reason=%s',
                 $actionRaw,
                 (string) $driverId,
-                (string) $plantId,
+                (string) $effectivePlantId,
                 (string) ($checkOutGeofence['message'] ?? 'unknown')
             ),
             $logFile
@@ -549,7 +567,7 @@ try {
         error_log(sprintf(
             'GEOFENCE BLOCK check_out driver=%s plant=%d reason=%s',
             $driverExists ? (string) $driverId : 'user_' . $driverId,
-            $plantId,
+            $effectivePlantId,
             $checkOutGeofence['message'] ?? 'unknown'
         ));
         apiRespond(422, [
@@ -562,7 +580,7 @@ try {
         error_log(sprintf(
             'GEOFENCE check_out driver=%s plant=%d inside=%s',
             $driverExists ? (string) $driverId : 'user_' . $driverId,
-            $plantId,
+            $effectivePlantId,
             $checkOutOutOfGeofence === 0 ? 'true' : 'false'
         ));
     }
@@ -590,7 +608,7 @@ try {
         $eventTimeSql,
         $photoUrl,
         $vehicleId,
-        $plantId,
+        $effectivePlantId,
         $assignmentId,
         $locationJsonValue,
         $checkOutOutOfGeofence,

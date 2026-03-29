@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'core/models/app_user.dart';
+import 'core/navigation/app_route_observer.dart';
 import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
 import 'core/services/notification_service.dart';
@@ -57,8 +57,8 @@ class _SSAdminAppState extends State<SSAdminApp> {
   }
 
   Future<void> _loadSavedUser() async {
+    final savedUser = await AuthStorageService.getUser();
     try {
-      final savedUser = await AuthStorageService.getUser();
       if (savedUser != null) {
         await _authRepository.syncDeviceInfo(
           user: savedUser,
@@ -74,7 +74,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _currentUser = null;
+          _currentUser = savedUser;
           _isLoading = false;
         });
       }
@@ -82,7 +82,11 @@ class _SSAdminAppState extends State<SSAdminApp> {
   }
 
   Future<void> _handleLogin(AppUser user) async {
-    await _authRepository.syncDeviceInfo(user: user, appVariant: 'admin');
+    try {
+      await _authRepository.syncDeviceInfo(user: user, appVariant: 'admin');
+    } catch (_) {
+      // Keep login flow resilient even if server-side sync fails.
+    }
     await AuthStorageService.saveUser(user);
     if (mounted) {
       setState(() => _currentUser = user);
@@ -91,6 +95,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
 
   Future<void> _handleLogout() async {
     await AuthStorageService.clearUser();
+    NotificationService().unbindInboxUser();
     if (mounted) {
       setState(() => _currentUser = null);
     }
@@ -117,6 +122,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'SS Admin',
+        navigatorObservers: [appRouteObserver],
         theme: baseTheme.copyWith(
           textTheme: textTheme,
           appBarTheme: baseTheme.appBarTheme.copyWith(
@@ -143,9 +149,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
           return MediaQuery(
             // Lock text scaling across all platforms so system display/font size
             // changes do not inflate UI text sizes.
-            data: mediaQuery.copyWith(
-              textScaler: const TextScaler.linear(1.0),
-            ),
+            data: mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0)),
             child: InAppNotificationBannerHost(
               hideBell: child is _LoginRoute,
               child: child,
@@ -153,7 +157,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
           );
         },
         home: _isLoading
-            ? const Scaffold(body: Center(child: AppLoader()))
+            ? const Scaffold(body: AppStartupLoader())
             : _currentUser == null
             ? _LoginRoute(
                 child: LoginScreen(
@@ -187,6 +191,8 @@ class _AdminHomeSwitchboard extends StatelessWidget {
       case UserRole.supervisor:
         return SupervisorDashboardScreen(user: user, onLogout: onLogout);
       case UserRole.driver:
+        return _UnauthorizedRoleScreen(onLogout: onLogout);
+      case UserRole.referral:
         return _UnauthorizedRoleScreen(onLogout: onLogout);
     }
   }

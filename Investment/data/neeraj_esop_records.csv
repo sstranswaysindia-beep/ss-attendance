@@ -1,0 +1,7 @@
+s_no,year,investment,remarks,euro_alloted,maturity_date,expected_return,amount_received
+1,2020,"28,424","Maturity After 5 year in ICICI Bank Account",325.98,2025,5x,170421.99
+2,2021,"32,377","Maturity After 5 year in ICICI Bank Account",373.85,2026,5x,-
+3,2022,"44,755","Maturity After 5 year in ICICI Bank Account",545.85,2027,5X,-
+4,2023,46900,"Maturity After 5 year in ICICI Bank Account",526.65,2028,5x,-
+5,2024,54316,"Maturity After 5 year in ICICI Bank Account",602.30,2029,5x,-
+6,2025,59265,"Maturity After 5 year in ICICI Bank Account",581.79,2030,5x,-
