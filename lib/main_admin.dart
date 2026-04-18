@@ -1,5 +1,9 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
@@ -9,13 +13,16 @@ import 'core/models/app_user.dart';
 import 'core/navigation/app_route_observer.dart';
 import 'core/services/auth_repository.dart';
 import 'core/services/auth_storage_service.dart';
+import 'core/services/background_location_disclosure_service.dart';
 import 'core/services/notification_service.dart';
 import 'firebase_options.dart';
+import 'features/auth/background_location_disclosure_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/dashboard/admin_dashboard_screen.dart';
 import 'features/dashboard/supervisor_dashboard_screen.dart';
 import 'core/widgets/in_app_notification_banner.dart';
 import 'core/widgets/app_loader.dart';
+import 'core/widgets/location_permission_sheet.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -49,48 +56,81 @@ class _SSAdminAppState extends State<SSAdminApp> {
   AppUser? _currentUser;
   bool _isLoading = true;
   final AuthRepository _authRepository = AuthRepository();
+  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+  Timer? _startupTimeoutTimer;
 
   @override
   void initState() {
     super.initState();
+    _startupTimeoutTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    });
     _loadSavedUser();
   }
 
+  @override
+  void dispose() {
+    _startupTimeoutTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _loadSavedUser() async {
-    final savedUser = await AuthStorageService.getUser();
+    final savedUser = await _readSavedUserBestEffort();
+    if (mounted) {
+      setState(() {
+        _currentUser = savedUser;
+        _isLoading = false;
+      });
+      _startupTimeoutTimer?.cancel();
+    }
+    if (savedUser == null) {
+      return;
+    }
+    unawaited(_runPostLoginSetup(savedUser));
+  }
+
+  Future<AppUser?> _readSavedUserBestEffort() async {
     try {
-      if (savedUser != null) {
-        await _authRepository.syncDeviceInfo(
-          user: savedUser,
-          appVariant: 'admin',
-        );
-      }
-      if (mounted) {
-        setState(() {
-          _currentUser = savedUser;
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _currentUser = savedUser;
-          _isLoading = false;
-        });
-      }
+      return await AuthStorageService.getUser().timeout(
+        const Duration(seconds: 4),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('SSAdminApp: saved user load failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return null;
     }
   }
 
-  Future<void> _handleLogin(AppUser user) async {
+  void _handleLogin(AppUser user) {
+    print('SSAdminApp: received login for ${user.role} ${user.id}');
+    if (mounted) {
+      setState(() => _currentUser = user);
+      _startupTimeoutTimer?.cancel();
+      print('SSAdminApp: current user set, showing dashboard');
+    }
+    unawaited(_saveUserBestEffort(user));
+    unawaited(_runPostLoginSetup(user));
+  }
+
+  Future<void> _saveUserBestEffort(AppUser user) async {
+    try {
+      await AuthStorageService.saveUser(user);
+    } catch (error, stackTrace) {
+      print('SSAdminApp: local login save failed: $error');
+      print(stackTrace);
+    }
+  }
+
+  Future<void> _runPostLoginSetup(AppUser user) async {
     try {
       await _authRepository.syncDeviceInfo(user: user, appVariant: 'admin');
+      await _ensureAdminBackgroundLocationConsent(user);
     } catch (_) {
       // Keep login flow resilient even if server-side sync fails.
     }
-    await AuthStorageService.saveUser(user);
-    if (mounted) {
-      setState(() => _currentUser = user);
-    }
+    await _saveUserBestEffort(user);
   }
 
   Future<void> _handleLogout() async {
@@ -99,6 +139,63 @@ class _SSAdminAppState extends State<SSAdminApp> {
     if (mounted) {
       setState(() => _currentUser = null);
     }
+  }
+
+  Future<void> _ensureAdminBackgroundLocationConsent(AppUser user) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
+    final alreadyAccepted =
+        await BackgroundLocationDisclosureService.isAccepted();
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.always && alreadyAccepted) {
+      return;
+    }
+
+    if (!alreadyAccepted) {
+      final navigator = await _waitForNavigatorState();
+      if (!mounted || navigator == null) {
+        return;
+      }
+      final accepted = await navigator.push<bool>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => const BackgroundLocationDisclosureScreen(),
+        ),
+      );
+      if (accepted != true) {
+        return;
+      }
+      await BackgroundLocationDisclosureService.markAccepted();
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    if (permission == LocationPermission.always) {
+      return;
+    }
+
+    final navigator = await _waitForNavigatorState();
+    if (!mounted || navigator == null) {
+      return;
+    }
+
+    final granted = await LocationPermissionSheet.show(navigator.context);
+    if (granted) {
+      return;
+    }
+  }
+
+  Future<NavigatorState?> _waitForNavigatorState() async {
+    for (var i = 0; i < 25; i++) {
+      final nav = _navKey.currentState;
+      if (nav != null) return nav;
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+    }
+    return null;
   }
 
   @override
@@ -122,6 +219,7 @@ class _SSAdminAppState extends State<SSAdminApp> {
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'SS Admin',
+        navigatorKey: _navKey,
         navigatorObservers: [appRouteObserver],
         theme: baseTheme.copyWith(
           textTheme: textTheme,
@@ -151,29 +249,51 @@ class _SSAdminAppState extends State<SSAdminApp> {
             // changes do not inflate UI text sizes.
             data: mediaQuery.copyWith(textScaler: const TextScaler.linear(1.0)),
             child: InAppNotificationBannerHost(
-              hideBell: child is _LoginRoute,
+              hideBell: _currentUser == null,
               child: child,
             ),
           );
         },
-        home: _isLoading
-            ? const Scaffold(body: AppStartupLoader())
-            : _currentUser == null
-            ? _LoginRoute(
-                child: LoginScreen(
-                  onLogin: _handleLogin,
-                  appTitle: 'SS Transways India',
-                  appSubtitle: 'Manage HR attendance and approvals',
-                  screenTitle: 'Admin Login',
-                  appVariant: 'admin',
-                ),
-              )
-            : _AdminHomeSwitchboard(
-                user: _currentUser!,
-                onLogout: _handleLogout,
-              ),
+        home: _AdminAuthRoot(
+          isLoading: _isLoading,
+          user: _currentUser,
+          onLogin: _handleLogin,
+          onLogout: _handleLogout,
+        ),
       ),
     );
+  }
+}
+
+class _AdminAuthRoot extends StatelessWidget {
+  const _AdminAuthRoot({
+    required this.isLoading,
+    required this.user,
+    required this.onLogin,
+    required this.onLogout,
+  });
+
+  final bool isLoading;
+  final AppUser? user;
+  final void Function(AppUser user) onLogin;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(body: AppStartupLoader());
+    }
+    final currentUser = user;
+    if (currentUser == null) {
+      return LoginScreen(
+        onLogin: onLogin,
+        appTitle: 'SS Transways India',
+        appSubtitle: 'Manage HR attendance and approvals',
+        screenTitle: 'Admin Login',
+        appVariant: 'admin',
+      );
+    }
+    return _AdminHomeSwitchboard(user: currentUser, onLogout: onLogout);
   }
 }
 
@@ -195,17 +315,6 @@ class _AdminHomeSwitchboard extends StatelessWidget {
       case UserRole.referral:
         return _UnauthorizedRoleScreen(onLogout: onLogout);
     }
-  }
-}
-
-class _LoginRoute extends StatelessWidget {
-  const _LoginRoute({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return child;
   }
 }
 

@@ -18,29 +18,60 @@ class AuthFailure implements Exception {
   String toString() => 'AuthFailure: $message';
 }
 
+class AuthAccessStatus {
+  const AuthAccessStatus({
+    required this.shouldLogout,
+    this.message,
+    this.driverStatus,
+  });
+
+  const AuthAccessStatus.allowed()
+    : shouldLogout = false,
+      message = null,
+      driverStatus = null;
+
+  final bool shouldLogout;
+  final String? message;
+  final String? driverStatus;
+}
+
 class AuthRepository {
-  AuthRepository({http.Client? client, Uri? endpoint, Uri? deviceEndpoint})
-    : _client = client ?? http.Client(),
-      _endpoint = endpoint ?? Uri.parse(_defaultEndpoint),
-      _deviceEndpoint = deviceEndpoint ?? Uri.parse(_defaultDeviceEndpoint);
+  AuthRepository({
+    http.Client? client,
+    Uri? endpoint,
+    Uri? deviceEndpoint,
+    Uri? sessionStatusEndpoint,
+  }) : _client = client ?? http.Client(),
+       _endpoint = endpoint ?? Uri.parse(_defaultEndpoint),
+       _deviceEndpoint = deviceEndpoint ?? Uri.parse(_defaultDeviceEndpoint),
+       _sessionStatusEndpoint =
+           sessionStatusEndpoint ?? Uri.parse(_defaultSessionStatusEndpoint);
 
   static const String _defaultEndpoint =
       'https://sstranswaysindia.com/api/mobile/mobile_login.php';
   static const String _defaultDeviceEndpoint =
       'https://sstranswaysindia.com/api/mobile/user_device_sync.php';
+  static const String _defaultSessionStatusEndpoint =
+      'https://sstranswaysindia.com/api/mobile/session_status.php';
   static const String _defaultTrainingReqStatusEndpoint =
       'https://sstranswaysindia.com/api/mobile/training_req_status.php';
   static const String _defaultTrainingReqClearEndpoint =
       'https://sstranswaysindia.com/api/mobile/training_req_clear.php';
+  static const String _defaultEmployeeRegStatusEndpoint =
+      'https://sstranswaysindia.com/api/mobile/employee_reg_status.php';
 
   final http.Client _client;
   final Uri _endpoint;
   final Uri _deviceEndpoint;
+  final Uri _sessionStatusEndpoint;
   final Uri _trainingReqStatusEndpoint = Uri.parse(
     _defaultTrainingReqStatusEndpoint,
   );
   final Uri _trainingReqClearEndpoint = Uri.parse(
     _defaultTrainingReqClearEndpoint,
+  );
+  final Uri _employeeRegStatusEndpoint = Uri.parse(
+    _defaultEmployeeRegStatusEndpoint,
   );
 
   static final DeviceInfoPlugin _deviceInfoPlugin = DeviceInfoPlugin();
@@ -68,11 +99,13 @@ class AuthRepository {
         requestBody['appVariant'] = appVariant;
       }
 
-      final response = await _client.post(
-        _endpoint,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(requestBody),
-      );
+      final response = await _client
+          .post(
+            _endpoint,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode(requestBody),
+          )
+          .timeout(const Duration(seconds: 15));
 
       final statusCode = response.statusCode;
       final body = response.body;
@@ -114,6 +147,7 @@ class AuthRepository {
       }
 
       final role = _parseRole(userJson['role']?.toString());
+      final apiUsername = userJson['username']?.toString() ?? username;
       final roleRaw = userJson['role']?.toString() ?? '';
       final referralLikeUser =
           _parseFlag(userJson['is_referral_user']) ||
@@ -134,11 +168,12 @@ class AuthRepository {
       final bool advanceEntryAllowed = _parseFlag(
         userJson['advance_entry'] ?? userJson['advanceEntry'],
       );
+      final bool employeeRegEnabled = _parseFlag(
+        userJson['employee_reg'] ?? userJson['employeeRegEnabled'],
+      );
 
-      Map<String, dynamic>? driverJson =
-          payload['driver'] as Map<String, dynamic>?;
-      Map<String, dynamic>? supervisorJson =
-          payload['supervisor'] as Map<String, dynamic>?;
+      final driverJson = _asStringMap(payload['driver']);
+      final supervisorJson = _asStringMap(payload['supervisor']);
 
       // Debug: Print flow information
       print('AuthRepository: Role: $role');
@@ -156,11 +191,13 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
+          username: apiUsername,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
           advanceEntryAllowed: advanceEntryAllowed,
+          employeeRegEnabled: employeeRegEnabled,
         );
       }
 
@@ -175,11 +212,13 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
+          username: apiUsername,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
           advanceEntryAllowed: advanceEntryAllowed,
+          employeeRegEnabled: employeeRegEnabled,
         );
       }
 
@@ -194,25 +233,25 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: UserRole.referral,
+          username: apiUsername,
           canViewDocuments: canViewDocuments,
           geofencingEnabled: geofencingEnabled,
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
           advanceEntryAllowed: advanceEntryAllowed,
+          employeeRegEnabled: employeeRegEnabled,
         );
       }
 
       // Handle supervisors without driver_id (fallback case)
-      if (role == UserRole.supervisor &&
-          driverJson == null &&
-          supervisorJson != null) {
+      if (role == UserRole.supervisor && driverJson == null) {
         final displayName =
             userJson['full_name']?.toString() ??
             userJson['username']?.toString() ??
             username;
 
         // Process vehicles for supervisors without driver_id
-        final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
+        final vehiclesJson = _asList(payload['vehicles']);
         print(
           'AuthRepository: Processing vehicles for supervisor without driver_id',
         );
@@ -220,8 +259,11 @@ class AuthRepository {
         final vehicles = vehiclesJson
             .map((item) {
               print('AuthRepository: Vehicle item: $item');
-              return DriverVehicle.fromJson(item as Map<String, dynamic>);
+              final vehicleJson = _asStringMap(item);
+              if (vehicleJson == null) return null;
+              return DriverVehicle.fromJson(vehicleJson);
             })
+            .whereType<DriverVehicle>()
             .where((vehicle) {
               final isValid =
                   vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty;
@@ -236,11 +278,12 @@ class AuthRepository {
         );
 
         // Get plant information for supervisors without driver_id
-        final supervisedPlants =
-            (supervisorJson['supervisedPlants'] as List<dynamic>? ?? [])
-                .cast<Map<String, dynamic>>();
-        final supervisedPlantIds =
-            supervisorJson['supervisedPlantIds'] as List<dynamic>? ?? [];
+        final supervisedPlants = _asStringMapList(
+          supervisorJson?['supervisedPlants'],
+        );
+        final supervisedPlantIds = _asList(
+          supervisorJson?['supervisedPlantIds'],
+        );
 
         // Set default plant information from first supervised plant
         String? defaultPlantId;
@@ -254,6 +297,7 @@ class AuthRepository {
           id: userJson['id']?.toString() ?? username,
           displayName: displayName,
           role: role,
+          username: apiUsername,
           // Set plant information for attendance and other features
           plantId: defaultPlantId,
           plantName: defaultPlantName,
@@ -267,6 +311,7 @@ class AuthRepository {
           proxyEnabled: proxyEnabled,
           trainingRequired: trainingRequired,
           advanceEntryAllowed: advanceEntryAllowed,
+          employeeRegEnabled: employeeRegEnabled,
         );
       }
 
@@ -275,22 +320,23 @@ class AuthRepository {
         throw AuthFailure('Missing driver mapping from server.');
       }
 
-      driverJson ??= <String, dynamic>{};
+      final effectiveDriverJson = driverJson ?? <String, dynamic>{};
 
-      final assignmentJson = driverJson['assignment'] as Map<String, dynamic>?;
+      final assignmentJson = _asStringMap(effectiveDriverJson['assignment']);
 
       final defaultPlantId =
-          driverJson['defaultPlantId']?.toString() ??
-          driverJson['plantId']?.toString();
-      final defaultPlantName = driverJson['defaultPlantName']?.toString();
+          effectiveDriverJson['defaultPlantId']?.toString() ??
+          effectiveDriverJson['plantId']?.toString();
+      final defaultPlantName = effectiveDriverJson['defaultPlantName']
+          ?.toString();
       final assignmentPlantId = assignmentJson?['plantId']?.toString();
       final assignmentPlantName = assignmentJson?['plantName']?.toString();
       final assignmentVehicleId = assignmentJson?['vehicleId']?.toString();
       final assignmentVehicleNumber = assignmentJson?['vehicleNumber']
           ?.toString();
       final assignmentId = assignmentJson?['assignmentId']?.toString();
-      final supervisorName = driverJson['supervisorName']?.toString();
-      final joiningDateRaw = driverJson['joiningDate']?.toString();
+      final supervisorName = effectiveDriverJson['supervisorName']?.toString();
+      final joiningDateRaw = effectiveDriverJson['joiningDate']?.toString();
       DateTime? joiningDate;
       if (joiningDateRaw != null && joiningDateRaw.isNotEmpty) {
         joiningDate = DateTime.tryParse(joiningDateRaw);
@@ -307,9 +353,9 @@ class AuthRepository {
 
       final vehicleNumber = assignmentVehicleNumber?.isNotEmpty == true
           ? assignmentVehicleNumber
-          : driverJson['vehicleNumber']?.toString();
+          : effectiveDriverJson['vehicleNumber']?.toString();
 
-      final vehiclesJson = payload['vehicles'] as List<dynamic>? ?? const [];
+      final vehiclesJson = _asList(payload['vehicles']);
       print(
         'AuthRepository: Processing vehicles for driver/supervisor with driver_id',
       );
@@ -317,8 +363,11 @@ class AuthRepository {
       final vehicles = vehiclesJson
           .map((item) {
             print('AuthRepository: Vehicle item: $item');
-            return DriverVehicle.fromJson(item as Map<String, dynamic>);
+            final vehicleJson = _asStringMap(item);
+            if (vehicleJson == null) return null;
+            return DriverVehicle.fromJson(vehicleJson);
           })
+          .whereType<DriverVehicle>()
           .where((vehicle) {
             final isValid =
                 vehicle.vehicleNumber.isNotEmpty && vehicle.id.isNotEmpty;
@@ -335,7 +384,7 @@ class AuthRepository {
           (role == UserRole.supervisor &&
               userJson['full_name']?.toString().isNotEmpty == true)
           ? userJson['full_name']?.toString() ?? username
-          : (driverJson['name']?.toString() ?? username);
+          : (effectiveDriverJson['name']?.toString() ?? username);
 
       String? pickString(Map<String, dynamic> source, List<String> keys) {
         for (final key in keys) {
@@ -349,30 +398,33 @@ class AuthRepository {
         return null;
       }
 
-      final contactNumber = pickString(driverJson, const [
+      final contactNumber = pickString(effectiveDriverJson, const [
         'contact',
         'contact_number',
         'phone',
       ]);
-      final dlNumber = pickString(driverJson, const ['dlNumber', 'dl_number']);
-      final dlValidity = pickString(driverJson, const [
+      final dlNumber = pickString(effectiveDriverJson, const [
+        'dlNumber',
+        'dl_number',
+      ]);
+      final dlValidity = pickString(effectiveDriverJson, const [
         'dlValidity',
         'dl_validity',
         'license_expiry_date',
       ]);
-      final dlIssueDate = pickString(driverJson, const [
+      final dlIssueDate = pickString(effectiveDriverJson, const [
         'dlIssueDate',
         'dl_issue_date',
       ]);
-      final nomineeName = pickString(driverJson, const [
+      final nomineeName = pickString(effectiveDriverJson, const [
         'nomineeName',
         'nominee_name',
       ]);
-      final nomineeRelation = pickString(driverJson, const [
+      final nomineeRelation = pickString(effectiveDriverJson, const [
         'nomineeRelation',
         'relation_nominee',
       ]);
-      final nomineeContact = pickString(driverJson, const [
+      final nomineeContact = pickString(effectiveDriverJson, const [
         'nomineeContact',
         'nominee_contact',
       ]);
@@ -381,8 +433,9 @@ class AuthRepository {
         id: userJson['id']?.toString() ?? username,
         displayName: displayName,
         role: role,
-        employeeId: driverJson['employeeId']?.toString(),
-        driverId: driverJson['driverId']?.toString(),
+        username: apiUsername,
+        employeeId: effectiveDriverJson['employeeId']?.toString(),
+        driverId: effectiveDriverJson['driverId']?.toString(),
         plantId: plantId,
         plantName: plantName,
         defaultPlantId: defaultPlantId,
@@ -392,18 +445,18 @@ class AuthRepository {
         assignmentPlantName: assignmentPlantName,
         assignmentVehicleId: assignmentVehicleId,
         assignmentVehicleNumber: assignmentVehicleNumber,
-        salary: driverJson['salary']?.toString(),
-        profilePhoto: driverJson['profilePhoto']?.toString(),
-        aadhaar: driverJson['aadhaar']?.toString(),
+        salary: effectiveDriverJson['salary']?.toString(),
+        profilePhoto: effectiveDriverJson['profilePhoto']?.toString(),
+        aadhaar: effectiveDriverJson['aadhaar']?.toString(),
         contactNumber: contactNumber,
-        esiNumber: driverJson['esiNumber']?.toString(),
-        uanNumber: driverJson['uanNumber']?.toString(),
-        ifscCode: driverJson['ifsc']?.toString(),
-        ifscVerified: driverJson['ifscVerified'] == true,
-        bankAccount: driverJson['bankAccount']?.toString(),
-        branchName: driverJson['branchName']?.toString(),
-        fatherName: driverJson['fatherName']?.toString(),
-        address: driverJson['address']?.toString(),
+        esiNumber: effectiveDriverJson['esiNumber']?.toString(),
+        uanNumber: effectiveDriverJson['uanNumber']?.toString(),
+        ifscCode: effectiveDriverJson['ifsc']?.toString(),
+        ifscVerified: effectiveDriverJson['ifscVerified'] == true,
+        bankAccount: effectiveDriverJson['bankAccount']?.toString(),
+        branchName: effectiveDriverJson['branchName']?.toString(),
+        fatherName: effectiveDriverJson['fatherName']?.toString(),
+        address: effectiveDriverJson['address']?.toString(),
         dlNumber: dlNumber,
         dlValidity: dlValidity,
         dlIssueDate: dlIssueDate,
@@ -411,26 +464,50 @@ class AuthRepository {
         nomineeRelation: nomineeRelation,
         nomineeContact: nomineeContact,
         vehicleNumber: vehicleNumber,
-        driverRole: driverJson['role']?.toString(),
+        driverRole: effectiveDriverJson['role']?.toString(),
         availableVehicles: vehicles,
         joiningDate: joiningDate,
         supervisorName: supervisorName,
-        supervisedPlants:
-            (supervisorJson?['supervisedPlants'] as List<dynamic>? ?? [])
-                .cast<Map<String, dynamic>>(),
-        supervisedPlantIds:
-            supervisorJson?['supervisedPlantIds'] as List<dynamic>? ?? [],
+        supervisedPlants: _asStringMapList(supervisorJson?['supervisedPlants']),
+        supervisedPlantIds: _asList(supervisorJson?['supervisedPlantIds']),
         canViewDocuments: canViewDocuments,
         geofencingEnabled: geofencingEnabled,
         proxyEnabled: proxyEnabled,
         trainingRequired: trainingRequired,
         advanceEntryAllowed: advanceEntryAllowed,
+        employeeRegEnabled: employeeRegEnabled,
       );
     } on AuthFailure {
       rethrow;
-    } catch (_) {
-      throw AuthFailure('Unable to reach server. Please try again later.');
+    } catch (error, stackTrace) {
+      print('AuthRepository: Login parsing failed: $error');
+      print(stackTrace);
+      throw AuthFailure('Login data error: $error');
     }
+  }
+
+  Map<String, dynamic>? _asStringMap(dynamic value) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    if (value is Map) {
+      return value.map((key, item) => MapEntry(key.toString(), item));
+    }
+    return null;
+  }
+
+  List<dynamic> _asList(dynamic value) {
+    if (value is List) {
+      return value;
+    }
+    return const [];
+  }
+
+  List<Map<String, dynamic>> _asStringMapList(dynamic value) {
+    return _asList(value)
+        .map(_asStringMap)
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
   }
 
   UserRole _parseRole(String? raw) {
@@ -562,11 +639,13 @@ class AuthRepository {
       body['username'] = username;
     }
     try {
-      await _client.post(
-        _deviceEndpoint,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode(body),
-      );
+      await _client
+          .post(
+            _deviceEndpoint,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
       // Ignore errors; device reporting is best-effort.
     }
@@ -588,16 +667,65 @@ class AuthRepository {
     }
   }
 
+  Future<AuthAccessStatus> checkSessionStatus({required AppUser user}) async {
+    final body = <String, dynamic>{
+      'userId': user.id,
+      'username': user.username ?? user.displayName,
+      'role': user.role.name,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    final driverId = user.driverId;
+    if (driverId != null && driverId.isNotEmpty) {
+      body['driverId'] = driverId;
+    }
+
+    try {
+      final response = await _client
+          .post(
+            _sessionStatusEndpoint,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 8));
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final shouldLogout =
+          payload['shouldLogout'] == true ||
+          payload['isActive'] == false ||
+          payload['error'] == 'account_inactive' ||
+          payload['error'] == 'driver_not_found' ||
+          payload['error'] == 'session_mismatch' ||
+          payload['error'] == 'user_not_found';
+
+      if (shouldLogout) {
+        return AuthAccessStatus(
+          shouldLogout: true,
+          message: payload['message']?.toString(),
+          driverStatus: payload['driverStatus']?.toString(),
+        );
+      }
+
+      return const AuthAccessStatus.allowed();
+    } catch (_) {
+      // Network/server format failures should not force a logout. The login API
+      // and the next successful status check still enforce disabled accounts.
+      return const AuthAccessStatus.allowed();
+    }
+  }
+
   Future<bool?> fetchTrainingRequired({
     required String userId,
     String? username,
   }) async {
     try {
-      final response = await _client.post(
-        _trainingReqStatusEndpoint,
-        headers: const {'Content-Type': 'application/json'},
-        body: jsonEncode({'userId': userId, 'username': username}),
-      );
+      final response = await _client
+          .post(
+            _trainingReqStatusEndpoint,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'userId': userId, 'username': username}),
+          )
+          .timeout(const Duration(seconds: 8));
       final payload = jsonDecode(response.body) as Map<String, dynamic>;
       if (response.statusCode != 200 || payload['status'] != 'ok') {
         throw AuthFailure(
@@ -616,14 +744,41 @@ class AuthRepository {
     required String userId,
     String? username,
   }) async {
-    final response = await _client.post(
-      _trainingReqClearEndpoint,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'userId': userId, 'username': username}),
-    );
+    final response = await _client
+        .post(
+          _trainingReqClearEndpoint,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode({'userId': userId, 'username': username}),
+        )
+        .timeout(const Duration(seconds: 8));
     final payload = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200 || payload['status'] != 'ok') {
       throw AuthFailure(payload['error']?.toString() ?? 'Unable to clear flag');
+    }
+  }
+
+  Future<bool?> fetchEmployeeRegEnabled({
+    required String userId,
+    String? username,
+  }) async {
+    try {
+      final response = await _client
+          .post(
+            _employeeRegStatusEndpoint,
+            headers: const {'Content-Type': 'application/json'},
+            body: jsonEncode({'userId': userId, 'username': username}),
+          )
+          .timeout(const Duration(seconds: 8));
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      if (response.statusCode != 200 || payload['status'] != 'ok') {
+        throw AuthFailure(
+          payload['error']?.toString() ?? 'Unable to check flag',
+        );
+      }
+      final raw = payload['employee_reg'] ?? payload['employeeRegEnabled'];
+      return _parseFlag(raw);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -634,17 +789,19 @@ class AuthRepository {
       final fcmToken = notificationService.fcmToken;
 
       if (fcmToken != null && fcmToken.isNotEmpty) {
-        final response = await _client.post(
-          Uri.parse(
-            'https://sstranswaysindia.com/api/mobile/fcm_token_update.php',
-          ),
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'userId': userId,
-            'fcmToken': fcmToken,
-            'platform': 'mobile',
-          }),
-        );
+        final response = await _client
+            .post(
+              Uri.parse(
+                'https://sstranswaysindia.com/api/mobile/fcm_token_update.php',
+              ),
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode({
+                'userId': userId,
+                'fcmToken': fcmToken,
+                'platform': 'mobile',
+              }),
+            )
+            .timeout(const Duration(seconds: 8));
 
         if (response.statusCode == 200) {
           final payload = jsonDecode(response.body) as Map<String, dynamic>;

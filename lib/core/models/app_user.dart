@@ -49,6 +49,7 @@ class AppUser {
     this.proxyEnabled = false,
     this.trainingRequired = false,
     this.advanceEntryAllowed = false,
+    this.employeeRegEnabled = false,
   });
 
   final String id;
@@ -96,6 +97,7 @@ class AppUser {
   final bool proxyEnabled;
   final bool trainingRequired;
   final bool advanceEntryAllowed;
+  final bool employeeRegEnabled;
 
   AppUser copyWith({
     String? id,
@@ -143,6 +145,7 @@ class AppUser {
     bool? proxyEnabled,
     bool? trainingRequired,
     bool? advanceEntryAllowed,
+    bool? employeeRegEnabled,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -191,6 +194,7 @@ class AppUser {
       proxyEnabled: proxyEnabled ?? this.proxyEnabled,
       trainingRequired: trainingRequired ?? this.trainingRequired,
       advanceEntryAllowed: advanceEntryAllowed ?? this.advanceEntryAllowed,
+      employeeRegEnabled: employeeRegEnabled ?? this.employeeRegEnabled,
     );
   }
 
@@ -241,6 +245,7 @@ class AppUser {
       'proxyEnabled': proxyEnabled,
       'trainingRequired': trainingRequired,
       'advanceEntryAllowed': advanceEntryAllowed,
+      'employeeRegEnabled': employeeRegEnabled,
     };
   }
 
@@ -315,6 +320,9 @@ class AppUser {
       ),
       advanceEntryAllowed: _parseGeofenceFlag(
         json['advanceEntryAllowed'] ?? json['advance_entry'],
+      ),
+      employeeRegEnabled: _parseGeofenceFlag(
+        json['employeeRegEnabled'] ?? json['employee_reg'],
       ),
     );
   }

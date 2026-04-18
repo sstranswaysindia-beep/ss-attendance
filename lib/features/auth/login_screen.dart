@@ -61,10 +61,6 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLoading = false;
   late final AuthRepository _authRepository;
 
-  // ── Welcome transition ──
-  bool _showWelcome = false;
-  AppUser? _loggedInUser;
-
   // ── Animation controllers ──
   late final AnimationController _logoController;
   late final AnimationController _glowController;
@@ -89,9 +85,6 @@ class _LoginScreenState extends State<LoginScreen>
   late final Animation<Offset> _field2Slide;
   late final Animation<double> _buttonScale;
   late final Animation<double> _buttonFade;
-
-  // ── Button press ──
-  bool _isPressed = false;
 
   @override
   void initState() {
@@ -250,6 +243,7 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin() async {
+    print('LoginScreen: sign in tapped');
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
@@ -264,24 +258,16 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (!mounted) return;
-
-      // Show welcome transition
-      setState(() {
-        _isLoading = false;
-        _showWelcome = true;
-        _loggedInUser = user;
-      });
-
-      // Wait for welcome animation to play, then navigate
-      await Future<void>.delayed(const Duration(milliseconds: 2800));
-
-      if (!mounted) return;
+      setState(() => _isLoading = false);
+      print('LoginScreen: login parsed successfully, handing off to app');
       widget.onLogin(user);
     } on AuthFailure catch (error) {
       if (!mounted) return;
       setState(() => _isLoading = false);
       showAppToast(context, error.message, isError: true);
-    } catch (_) {
+    } catch (error, stackTrace) {
+      print('LoginScreen: unexpected login error: $error');
+      print(stackTrace);
       if (!mounted) return;
       setState(() => _isLoading = false);
       showAppToast(
@@ -341,12 +327,6 @@ class _LoginScreenState extends State<LoginScreen>
                 ),
               ),
             ),
-
-            // ── Welcome transition overlay ──
-            if (_showWelcome && _loggedInUser != null)
-              _WelcomeTransitionOverlay(
-                displayName: _loggedInUser!.displayName,
-              ),
           ],
         ),
       ),
@@ -552,6 +532,8 @@ class _LoginScreenState extends State<LoginScreen>
                       label: 'Password',
                       icon: Icons.lock_outline_rounded,
                       isPassword: true,
+                      inputAction: TextInputAction.done,
+                      onSubmitted: _isLoading ? null : _handleLogin,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
                           return 'Enter password';
@@ -599,76 +581,48 @@ class _LoginScreenState extends State<LoginScreen>
                   opacity: _buttonFade,
                   child: ScaleTransition(
                     scale: _buttonScale,
-                    child: GestureDetector(
-                      onTapDown: (_) => setState(() => _isPressed = true),
-                      onTapUp: (_) => setState(() => _isPressed = false),
-                      onTapCancel: () => setState(() => _isPressed = false),
-                      child: AnimatedScale(
-                        scale: _isPressed ? 0.96 : 1.0,
-                        duration: const Duration(milliseconds: 120),
-                        child: Container(
-                          height: 44,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(14),
-                            gradient: _isLoading
-                                ? null
-                                : const LinearGradient(
-                                    begin: Alignment.centerLeft,
-                                    end: Alignment.centerRight,
-                                    colors: [
-                                      Color(0xFF153753),
-                                      Color(0xFF153753),
-                                    ],
-                                  ),
-                            color: _isLoading ? _BrandColors.inputBg : null,
-                            boxShadow: _isLoading
-                                ? null
-                                : [
-                                    BoxShadow(
-                                      color: _BrandColors.navy.withValues(
-                                        alpha: 0.25,
-                                      ),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 6),
-                                    ),
-                                  ],
+                    child: SizedBox(
+                      height: 44,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _handleLogin,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF153753),
+                          disabledBackgroundColor: _BrandColors.inputBg,
+                          foregroundColor: Colors.white,
+                          elevation: _isLoading ? 0 : 8,
+                          shadowColor: _BrandColors.navy.withValues(
+                            alpha: 0.25,
                           ),
-                          child: Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              onTap: _isLoading ? null : _handleLogin,
-                              borderRadius: BorderRadius.circular(14),
-                              child: Center(
-                                child: _isLoading
-                                    ? const SizedBox(
-                                        height: 22,
-                                        width: 22,
-                                        child: AppLoader(size: 22),
-                                      )
-                                    : Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            'Sign In',
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.white,
-                                              letterSpacing: 0.5,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 8),
-                                          const Icon(
-                                            Icons.arrow_forward_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                        ],
-                                      ),
-                              ),
-                            ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
                           ),
                         ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 22,
+                                width: 22,
+                                child: AppLoader(size: 22),
+                              )
+                            : Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Sign In',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ],
+                              ),
                       ),
                     ),
                   ),
@@ -749,6 +703,7 @@ class _LoginScreenState extends State<LoginScreen>
     required IconData icon,
     bool isPassword = false,
     TextInputAction? inputAction,
+    VoidCallback? onSubmitted,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
   }) {
@@ -756,6 +711,7 @@ class _LoginScreenState extends State<LoginScreen>
       controller: controller,
       obscureText: isPassword && !_showPassword,
       textInputAction: inputAction,
+      onFieldSubmitted: (_) => onSubmitted?.call(),
       autocorrect: false,
       enableSuggestions: false,
       textCapitalization: TextCapitalization.none,
@@ -826,280 +782,6 @@ class _LoginScreenState extends State<LoginScreen>
         ),
       ),
       validator: validator,
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// WELCOME TRANSITION OVERLAY
-// ═══════════════════════════════════════════════════════════════════════════════
-class _WelcomeTransitionOverlay extends StatefulWidget {
-  const _WelcomeTransitionOverlay({required this.displayName});
-  final String displayName;
-
-  @override
-  State<_WelcomeTransitionOverlay> createState() =>
-      _WelcomeTransitionOverlayState();
-}
-
-class _WelcomeTransitionOverlayState extends State<_WelcomeTransitionOverlay>
-    with TickerProviderStateMixin {
-  late final AnimationController _bgController;
-  late final AnimationController _logoController;
-  late final AnimationController _checkController;
-  late final AnimationController _textController;
-
-  late final Animation<double> _bgFade;
-  late final Animation<double> _logoScale;
-  late final Animation<double> _logoFade;
-  late final Animation<double> _checkProgress;
-  late final Animation<double> _ringScale;
-  late final Animation<double> _textFade;
-  late final Animation<Offset> _textSlide;
-
-  @override
-  void initState() {
-    super.initState();
-
-    // Background fade-in
-    _bgController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 400),
-    );
-    _bgFade = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _bgController, curve: Curves.easeOut));
-
-    // Logo entrance
-    _logoController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 700),
-    );
-    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _logoController, curve: Curves.elasticOut),
-    );
-    _logoFade = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0.0, 0.4, curve: Curves.easeOut),
-      ),
-    );
-    _ringScale = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _logoController,
-        curve: const Interval(0.3, 1.0, curve: Curves.easeOutCubic),
-      ),
-    );
-
-    // Checkmark draw
-    _checkController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _checkProgress = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _checkController, curve: Curves.easeInOut),
-    );
-
-    // Text entrance
-    _textController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 500),
-    );
-    _textFade = Tween<double>(
-      begin: 0.0,
-      end: 1.0,
-    ).animate(CurvedAnimation(parent: _textController, curve: Curves.easeOut));
-    _textSlide = Tween<Offset>(begin: const Offset(0, 0.3), end: Offset.zero)
-        .animate(
-          CurvedAnimation(parent: _textController, curve: Curves.easeOutCubic),
-        );
-
-    _startSequence();
-  }
-
-  void _startSequence() {
-    _bgController.forward();
-    Future.delayed(const Duration(milliseconds: 200), () {
-      if (mounted) _logoController.forward();
-    });
-    Future.delayed(const Duration(milliseconds: 800), () {
-      if (mounted) _checkController.forward();
-    });
-    Future.delayed(const Duration(milliseconds: 1300), () {
-      if (mounted) _textController.forward();
-    });
-  }
-
-  @override
-  void dispose() {
-    _bgController.dispose();
-    _logoController.dispose();
-    _checkController.dispose();
-    _textController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: Listenable.merge([
-        _bgController,
-        _logoController,
-        _checkController,
-        _textController,
-      ]),
-      builder: (context, _) {
-        return Positioned.fill(
-          child: FadeTransition(
-            opacity: _bgFade,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: RadialGradient(
-                  center: Alignment.center,
-                  radius: 1.2,
-                  colors: [
-                    Colors.white,
-                    const Color(0xFFF0F4FB),
-                    const Color(0xFFE4E9F4),
-                  ],
-                ),
-              ),
-              child: SafeArea(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Logo + success ring + checkmark
-                    FadeTransition(
-                      opacity: _logoFade,
-                      child: ScaleTransition(
-                        scale: _logoScale,
-                        child: SizedBox(
-                          width: 140,
-                          height: 140,
-                          child: Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              // Animated success ring
-                              ScaleTransition(
-                                scale: _ringScale,
-                                child: Container(
-                                  width: 140,
-                                  height: 140,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: const Color(
-                                        0xFF22C55E,
-                                      ).withValues(alpha: 0.3),
-                                      width: 3,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // Logo (transparent PNG, no container)
-                              SizedBox(
-                                width: 85,
-                                child: Image.asset(
-                                  AppAssets.logoNew,
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) => Icon(
-                                    Icons.local_shipping_rounded,
-                                    size: 38,
-                                    color: _BrandColors.navy.withValues(
-                                      alpha: 0.6,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // Checkmark badge
-                              Positioned(
-                                bottom: 4,
-                                right: 8,
-                                child: ScaleTransition(
-                                  scale: _checkProgress,
-                                  child: Container(
-                                    width: 36,
-                                    height: 36,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: const Color(0xFF22C55E),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: const Color(
-                                            0xFF22C55E,
-                                          ).withValues(alpha: 0.3),
-                                          blurRadius: 12,
-                                          offset: const Offset(0, 3),
-                                        ),
-                                      ],
-                                    ),
-                                    child: const Icon(
-                                      Icons.check_rounded,
-                                      color: Colors.white,
-                                      size: 22,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 32),
-
-                    // Welcome text
-                    SlideTransition(
-                      position: _textSlide,
-                      child: FadeTransition(
-                        opacity: _textFade,
-                        child: Column(
-                          children: [
-                            Text(
-                              'Welcome back,',
-                              style: GoogleFonts.poppins(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w400,
-                                color: _BrandColors.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.displayName,
-                              textAlign: TextAlign.center,
-                              style: GoogleFonts.poppins(
-                                fontSize: 26,
-                                fontWeight: FontWeight.w700,
-                                color: _BrandColors.navy,
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                            SizedBox(
-                              width: 28,
-                              height: 28,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                valueColor: const AlwaysStoppedAnimation<Color>(
-                                  Color(0xFF1E3A6E),
-                                ),
-                                backgroundColor: _BrandColors.navy.withValues(
-                                  alpha: 0.08,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

@@ -15,6 +15,7 @@ import '../../core/models/app_user.dart';
 import '../../core/models/attendance_record.dart';
 import '../../core/models/driver_vehicle.dart';
 import '../../core/services/attendance_repository.dart';
+import '../../core/services/attendance_resume_service.dart';
 import '../../core/services/assignment_repository.dart';
 import '../../core/services/biometric_unlock_service.dart';
 import '../../core/widgets/app_loader.dart';
@@ -41,9 +42,10 @@ class CheckInOutScreen extends StatefulWidget {
 }
 
 class _CheckInOutScreenState extends State<CheckInOutScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AttendanceRepository _attendanceRepository = AttendanceRepository();
   final AssignmentRepository _assignmentRepository = AssignmentRepository();
+  final ImagePicker _imagePicker = ImagePicker();
 
   AttendanceRecord? _activeShift;
   bool? _serverIsCheckedIn;
@@ -58,6 +60,9 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   LocationPermission? _locationPermissionStatus;
   bool _locationStatusRefreshing = false;
   bool _platformAttendanceSelected = false;
+  bool _recoveringLostPhoto = false;
+  bool _pendingCameraCaptureRegistered = false;
+  bool _submissionCompleted = false;
   static const String _platformNoteTag = 'Rest';
 
   String? _selectedVehicleId;
@@ -69,6 +74,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _statusController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -82,12 +88,30 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
     if (widget.user.geofencingEnabled) {
       _preflightLocationCheck();
     }
+    unawaited(_hydratePendingCameraState());
+    unawaited(_recoverLostPhotoIfAny());
   }
 
   @override
   void dispose() {
+    if (_pendingCameraCaptureRegistered && !_submissionCompleted) {
+      unawaited(AttendanceResumeService.clearPendingCameraCapture());
+    }
+    WidgetsBinding.instance.removeObserver(this);
     _statusController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_recoverLostPhotoIfAny(silent: true));
+    }
+  }
+
+  Future<void> _hydratePendingCameraState() async {
+    _pendingCameraCaptureRegistered =
+        await AttendanceResumeService.hasPendingCameraCapture(widget.user.id);
   }
 
   void _initialiseVehicleSelection() {
@@ -651,15 +675,17 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       );
       return;
     }
-    final locationFuture = _captureCurrentLocation(
-      requireHighAccuracy: widget.user.geofencingEnabled,
-    );
-
     // Always open front camera for selfie — photo is mandatory.
+    _pendingCameraCaptureRegistered = true;
+    await AttendanceResumeService.markPendingCameraCapture(widget.user.id);
     await _capturePhoto();
+    if (!mounted) return;
 
     // Block submission if user cancelled/skipped the photo.
     if (_capturedPhoto == null) {
+      _pendingCameraCaptureRegistered = false;
+      await AttendanceResumeService.clearPendingCameraCapture();
+      if (!mounted) return;
       showAppToast(
         context,
         'Photo is required for attendance. Please take a selfie.',
@@ -668,15 +694,16 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       return;
     }
 
-    final locationPayload = await locationFuture;
+    final locationPayload = await _captureCurrentLocation(
+      requireHighAccuracy: widget.user.geofencingEnabled,
+    );
     await _submitAttendance(locationPayload: locationPayload);
   }
 
   Future<void> _capturePhoto() async {
     try {
       BiometricUnlockService.suppressPromptsTemporarily();
-      final picker = ImagePicker();
-      final xFile = await picker.pickImage(
+      final xFile = await _imagePicker.pickImage(
         source: ImageSource.camera,
         preferredCameraDevice: CameraDevice.front,
         imageQuality: 70,
@@ -686,57 +713,103 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       );
 
       if (xFile == null) {
+        await _recoverLostPhotoIfAny();
         return;
       }
-
-      final directory = await getApplicationDocumentsDirectory();
-
-      // Create date-based folder structure
-      final now = DateTime.now();
-      final dateFolder = DateFormat('yyyy-MM-dd').format(now);
-      final dateDir = Directory(
-        '${directory.path}/attendance_photos/$dateFolder',
-      );
-
-      // Create directory if it doesn't exist
-      if (!await dateDir.exists()) {
-        await dateDir.create(recursive: true);
-      }
-
-      // Create filename with action type and timestamp
-      final actionType = _currentAction == CheckFlowAction.checkIn
-          ? 'checkin'
-          : 'checkout';
-      final timeStamp = DateFormat('HH-mm-ss').format(now);
-      final fileName = '${actionType}_${timeStamp}.jpg';
-      final savedPath = '${dateDir.path}/$fileName';
-      final savedFile = await File(xFile.path).copy(savedPath);
-
-      // Normalize orientation (some Android devices return sideways images relying on EXIF).
-      try {
-        final bytes = await savedFile.readAsBytes();
-        final decoded = img.decodeImage(bytes);
-        if (decoded != null) {
-          final baked = img.bakeOrientation(decoded);
-          final normalizedBytes = img.encodeJpg(baked, quality: 80);
-          await savedFile.writeAsBytes(normalizedBytes, flush: true);
-        }
-      } catch (e) {
-        debugPrint('Photo normalize failed: $e');
-      }
-
-      if (!mounted) return;
-      setState(() {
-        _capturedPhoto = savedFile;
-      });
-
-      // Optionally keep file size info for debugging without user toast
-      // final fileSize = await savedFile.length();
-      // final sizeKB = (fileSize / 1024).toStringAsFixed(1);
+      await _persistCapturedPhoto(xFile);
     } catch (_) {
       if (!mounted) return;
       showAppToast(context, 'Unable to capture photo.', isError: true);
     }
+  }
+
+  Future<void> _recoverLostPhotoIfAny({bool silent = false}) async {
+    if (_recoveringLostPhoto) {
+      return;
+    }
+    _recoveringLostPhoto = true;
+    try {
+      final lostData = await _imagePicker.retrieveLostData();
+      if (lostData.isEmpty) {
+        if (_pendingCameraCaptureRegistered) {
+          _pendingCameraCaptureRegistered = false;
+          await AttendanceResumeService.clearPendingCameraCapture();
+        }
+        return;
+      }
+      if (lostData.exception != null) {
+        if (_pendingCameraCaptureRegistered) {
+          _pendingCameraCaptureRegistered = false;
+          await AttendanceResumeService.clearPendingCameraCapture();
+        }
+        if (!silent && mounted) {
+          showAppToast(
+            context,
+            'Recovered camera session failed. Please capture photo again.',
+            isError: true,
+          );
+        }
+        return;
+      }
+      final recoveredFile = lostData.file;
+      if (recoveredFile == null) {
+        if (_pendingCameraCaptureRegistered) {
+          _pendingCameraCaptureRegistered = false;
+          await AttendanceResumeService.clearPendingCameraCapture();
+        }
+        return;
+      }
+      await _persistCapturedPhoto(recoveredFile);
+      if (!silent && mounted) {
+        showAppToast(context, 'Recovered captured photo. Continue attendance.');
+      }
+    } catch (_) {
+      // Best-effort recovery only.
+    } finally {
+      _recoveringLostPhoto = false;
+    }
+  }
+
+  Future<void> _persistCapturedPhoto(XFile xFile) async {
+    final directory = await getApplicationDocumentsDirectory();
+
+    final now = DateTime.now();
+    final dateFolder = DateFormat('yyyy-MM-dd').format(now);
+    final dateDir = Directory(
+      '${directory.path}/attendance_photos/$dateFolder',
+    );
+
+    if (!await dateDir.exists()) {
+      await dateDir.create(recursive: true);
+    }
+
+    final actionType = _currentAction == CheckFlowAction.checkIn
+        ? 'checkin'
+        : 'checkout';
+    final timeStamp = DateFormat('HH-mm-ss').format(now);
+    final fileName = '${actionType}_${timeStamp}.jpg';
+    final savedPath = '${dateDir.path}/$fileName';
+    final sourceFile = File(xFile.path);
+    final savedFile = sourceFile.path == savedPath
+        ? sourceFile
+        : await sourceFile.copy(savedPath);
+
+    try {
+      final bytes = await savedFile.readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null) {
+        final baked = img.bakeOrientation(decoded);
+        final normalizedBytes = img.encodeJpg(baked, quality: 80);
+        await savedFile.writeAsBytes(normalizedBytes, flush: true);
+      }
+    } catch (e) {
+      debugPrint('Photo normalize failed: $e');
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _capturedPhoto = savedFile;
+    });
   }
 
   Future<void> _submitAttendance({
@@ -900,6 +973,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
           );
         }
       });
+      _submissionCompleted = true;
+      _pendingCameraCaptureRegistered = false;
+      await AttendanceResumeService.clearPendingCameraCapture();
+      if (!mounted) return;
       _updateStatusAnimation();
 
       showAppToast(context, '$actionLabel submitted successfully.');
@@ -907,7 +984,13 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
       // Show green/red success animation overlay
       _showResultAnimation(performedAction);
 
-      unawaited(_loadActiveShift());
+      // Reload shift state only when checking in. On check-out we pop the
+      // screen shortly after, so reloading is unnecessary and could race with
+      // the delayed pop (resetting state and making the screen look "stuck").
+      if (performedAction == CheckFlowAction.checkIn) {
+        unawaited(_loadActiveShift());
+      }
+
       if (performedAction == CheckFlowAction.checkOut) {
         Future.delayed(const Duration(milliseconds: 2200), () {
           if (!mounted) return;
@@ -1387,7 +1470,10 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                     onRefresh: _loadActiveShift,
                     child: ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       children: [
                         Row(
                           children: [
@@ -1398,7 +1484,7 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                                 value: _resolvePlantLabel(),
                               ),
                             ),
-                            const SizedBox(width: 12),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: _SummaryInfoCard(
                                 icon: Icons.fire_truck,
@@ -1435,19 +1521,30 @@ class _CheckInOutScreenState extends State<CheckInOutScreen>
                                         : _pickVehicle,
                                     icon: _isAssigning
                                         ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: AppLoader(size: 16),
+                                            width: 14,
+                                            height: 14,
+                                            child: AppLoader(size: 14),
                                           )
-                                        : const Icon(Icons.swap_horiz),
+                                        : const Icon(
+                                            Icons.swap_horiz,
+                                            size: 16,
+                                          ),
                                     label: Text(
                                       _isAssigning
                                           ? 'Updating...'
                                           : 'Change Vehicle',
+                                      style: const TextStyle(fontSize: 13),
                                     ),
                                     style: OutlinedButton.styleFrom(
                                       backgroundColor: const Color(0xFF96E072),
                                       foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 20,
+                                        vertical: 10,
+                                      ),
+                                      minimumSize: Size.zero,
+                                      tapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
                                       side: const BorderSide(
                                         color: Color(0xFF96E072),
                                       ),
@@ -1814,9 +1911,9 @@ class _SummaryInfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(10),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -1826,33 +1923,39 @@ class _SummaryInfoCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 8,
-            offset: const Offset(0, 3),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
         children: [
-          Icon(icon, color: Colors.blue.shade800),
-          const SizedBox(width: 12),
+          Icon(icon, color: Colors.blue.shade800, size: 18),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: theme.textTheme.bodySmall?.copyWith(
+                  style: theme.textTheme.labelSmall?.copyWith(
                     color: Colors.white,
+                    fontSize: 10,
+                    height: 1.0,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 1),
                 Text(
                   value,
-                  style: theme.textTheme.titleMedium?.copyWith(
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     color: Colors.white,
+                    fontSize: 13,
+                    height: 1.1,
                     fontWeight: FontWeight.w700,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

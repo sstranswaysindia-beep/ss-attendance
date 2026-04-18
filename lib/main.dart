@@ -83,12 +83,21 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   final BiometricUnlockService _biometricService = BiometricUnlockService();
   final Set<String> _gpsPingRefreshInFlight = <String>{};
   bool _biometricPromptActive = false;
+  bool _accessCheckInFlight = false;
+  Timer? _accessCheckTimer;
+  DateTime? _lastAccessCheckAt;
   DateTime? _lastBiometricUnlockAt;
+  Timer? _startupTimeoutTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _startupTimeoutTimer = Timer(const Duration(seconds: 6), () {
+      if (mounted && _isLoading) {
+        setState(() => _isLoading = false);
+      }
+    });
     _logoutSub = SessionEventBus.onLogoutRequested.listen((_) {
       _handleLogout();
     });
@@ -99,45 +108,93 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     });
     _loadSavedUser();
     unawaited(_drainPendingGpsPingRefreshRequests());
+    _startAccessCheckTimer();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _startupTimeoutTimer?.cancel();
+    _accessCheckTimer?.cancel();
     _logoutSub.cancel();
     _gpsPingRefreshSub.cancel();
     super.dispose();
   }
 
   Future<void> _loadSavedUser() async {
-    final savedUser = await AuthStorageService.getUser();
+    final savedUser = await _readSavedUserBestEffort();
+    if (savedUser == null) {
+      if (mounted) {
+        setState(() {
+          _currentUser = null;
+          _isLoading = false;
+        });
+        _startupTimeoutTimer?.cancel();
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        _currentUser = savedUser;
+        _isLoading = false;
+      });
+      _startupTimeoutTimer?.cancel();
+      _forceTrainingIfRequired();
+    }
+    unawaited(_verifySavedUserAfterStartup(savedUser));
+    unawaited(_runPostLoginSetup(savedUser));
+  }
+
+  Future<AppUser?> _readSavedUserBestEffort() async {
     try {
-      if (savedUser != null) {
-        await _authRepository.syncDeviceInfo(
-          user: savedUser,
-          appVariant: 'driver',
-        );
-      }
-      final mergedUser = await _mergeTrainingFlag(savedUser);
-      await _applyBackgroundGpsPolicy(mergedUser);
-      if (mounted) {
-        setState(() {
-          _currentUser = mergedUser;
-          _isLoading = false;
-        });
-        _forceTrainingIfRequired();
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _currentUser = savedUser;
-          _isLoading = false;
-        });
-      }
+      return await AuthStorageService.getUser().timeout(
+        const Duration(seconds: 4),
+      );
+    } catch (error, stackTrace) {
+      debugPrint('SSTranswaysApp: saved user load failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return null;
     }
   }
 
-  void _handleLogin(AppUser user) async {
+  Future<void> _verifySavedUserAfterStartup(AppUser user) async {
+    try {
+      final allowed = await _ensureUserStillAllowed(user, force: true);
+      if (!allowed) {
+        debugPrint('SSTranswaysApp: saved user disabled, session cleared');
+      }
+    } catch (error, stackTrace) {
+      debugPrint('SSTranswaysApp: saved user access check failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  void _handleLogin(AppUser user) {
+    print('SSTranswaysApp: received login for ${user.role} ${user.id}');
+    if (mounted) {
+      setState(() {
+        _currentUser = user;
+        _isLoading = false;
+      });
+      _startupTimeoutTimer?.cancel();
+      print('SSTranswaysApp: current user set, showing dashboard');
+    }
+    _forceTrainingIfRequired();
+    unawaited(_saveUserBestEffort(user));
+    unawaited(_runPostLoginSetup(user));
+  }
+
+  Future<void> _saveUserBestEffort(AppUser user) async {
+    try {
+      await AuthStorageService.saveUser(user);
+    } catch (error, stackTrace) {
+      print('SSTranswaysApp: local login save failed: $error');
+      print(stackTrace);
+    }
+  }
+
+  Future<void> _runPostLoginSetup(AppUser user) async {
     var resolvedUser = user;
     try {
       await _authRepository.syncDeviceInfo(user: user, appVariant: 'driver');
@@ -146,20 +203,67 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
     } catch (_) {
       resolvedUser = user;
     }
-    await AuthStorageService.saveUser(resolvedUser);
-    if (mounted) {
+    await _saveUserBestEffort(resolvedUser);
+    if (mounted && _currentUser?.id == resolvedUser.id) {
       setState(() => _currentUser = resolvedUser);
+      _forceTrainingIfRequired();
     }
-    _forceTrainingIfRequired();
   }
 
-  void _handleLogout() async {
+  void _handleLogout() {
+    unawaited(_clearSession());
+  }
+
+  Future<void> _clearSession() async {
     await AuthStorageService.clearUser();
     await GpsPingBackgroundScheduler.cancel();
     NotificationService().unbindInboxUser();
     if (mounted) {
       setState(() => _currentUser = null);
     }
+  }
+
+  void _startAccessCheckTimer() {
+    _accessCheckTimer?.cancel();
+    _accessCheckTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      unawaited(_checkCurrentUserAccess());
+    });
+  }
+
+  Future<bool> _ensureUserStillAllowed(
+    AppUser user, {
+    bool force = false,
+  }) async {
+    if (_accessCheckInFlight) {
+      return true;
+    }
+    if (!force && _lastAccessCheckAt != null) {
+      final elapsed = DateTime.now().difference(_lastAccessCheckAt!);
+      if (elapsed < const Duration(seconds: 20)) {
+        return true;
+      }
+    }
+
+    _accessCheckInFlight = true;
+    _lastAccessCheckAt = DateTime.now();
+    try {
+      final access = await _authRepository.checkSessionStatus(user: user);
+      if (access.shouldLogout) {
+        await _clearSession();
+        return false;
+      }
+      return true;
+    } finally {
+      _accessCheckInFlight = false;
+    }
+  }
+
+  Future<bool> _checkCurrentUserAccess({bool force = false}) async {
+    final user = _currentUser ?? await AuthStorageService.getUser();
+    if (user == null) {
+      return true;
+    }
+    return _ensureUserStillAllowed(user, force: force);
   }
 
   Future<void> _drainPendingGpsPingRefreshRequests() async {
@@ -222,6 +326,8 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
   void didChangeAppLifecycleState(AppLifecycleState state) async {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
+      final allowed = await _checkCurrentUserAccess(force: true);
+      if (!allowed) return;
       await NotificationService().hydratePendingGpsPingRefreshRequests();
       await _drainPendingGpsPingRefreshRequests();
       await _maybePromptBiometricUnlock();
@@ -449,6 +555,7 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
       proxyEnabled: user.proxyEnabled,
       trainingRequired: trainingRequired,
       advanceEntryAllowed: user.advanceEntryAllowed,
+      employeeRegEnabled: user.employeeRegEnabled,
     );
   }
 
@@ -526,15 +633,40 @@ class _SSTranswaysAppState extends State<SSTranswaysApp>
             ),
           );
         },
-        home: _isLoading
-            ? const Scaffold(body: AppStartupLoader())
-            : _currentUser == null
-            ? _LoginRoute(
-                child: LoginScreen(onLogin: _handleLogin, screenTitle: 'Login'),
-              )
-            : _HomeSwitchboard(user: _currentUser!, onLogout: _handleLogout),
+        home: _AuthRoot(
+          isLoading: _isLoading,
+          user: _currentUser,
+          onLogin: _handleLogin,
+          onLogout: _handleLogout,
+        ),
       ),
     );
+  }
+}
+
+class _AuthRoot extends StatelessWidget {
+  const _AuthRoot({
+    required this.isLoading,
+    required this.user,
+    required this.onLogin,
+    required this.onLogout,
+  });
+
+  final bool isLoading;
+  final AppUser? user;
+  final void Function(AppUser user) onLogin;
+  final VoidCallback onLogout;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(body: AppStartupLoader());
+    }
+    final currentUser = user;
+    if (currentUser == null) {
+      return LoginScreen(onLogin: onLogin, screenTitle: 'Login');
+    }
+    return _HomeSwitchboard(user: currentUser, onLogout: onLogout);
   }
 }
 
@@ -564,16 +696,5 @@ class _HomeSwitchboard extends StatelessWidget {
       case UserRole.referral:
         return ReferralEntryScreen(user: user, onLogout: onLogout);
     }
-  }
-}
-
-class _LoginRoute extends StatelessWidget {
-  const _LoginRoute({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return child;
   }
 }
